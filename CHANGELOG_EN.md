@@ -6,6 +6,12 @@ This file records significant dsh-qqbot updates from a product perspective, focu
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [Unreleased]
+
+### Added
+
+- **New `/sessions` session-management command**: list the agent workspace's sessions (same source as the Web sidebar, so sessions created in the Web UI are visible too), resume the current chat into a session by index or id prefix, or delete one. Deletion also removes the on-disk session log (the host has no deletion API, so the JSONL session directory is located and removed), disposes the agent, repoints dangling mappings to a new session, and cascades to subagent children. Private chat + allowlist only.
+
 ## [0.5.5] - 2026-10-30
 
 ### Fixed

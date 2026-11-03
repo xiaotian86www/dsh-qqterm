@@ -103,6 +103,11 @@ export class PrefsStore {
     return deleted;
   }
 
+  /** sessionKey → sessionId 快照（删除会话后重指向用） */
+  sessionIdEntries(): Array<[string, string]> {
+    return [...this.sessionIds.entries()];
+  }
+
   // ── Preset 操作 ──
 
   getPreset(sessionKey: string): string | undefined {

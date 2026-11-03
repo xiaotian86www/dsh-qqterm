@@ -120,6 +120,13 @@ export class ModelResolver {
   }
 
   /**
+   * 列出所有 sessionKey → sessionId 映射（删除会话后把悬空映射换成新 id）
+   */
+  listSessionIdEntries(): Array<[string, string]> {
+    return this.prefs.sessionIdEntries();
+  }
+
+  /**
    * 获取指定 sessionKey 的 per-peer preset 覆盖
    */
   getPreset(sessionKey: string): string | undefined {

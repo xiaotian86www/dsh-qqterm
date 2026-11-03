@@ -9,6 +9,7 @@
  */
 import type { CommandDeps, CategorizedCommand } from './types.ts';
 import { newCommand, compactCommand } from './session.ts';
+import { sessionsCommand } from './sessions.ts';
 import { modelCommand } from './model.ts';
 import { costCommand } from './cost.ts';
 import { presetCommand } from './preset.ts';
@@ -24,6 +25,7 @@ export function buildCommandList(deps: CommandDeps): CategorizedCommand[] {
     // 通用能力（底层 agent）
     newCommand(deps),
     compactCommand(deps),
+    sessionsCommand(deps),
     modelCommand(deps),
     costCommand(deps),
     presetCommand(deps),

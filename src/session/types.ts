@@ -187,3 +187,60 @@ export interface SessionContextUsage {
   provider?: string;
   model?: string;
 }
+
+/** 宿主 sessionId 类型再导出（批量标题查询用） */
+export type { SessionId } from '@deepseek-ai/dsh-session';
+
+
+/**
+ * 会话列表条目（/sessions 用）
+ *
+ * 来源是宿主 `sessionQuery.listSessions()` / `sessionPersistence.list()`，
+ * 按 agent 工作目录过滤后与 Web 侧栏看到的会话一致。
+ */
+export interface WorkspaceSession {
+  /** 会话 id（session-<uuid>） */
+  id: string;
+  /** 日志里的最新标题（可能取不到） */
+  title?: string;
+  /** 创建时间（Unix epoch ms） */
+  createdAt: number;
+  /** 是否为本 chat 当前绑定的会话 */
+  current: boolean;
+  /** 是否正被进程内 agent 占用 */
+  live: boolean;
+  /** 是否由 fork 派生（/model 换模型产生） */
+  isSeeded: boolean;
+}
+
+/** 切换会话结果 */
+export interface SwitchSessionOutcome {
+  ok: boolean;
+  reason?: 'same' | 'not-found' | 'in-use' | 'failed';
+  message?: string;
+}
+
+/** 删除会话的单个结果 */
+export interface DeletedSessionInfo {
+  id: string;
+  path: string;
+  bytes: number;
+}
+
+/** 删除会话结果 */
+export interface DeleteSessionsOutcome {
+  ok: boolean;
+  reason?: 'no-root' | 'not-found' | 'failed';
+  message?: string;
+  /** 已删除的会话目录 */
+  removed: DeletedSessionInfo[];
+  /** 删除失败（多为宿主仍占用文件） */
+  failed: Array<{ id: string; path?: string; message: string }>;
+  /** 磁盘上没有目录的 id（从未落盘 / 已被删） */
+  missing: string[];
+  /** 被连带删除的子 agent 会话数 */
+  cascaded: number;
+  /** 因指向被删会话而被改写的 per-peer 映射数 */
+  remapped: number;
+}
+

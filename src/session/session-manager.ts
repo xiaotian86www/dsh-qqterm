@@ -18,12 +18,14 @@ import { SessionId } from '@deepseek-ai/dsh-session';
 import type { Context } from '@deepseek-ai/cordis';
 import { createHostAdapter, type HostAdapter } from '../host/adapter.ts';
 import { mkdirSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { resolveAgentCwd } from '../shared/dirs.ts';
 import type { ChatScope, Logger, ReplyTarget } from '../types.ts';
 import type { ImQQBotConfig } from '../config.ts';
 import { ModelResolver } from '../model/model-resolver.ts';
 import type { ModelRoute, ModelEntry } from '../model/types.ts';
 import { IdleEvictor } from './idle-evictor.ts';
+import { removeSessionDirs } from './session-store.ts';
 import type { QuestionChannel } from '../features/question-channel.ts';
 import type { ApprovalChannel } from '../features/approval-channel.ts';
 import type {
@@ -41,6 +43,9 @@ import type {
   SessionContextUsage,
   CompactionServiceLike,
   CompactOutcome,
+  WorkspaceSession,
+  SwitchSessionOutcome,
+  DeleteSessionsOutcome,
 } from './types.ts';
 
 /** ManualCompactionError 各 code 的友好提示 */
@@ -51,6 +56,9 @@ const COMPACTION_ERROR_HINTS: Record<string, string> = {
   commit: '压缩提交失败',
   persistence: '压缩完成但保存失败',
 };
+
+/** 会话列表最多为多少条会话读取标题（每条都要读一遍日志，是列表的耗时大头） */
+const TITLE_FETCH_LIMIT = 10;
 
 /** system-prompt section 最小结构（name/order/text） */
 interface PromptSection {
@@ -744,6 +752,190 @@ export class SessionManager {
     return dir;
   }
 
+  // ── 会话管理（列表 / 恢复 / 删除，/sessions 命令用） ──
+
+  /**
+   * 列出本 agent 工作区内的全部会话（与 Web 侧栏同一来源）。
+   *
+   * 不过滤 per-chat：宿主里 Web 端创建的会话也要能在这里看到并接回来
+   * （运营者要求「web 能看到的，qqbot 渠道都要能看到」）。子 agent 会话
+   * 不单独展示，随父会话删除。
+   *
+   * @param scope 当前 chat 作用域（用于标记 current）
+   * @param peerId 当前 chat 的 peer id
+   * @throws 宿主列举失败时抛出，由命令层给出明确提示
+   */
+  async listWorkspaceSessions(scope: ChatScope, peerId: string): Promise<WorkspaceSession[]> {
+    const workspace = this.workspaceDir();
+    const all = await this.host.listSessions();
+    const record = this.sessions.get(this.sessionKey(scope, peerId));
+    const currentId = record?.sessionId ?? this.modelResolver.getSessionId(this.sessionKey(scope, peerId));
+
+    const visible = all
+      .filter((session) => session.origin !== 'subagent')
+      .filter((session) => session.cwd !== undefined && samePath(session.cwd, workspace))
+      .sort((a, b) => b.createdAt - a.createdAt);
+
+    // 标题要逐个读日志，只取最近若干条，避免列表变慢
+    const titles = await this.host.sessionTitles(visible.slice(0, TITLE_FETCH_LIMIT).map((s) => s.id));
+
+    return visible.map((session) => ({
+      id: session.id,
+      createdAt: session.createdAt,
+      current: session.id === currentId,
+      live: session.live,
+      isSeeded: session.isSeeded,
+      ...(titles.has(session.id) ? { title: titles.get(session.id) } : {}),
+    }));
+  }
+
+  /**
+   * 把当前 chat 切到指定会话（恢复历史）。
+   *
+   * 先释放当前 agent 再改映射，失败时把映射恢复回原会话——否则 chat 会停在
+   * 一个既没接上、又丢了原来上下文的中间态。
+   *
+   * @param scope 当前 chat 作用域
+   * @param peerId 当前 chat 的 peer id
+   * @param sessionId 目标会话 id
+   * @param senderId 当前发送者（记录进会话记录）
+   * @param replyTarget 回复目标（后续出站用）
+   */
+  async switchSession(
+    scope: ChatScope,
+    peerId: string,
+    sessionId: string,
+    senderId: string,
+    replyTarget: ReplyTarget,
+  ): Promise<SwitchSessionOutcome> {
+    const key = this.sessionKey(scope, peerId);
+    const current = this.sessions.get(key);
+    if (current?.sessionId === sessionId) return { ok: true, reason: 'same' };
+
+    // 同一进程内一个会话只能被一个 chat 持有：直接复用 live agent 会让两个
+    // chat 同时写进同一份历史，出站也会串台
+    for (const [otherKey, record] of this.sessions) {
+      if (otherKey !== key && record.sessionId === sessionId) {
+        return { ok: false, reason: 'in-use', message: '该会话正在另一个聊天中使用' };
+      }
+    }
+
+    // 存在性求证：undefined = 宿主没有 stat 能力，按存在处理（交给 resume 判定）
+    const exists = await this.host.sessionExists(sessionId);
+    if (exists === false) return { ok: false, reason: 'not-found' };
+
+    // 映射失败时要回到的值：原会话（没有则铸一个新 id，避免停在被删/无效 id 上）
+    const fallbackId = this.modelResolver.getSessionId(key) ?? mintSessionId();
+
+    await this.disposeRecord(key, current);
+    this.modelResolver.setSessionId(key, sessionId);
+
+    try {
+      const record = await this.getOrCreate(scope, peerId, senderId, replyTarget);
+      if (record.sessionId !== sessionId) {
+        // resume 失败后宿主可能自建了新会话：不能悄悄留在这个“新会话”上
+        throw new Error(`宿主打开的是 ${record.sessionId}，不是目标会话`);
+      }
+      this.logger.info(`session switched: key=${key} sessionId=${sessionId}`);
+      return { ok: true };
+    } catch (err) {
+      this.modelResolver.setSessionId(key, fallbackId);
+      await this.disposeRecord(key, this.sessions.get(key));
+      const raw = errorText(err);
+      // 跨进程写所有权冲突是最常见的失败原因，补一句可操作的提示
+      const message = /already ?owned|ownership/i.test(raw)
+        ? `${raw}（该会话可能正被 Web 端打开，先关闭再恢复）`
+        : raw;
+      this.logger.warn(`session switch failed: key=${key} target=${sessionId} err=${raw}`);
+      return { ok: false, reason: 'failed', message };
+    }
+  }
+
+  /**
+   * 删除指定会话（含磁盘日志，不可恢复）。
+   *
+   * 宿主没有删除 API，这里按 JSONL 后端布局在存储根目录下定位会话目录后移除。
+   * 同时：释放进程内 agent（含正在生成的）、把指向该会话的 per-peer 映射换成
+   * 新 id（否则下次打开会按旧 id 重建一个同名空会话）、连带删除其 subagent 子会话。
+   *
+   * @param sessionIds 待删除的会话 id
+   */
+  async deleteSessions(sessionIds: readonly string[]): Promise<DeleteSessionsOutcome> {
+    const result: DeleteSessionsOutcome = {
+      ok: false,
+      removed: [],
+      failed: [],
+      missing: [],
+      cascaded: 0,
+      remapped: 0,
+    };
+    const ids = new Set(sessionIds);
+
+    const root = this.host.sessionStoreRoot();
+    if (root === undefined) {
+      return {
+        ...result,
+        reason: 'no-root',
+        message: '宿主未暴露会话存储根目录（sessionPersistence.root），无法删除磁盘文件',
+      };
+    }
+
+    // 连带子 agent 会话：父会话删掉后它们没有任何入口，留着只会占盘
+    try {
+      for (const session of await this.host.listSessions()) {
+        if (session.origin === 'subagent'
+          && session.parentSession !== undefined
+          && ids.has(session.parentSession)) {
+          ids.add(session.id);
+          result.cascaded += 1;
+        }
+      }
+    } catch (err) {
+      this.logger.warn(`delete sessions: 列举会话失败，按给定 id 删除: ${errorText(err)}`);
+    }
+
+    // 1) 释放进程内 agent（正在生成的先 cancel）
+    for (const [key, record] of [...this.sessions]) {
+      if (ids.has(record.sessionId)) await this.disposeRecord(key, record);
+    }
+
+    // 2) 悬空映射换成新 id（同一会话可能被多个 chat 指向）
+    for (const [key, mapped] of this.modelResolver.listSessionIdEntries()) {
+      if (!ids.has(mapped)) continue;
+      this.modelResolver.setSessionId(key, mintSessionId());
+      result.remapped += 1;
+    }
+
+    // 3) 删磁盘
+    const removed = removeSessionDirs(root, [...ids]);
+    result.removed = removed.removed;
+    result.failed = removed.failed;
+    result.missing = removed.missing;
+
+    if (result.removed.length === 0) {
+      result.reason = result.failed.length > 0 ? 'failed' : 'not-found';
+      result.message = result.failed.length > 0
+        ? '会话目录删除失败（可能仍被 Web 端或其它进程打开）'
+        : '磁盘上没有找到这些会话目录（可能从未落盘或已被删除）';
+      return result;
+    }
+
+    result.ok = result.failed.length === 0;
+    if (!result.ok) result.message = '部分会话删除失败（可能仍被其它进程占用）';
+    this.logger.info(
+      `sessions deleted: ids=${[...ids].join(',')} removed=${result.removed.length} failed=${result.failed.length} remapped=${result.remapped}`,
+    );
+    return result;
+  }
+
+  /** 释放并移除一条会话记录（cancel 后再 dispose，避免生成中的 turn 悬挂） */
+  private async disposeRecord(key: string, record: SessionRecord | undefined): Promise<void> {
+    if (!record) return;
+    if (this.sessions.get(key) === record) this.sessions.delete(key);
+    record.agent.cancel({ kind: 'user' });
+    await record.handle.dispose().catch(() => {});
+  }
+
   /**
    * 原地压缩当前会话历史（保留 sessionId，用摘要替换旧历史）。
    *
@@ -815,6 +1007,20 @@ export class SessionManager {
 /** 错误文案（日志用） */
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * 两个路径是否指向同一目录。
+ *
+ * 会话 header 里的 cwd 由宿主原样保存（可能带尾分隔符、大小写与配置不同），
+ * 直接字符串比较会把本工作区的会话漏掉；Windows 上大小写不敏感。
+ */
+function samePath(a: string, b: string): boolean {
+  const left = resolve(a).replace(/[\\/]+$/, '');
+  const right = resolve(b).replace(/[\\/]+$/, '');
+  return process.platform === 'win32'
+    ? left.toLowerCase() === right.toLowerCase()
+    : left === right;
 }
 
 /** 从消息对象中提取纯文本（用于导出/统计） */

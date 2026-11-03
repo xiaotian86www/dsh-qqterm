@@ -153,13 +153,34 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqbot/cordis.dev.yml
 |------|------|
 | `/new`（别名 `/reset` `/clear`） | 开始新会话（清空上下文） |
 | `/compact` | 压缩会话历史（摘要替换旧记录，保留上下文） |
+| `/sessions`（别名 `/session`） | 会话管理：列出工作区会话、恢复指定会话、删除指定会话 |
 | `/model` | 查看或切换模型 |
 | `/preset` | 查看或切换 agent preset（新会话生效） |
+| `/cost` | 查看当前会话的 token 消耗 |
 | `/stop` | 中止当前生成 |
 | `/bot-ping` | 网络延迟检测（返回传输与处理耗时） |
 | `/bot-version` | 查看版本信息 |
+| `/bot-me` | 查看你的 OpenID（配置白名单用） |
 | `/bot-status` | 查看当前会话状态 |
 | `/bot-help` | 查看所有指令 |
+
+### 会话管理（`/sessions`）
+
+`/sessions` 列出的会话与 Web 侧栏同一来源（宿主 `sessionQuery` / `sessionPersistence`），按 agent 工作目录过滤——Web 端创建、在本工作区里的会话，QQ 这边也能看到并接回来。
+
+| 用法 | 说明 |
+|------|------|
+| `/sessions` | 列出工作区会话；每条都是可点击命令，点一下就把 `/sessions resume <序号>` 填进输入框 |
+| `/sessions resume <序号\|id>` | 把当前聊天切到该会话，历史接上继续聊 |
+| `/sessions delete <序号\|id>` | 删除该会话，**连磁盘日志一起删**（宿主无删除 API，按 JSONL 布局移除会话目录），不可恢复 |
+
+注意：
+
+- 只允许**私聊**使用，且操作者必须在白名单（`access.c2cAllow`）内——会话标题、删除都涉及其他聊天的数据；未配置名单时命令直接不可用（`/bot-me` 可查自己的 OpenID）。
+- 删除前会释放该会话的 agent、把指向它的 per-peer 映射改到新会话，并连带删除其 subagent 子会话。
+- 若会话正被 Web 端或其它进程打开，磁盘文件被占用会删除失败，命令会如实报告（换个时间再删即可）。
+- 同一进程内一个会话只能被一个聊天持有：把别人正在聊的会话切过来会被拒绝。
+
 
 ## 核心模块
 

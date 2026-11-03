@@ -6,6 +6,7 @@
  * 调用方只依赖本模块的稳定签名，不再直接假设宿主形态。
  */
 import type { Context } from '@deepseek-ai/cordis';
+import { resolve } from 'node:path';
 
 /** 日志最小接口 */
 export interface AdapterLogger {
@@ -41,8 +42,47 @@ export interface HostAdapter {
    * `attachSession` 幂等，创建与恢复路径都可安全调用；升级后老会话自动补挂。
    */
   attachSessionToWorkspace(sessionId: string, cwd: string): Promise<void>;
+  /**
+   * 列出宿主可见的全部会话（与 Web 侧栏同一来源）。
+   *
+   * 优先 `ctx.sessionQuery.listSessions()`（带 live 标记），回退
+   * `ctx.sessionPersistence.list()`（只有持久化快照）。两者都没有时返回空数组；
+   * 后端故障时抛错，由调用方决定如何降级展示。
+   */
+  listSessions(): Promise<HostSessionInfo[]>;
+  /**
+   * 批量读取会话标题（日志里的 `session/title` 最新值）。
+   *
+   * 标题是展示性数据：任何失败都按会话隔离并返回已有结果，绝不抛错。
+   */
+  sessionTitles(ids: readonly string[]): Promise<Map<string, string>>;
+  /**
+   * 会话存储根目录（JSONL 后端的 `root`）。
+   *
+   * 宿主没有删除会话的 API，硬删除只能按磁盘布局在 root 下定位目录，因此这里
+   * 从服务实例上读取配置值；后端未暴露时返回 undefined，调用方据此拒绝硬删除。
+   */
+  sessionStoreRoot(): string | undefined;
   /** 探测结果摘要（启动契约检查用） */
   readonly capabilities: string[];
+}
+
+/** 宿主侧会话摘要（字段对齐 SessionHeader，供列表/删除使用） */
+export interface HostSessionInfo {
+  /** 会话 id */
+  readonly id: string;
+  /** 创建时间（Unix epoch ms；缺失按 0） */
+  readonly createdAt: number;
+  /** 会话创建时的绝对工作目录 */
+  readonly cwd?: string;
+  /** 派生来源会话（fork / subagent） */
+  readonly parentSession?: string;
+  /** 是否含 fork 继承前缀 */
+  readonly isSeeded: boolean;
+  /** 子 agent 会话标记 */
+  readonly origin?: 'subagent';
+  /** 是否正被宿主进程内的 agent 占用 */
+  readonly live: boolean;
 }
 
 /** 会话 header 的最小结构（只读插件关心的字段；`agentPreset` 在 header 顶层） */
@@ -87,6 +127,59 @@ function statCapablePersistence(ctx: Context): SessionPersistenceLike | undefine
   return typeof persistence?.stat === 'function' ? persistence : undefined;
 }
 
+/** ctx.sessionQuery 的最小契约（只要列表与批量标题） */
+interface SessionQueryLike {
+  listSessions?(signal?: AbortSignal): Promise<readonly unknown[]>;
+  readTitleSnapshots?(ids: readonly string[]): Promise<readonly unknown[]>;
+}
+
+/** ctx.sessionPersistence 的列举契约（`root` 是 JSONL 后端的配置值，可能不存在） */
+interface SessionListPersistenceLike {
+  list?(): Promise<readonly unknown[]>;
+  root?: unknown;
+}
+
+/**
+ * 把宿主的会话记录/快照统一成 {@link HostSessionInfo}。
+ *
+ * 两种形态：`sessionQuery.listSessions()` 返回 `{ header, live }`；
+ * `sessionPersistence.list()` 返回 `{ header, revision }`（无 live）。
+ */
+function hostSessionFrom(record: unknown, liveFallback: boolean): HostSessionInfo | undefined {
+  const raw = record as { header?: unknown; live?: unknown } | null | undefined;
+  const header = (raw?.header ?? raw) as Record<string, unknown> | null | undefined;
+  if (!header || typeof header !== 'object') return undefined;
+
+  const id = header['id'];
+  if (typeof id !== 'string' || id === '') return undefined;
+
+  const info: HostSessionInfo = {
+    id,
+    createdAt: typeof header['createdAt'] === 'number' ? header['createdAt'] : 0,
+    isSeeded: header['isSeeded'] === true,
+    live: raw?.live === true || liveFallback,
+    ...(typeof header['cwd'] === 'string' ? { cwd: header['cwd'] } : {}),
+    ...(typeof header['parentSession'] === 'string' ? { parentSession: header['parentSession'] } : {}),
+    ...(header['origin'] === 'subagent' ? { origin: 'subagent' as const } : {}),
+  };
+  return info;
+}
+
+/** 从批量标题结果里取出 (id, title)；失败/缺标题的条目忽略 */
+function collectTitles(results: readonly unknown[], sink: Map<string, string>): void {
+  for (const result of results) {
+    const item = result as {
+      sessionId?: unknown;
+      status?: unknown;
+      value?: { title?: { title?: unknown } };
+    } | null;
+    if (item?.status !== 'fulfilled') continue;
+    const id = typeof item.sessionId === 'string' ? item.sessionId : undefined;
+    const title = item.value?.title?.title;
+    if (id !== undefined && typeof title === 'string' && title !== '') sink.set(id, title);
+  }
+}
+
 /** 取出可用的 workspaceRegistry；形态不匹配返回 undefined（dsh-workspace 未挂载时无侧边栏） */
 function workspaceRegistry(ctx: Context): WorkspaceRegistryLike | undefined {
   const registry = safeGet(ctx, 'workspaceRegistry') as WorkspaceRegistryLike | undefined;
@@ -122,6 +215,19 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
   capabilities.push(workspaceRegistry(ctx)
     ? 'workspaceRegistry.create(可用)'
     : 'workspaceRegistry.create(不可用，侧边栏工作区归属降级)');
+
+  // 会话列举/标题/存储根都是「有就用、没有降级」的可选能力
+  const query = safeGet(ctx, 'sessionQuery') as SessionQueryLike | undefined;
+  capabilities.push(typeof query?.listSessions === 'function'
+    ? 'sessionQuery.listSessions(可用)'
+    : 'sessionQuery.listSessions(不可用，回退 persistence.list)');
+  capabilities.push(typeof query?.readTitleSnapshots === 'function'
+    ? 'sessionQuery.readTitleSnapshots(可用)'
+    : 'sessionQuery.readTitleSnapshots(不可用，会话列表无标题)');
+  const listPersistence = safeGet(ctx, 'sessionPersistence') as SessionListPersistenceLike | undefined;
+  capabilities.push(typeof listPersistence?.root === 'string'
+    ? 'sessionPersistence.root(可用，可硬删除会话)'
+    : 'sessionPersistence.root(不可用，拒绝硬删除会话)');
 
   let resolveFn: ((agent: { ctx: unknown }, name: string) => unknown | undefined) | undefined;
   const presets = safeGet(ctx, 'agentPresets') as
@@ -215,6 +321,48 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
       } catch {
         return undefined;
       }
+    },
+
+    async listSessions() {
+      const engine = safeGet(ctx, 'sessionQuery') as SessionQueryLike | undefined;
+      if (typeof engine?.listSessions === 'function') {
+        try {
+          return (await engine.listSessions())
+            .map((record) => hostSessionFrom(record, false))
+            .filter((info): info is HostSessionInfo => info !== undefined);
+        } catch (err) {
+          // 索引后端（sqlite）损坏时降级到持久化列举，别让会话列表整体不可用
+          logger?.warn?.(`host adapter: sessionQuery.listSessions 失败，回退 persistence.list: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+
+      const persistence = safeGet(ctx, 'sessionPersistence') as SessionListPersistenceLike | undefined;
+      if (typeof persistence?.list !== 'function') return [];
+      return (await persistence.list())
+        .map((snapshot) => hostSessionFrom(snapshot, false))
+        .filter((info): info is HostSessionInfo => info !== undefined);
+    },
+
+    async sessionTitles(ids) {
+      const titles = new Map<string, string>();
+      if (ids.length === 0) return titles;
+
+      const engine = safeGet(ctx, 'sessionQuery') as SessionQueryLike | undefined;
+      if (typeof engine?.readTitleSnapshots !== 'function') return titles;
+
+      try {
+        // 标题要读日志（每会话一次完整读取），失败只影响该条，绝不影响列表本身
+        collectTitles(await engine.readTitleSnapshots(ids), titles);
+      } catch (err) {
+        logger?.warn?.(`host adapter: 批量读取会话标题失败: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      return titles;
+    },
+
+    sessionStoreRoot() {
+      const persistence = safeGet(ctx, 'sessionPersistence') as SessionListPersistenceLike | undefined;
+      const root = persistence?.root;
+      return typeof root === 'string' && root !== '' ? resolve(root) : undefined;
     },
   };
 }

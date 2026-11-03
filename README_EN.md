@@ -153,13 +153,34 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqbot/cordis.dev.yml
 |------|------|
 | `/new` (aliases `/reset` `/clear`) | Start a new session (clear context) |
 | `/compact` | Compact session history (replace old records with a summary) |
+| `/sessions` (alias `/session`) | Session management: list, resume, or delete a session |
 | `/model` | View or switch model |
 | `/preset` | View or switch agent preset (applies to new sessions) |
+| `/cost` | View token usage of the current session |
 | `/stop` | Abort the current generation |
 | `/bot-ping` | Network latency test (transport & processing time) |
 | `/bot-version` | View version info |
+| `/bot-me` | View your OpenID (for access allowlists) |
 | `/bot-status` | View current session status |
 | `/bot-help` | View all commands |
+
+### Session management (`/sessions`)
+
+`/sessions` lists the same sessions the Web sidebar shows (host `sessionQuery` / `sessionPersistence`), filtered by the agent working directory — a session created in the Web UI inside this workspace is visible and resumable from QQ too.
+
+| Usage | Description |
+|------|------|
+| `/sessions` | List workspace sessions; each row is a clickable command that fills `/sessions resume <index>` into the input box |
+| `/sessions resume <index\|id>` | Rebind this chat to that session and continue its history |
+| `/sessions delete <index\|id>` | Delete the session **including its on-disk log** (no host deletion API — the JSONL session directory is removed); irreversible |
+
+Notes:
+
+- Private chat only, and the operator must be in the allowlist (`access.c2cAllow`) — titles and deletion touch other chats' data; with no allowlist configured the command is disabled (`/bot-me` shows your OpenID).
+- Deletion disposes the agent, repoints per-peer mappings to a new session, and cascades to its subagent children.
+- If a Web client or another process holds the session, the files are locked and deletion fails loudly; retry later.
+- A session can be held by one chat per process — resuming one that another chat is using is refused.
+
 
 ## Core Modules
 
