@@ -1,8 +1,14 @@
 /**
  * QuestionChannel — 把 dsh 的 ask_user_question 桥接到 QQ 通道。
  *
- * 接入方式：包装 `userQuestions.ask`（而非 registerProvider），按 `request.agent.id`
- * 路由到 QQ 会话；非 QQ 会话委托宿主默认 provider（如 Web 弹出框），多通道共存。
+ * 接入方式：监听 `user-questions/request` waterfall（与 approval 通道同一套
+ * 官方 seam），按 `request.agent.id` 路由到 QQ 会话；非 QQ 会话 `next()` 交给
+ * 链上其它 answerer（如 Web 弹出框），多通道共存。
+ *
+ * 早期实现包装 `userQuestions.ask`：插件 apply 时取一次服务实例，取不到
+ * （服务尚未激活 / 挂载晚于本插件）就静默放弃且永不重试——通道时灵时不灵，
+ * 提问会直接落到 Web 端。waterfall 不依赖服务是否就绪，服务上线后请求自然
+ * 经过同一条链；`ask` / `askTimed` 两条路径也都会走到这里。
  *
  * 每会话一个显式状态机，三态语义：
  *   - 待答（pending 中）：等待当前题的回答
@@ -46,9 +52,13 @@ export interface UserQuestionResult {
   answers: UserQuestionAnswer[];
 }
 
-export interface UserQuestionsServiceLike {
-  ask: (request: UserQuestionRequest) => Promise<UserQuestionResult>;
-  __qqQuestionPatched?: boolean;
+/** 依赖接口：`user-questions/request` waterfall 的注册上下文（对齐 cordis EventOptions） */
+export interface QuestionChannelContext {
+  on(
+    event: string,
+    handler: (...args: unknown[]) => unknown,
+    options?: { global?: boolean; prepend?: boolean },
+  ): () => boolean;
 }
 
 // ── 依赖接口（结构化，便于单测） ──
@@ -88,6 +98,19 @@ class QuestionChannelError extends Error {
   }
 }
 
+/**
+ * QQ 投递失败（发送接口报错）。
+ *
+ * 与「用户没答/超时」区分：只有投递失败才允许退回 `next()` 交给 Web 端，
+ * 已送达的问题再退回会导致同一个问题在两个通道各弹一次。
+ */
+class QuestionDeliveryError extends Error {
+  public constructor(message: string) {
+    super(message);
+    this.name = 'QuestionDeliveryError';
+  }
+}
+
 // ── 每会话状态机 ──
 
 interface PendingEntry {
@@ -105,8 +128,6 @@ interface PendingEntry {
 
 export class QuestionChannel {
   private readonly pending = new Map<string, PendingEntry>();
-  private uq?: UserQuestionsServiceLike;
-  private origAsk?: UserQuestionsServiceLike['ask'];
   private readonly manager: QuestionChannelManagerLike;
   private readonly sender: QuestionChannelSenderLike;
   private readonly config: QuestionChannelConfigLike;
@@ -125,37 +146,36 @@ export class QuestionChannel {
   }
 
   /**
-   * 包装 userQuestions.ask：QQ 会话走 QQ 通道，其余委托原实现。
-   * 幂等（已 patch 则跳过）；服务缺失或 ask 非函数时优雅禁用。
+   * 注册 `user-questions/request` waterfall answerer。
+   *
+   * 不探测服务是否存在：seam 未挂载时不会有请求到达，监听本身无副作用。
+   * `global` 必需——该事件按 agent 作用域派发，根作用域监听器不带 global 会被
+   * 过滤掉；`prepend` 让 QQ 先于 Web 端 answerer 取得请求。
+   *
+   * @param ctx 宿主上下文（只需 on）
    */
-  public install(ctx: { get(name: string): unknown }): void {
-    const uq = ctx.get('userQuestions') as UserQuestionsServiceLike | undefined;
-    if (!uq || uq.__qqQuestionPatched) return;
-    if (typeof uq.ask !== 'function') {
-      this.logger.warn('im-qqbot: userQuestions service lacks ask() — QQ question channel disabled');
-      return;
-    }
-
+  public install(ctx: QuestionChannelContext): void {
     const self = this;
-    this.origAsk = uq.ask.bind(uq);
-    uq.ask = async function qqRoutedAsk(request: UserQuestionRequest): Promise<UserQuestionResult> {
-      const sessionId = request?.agent?.id;
+    ctx.on('user-questions/request', (req: unknown, next: unknown) => {
+      const request = req as UserQuestionRequest;
+      const nextFn = next as () => Promise<UserQuestionResult>;
+      const sessionId = request.agent?.id;
       const record = sessionId ? self.manager.findBySessionId(sessionId) : undefined;
-      if (record) return self.askViaQQ(record, request);
-      return self.origAsk!(request);
-    };
-    Object.defineProperty(uq, '__qqQuestionPatched', { value: true, configurable: true, enumerable: false });
-    this.uq = uq;
-    this.logger.info('im-qqbot: QQ question channel installed');
+      if (!record) return nextFn();
+
+      // 投递失败才退回 Web：已送达的问题不能再次弹出（见 QuestionDeliveryError）
+      return self.askViaQQ(record, request).catch((err: unknown) => {
+        if (err instanceof QuestionDeliveryError) {
+          self.logger.warn(`im-qqbot: QQ question delivery failed, falling back to the host answerer: ${err.message}`);
+          return nextFn();
+        }
+        throw err;
+      });
+    }, { global: true, prepend: true });
+    this.logger.info('im-qqbot: QQ question channel installed (user-questions/request)');
   }
 
   public uninstall(): void {
-    if (this.uq && this.origAsk) {
-      this.uq.ask = this.origAsk;
-      delete this.uq.__qqQuestionPatched;
-      this.uq = undefined;
-      this.origAsk = undefined;
-    }
     for (const [, entry] of this.pending) {
       this.clearTimer(entry);
       this.removeAbort(entry);
@@ -290,6 +310,8 @@ export class QuestionChannel {
           await this.sender.sendMarkdown(record.replyTarget, formatQuestion(question, hint, true), { keyboard });
           return;
         } catch (err) {
+          // 同上：宿主 logger 在 headless profile 不可见，stderr 才是唯一线索
+          console.warn('[im-qqbot] keyboard send failed:', err);
           this.logger.warn(`im-qqbot: keyboard send failed, fallback to text: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
@@ -297,7 +319,7 @@ export class QuestionChannel {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this.logger.error(`im-qqbot: question send failed key=${record.sessionKey}: ${msg}`);
-      throw new Error(`failed to deliver question to QQ: ${msg}`);
+      throw new QuestionDeliveryError(`failed to deliver question to QQ: ${msg}`);
     }
   }
 

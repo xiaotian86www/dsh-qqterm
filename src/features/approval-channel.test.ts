@@ -127,13 +127,14 @@ describe('buildApprovalKeyboard', () => {
     expect(buttons).toHaveLength(2);
 
     const allow = buttons[0]!;
-    expect(allow.group_id).toBe('approval');
+    // 不设 group_id：QQ v2 接口在单聊拒绝该字段（40011021），会让审批卡片整条被平台打回
+    expect(allow.group_id).toBeUndefined();
     expect(allow.action.type).toBe(1);
     expect(allow.action.click_limit).toBe(1);
     expect(JSON.parse(allow.action.data)).toEqual({ t: 'approval', d: 'allow' });
 
     const deny = buttons[1]!;
-    expect(deny.group_id).toBe('approval');
+    expect(deny.group_id).toBeUndefined();
     expect(JSON.parse(deny.action.data)).toEqual({ t: 'approval', d: 'deny' });
   });
 });

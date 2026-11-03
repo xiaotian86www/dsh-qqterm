@@ -100,8 +100,8 @@ describe('buildKeyboard', () => {
     const btn = kb?.content.rows[0]?.buttons[0];
     expect(btn?.action.type).toBe(1);
     expect(btn?.action.permission.type).toBe(2);
-    // 单选互斥：同一题选项共享 group_id，点一个后其余变灰（action.type=1 才生效）
-    expect(btn?.group_id).toBe('q-q');
+    // 不设 group_id：QQ v2 接口在单聊拒绝该字段（40011021），会把整条按钮消息打回纯文本
+    expect(btn?.group_id).toBeUndefined();
     // 保留 click_limit=1（每人限点一次，与 openclaw 对齐）
     expect(btn?.action.click_limit).toBe(1);
     expect(btn?.render_data.label).toBe('A');
@@ -342,44 +342,85 @@ describe('QuestionChannel.cancelPending', () => {
   });
 });
 
-describe('QuestionChannel.install routing', () => {
-  it('routes QQ sessions to QQ channel and delegates others', async () => {
+describe('QuestionChannel.install routing（user-questions/request waterfall）', () => {
+  interface Listener {
+    handler: (...args: unknown[]) => unknown;
+    options?: { global?: boolean; prepend?: boolean };
+  }
+
+  function makeEventCtx() {
+    const listeners = new Map<string, Listener>();
+    const on = vi.fn((event: string, handler: (...args: unknown[]) => unknown, options?: Listener['options']) => {
+      listeners.set(event, { handler, options });
+      return () => true;
+    });
+    return { on, listeners };
+  }
+
+  function installChannel(ch: QuestionChannel) {
+    const ctx = makeEventCtx();
+    ch.install(ctx as unknown as Parameters<QuestionChannel['install']>[0]);
+    const listener = ctx.listeners.get('user-questions/request');
+    if (!listener) throw new Error('waterfall listener not registered');
+    return { ctx, handler: listener.handler, options: listener.options };
+  }
+
+  it('registers a global, prepended waterfall listener', () => {
+    const ch = new QuestionChannel(createManager(), createSender([]), { requireMention: false, askTimeoutMs: 60_000 }, createLogger());
+    const { options } = installChannel(ch);
+    // 不带 global 会被 agent 作用域过滤；不带 prepend 会输给 Web 端 answerer
+    expect(options).toEqual({ global: true, prepend: true });
+  });
+
+  it('routes QQ sessions to QQ and delegates others', async () => {
     const sent: SentMessage[] = [];
     const record = makeRecord(sessionKey('c2c', 'u9'));
     (record as { sessionId?: string }).sessionId = 'sess-qq';
     const manager = createManager({ findBySessionId: (id) => (id === 'sess-qq' ? record : undefined) });
     const ch = new QuestionChannel(manager, createSender(sent), { requireMention: false, askTimeoutMs: 60_000 }, createLogger());
-    let origCalled = 0;
-    const uq = { ask: vi.fn(async () => { origCalled += 1; return { answers: [] }; }) };
-    ch.install({ get: (n: string) => (n === 'userQuestions' ? uq : undefined) });
+    const { handler } = installChannel(ch);
 
-    await uq.ask({ questions: [q2('x')], agent: { id: 'sess-web' } });
-    expect(origCalled).toBe(1);
+    const next = vi.fn(async () => ({ answers: [] }));
+    await handler({ questions: [q2('x')], agent: { id: 'sess-web' } }, next);
+    expect(next).toHaveBeenCalledTimes(1);
 
-    const p = uq.ask({ questions: [q2()], agent: { id: 'sess-qq' } });
-    await new Promise((r) => setTimeout(r, 10));
+    const p = handler({ questions: [q2()], agent: { id: 'sess-qq' } }, next) as Promise<UserQuestionResult>;
+    await sleep(10);
+    expect(sent).toHaveLength(1);
     expect(ch.tryAnswer('c2c', 'u9', '1')).toBe(true);
     expect(await p).toEqual({ answers: [{ id: 'q', selected: ['A'] }] });
-    expect(origCalled).toBe(1); // QQ 路径未触碰原实现
+    expect(next).toHaveBeenCalledTimes(1); // QQ 路径不再委托
   });
 
-  it('uninstall restores the original ask', async () => {
+  it('delegates to the host answerer when QQ delivery fails', async () => {
+    const sent: SentMessage[] = [];
+    const record = makeRecord(sessionKey('c2c', 'u9'));
+    (record as { sessionId?: string }).sessionId = 'sess-qq';
+    const manager = createManager({ findBySessionId: (id) => (id === 'sess-qq' ? record : undefined) });
+    const logger = createLogger();
+    const ch = new QuestionChannel(
+      manager,
+      { sendMarkdown: vi.fn(async () => { throw new Error('network down'); }) },
+      { requireMention: false, askTimeoutMs: 60_000 },
+      logger,
+    );
+    const { handler } = installChannel(ch);
+
+    const next = vi.fn(async () => ({ answers: [{ id: 'q', selected: ['web'] }] }));
+    const result = await handler({ questions: [q2()], agent: { id: 'sess-qq' } }, next) as UserQuestionResult;
+
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(result.answers).toEqual([{ id: 'q', selected: ['web'] }]);
+    expect(logger.warn).toHaveBeenCalled();
+  });
+
+  it('uninstall 只清理 pending，不再改写服务方法', async () => {
     const sent: SentMessage[] = [];
     const ch = new QuestionChannel(createManager(), createSender(sent), { requireMention: false, askTimeoutMs: 60_000 }, createLogger());
-    const uq: { ask: (r: UserQuestionRequest) => Promise<UserQuestionResult>; __qqQuestionPatched?: boolean } = {
-      ask: async () => ({ answers: [] }),
-    };
-    ch.install({ get: (n: string) => (n === 'userQuestions' ? uq : undefined) });
-    expect(uq.__qqQuestionPatched).toBe(true);
+    installChannel(ch);
+    const p = startAsk(ch, 'c2c', 'U1', [q2()]);
+    await sleep(10);
     ch.uninstall();
-    expect(uq.__qqQuestionPatched).toBeUndefined();
-  });
-
-  it('disables gracefully when the userQuestions service is missing', () => {
-    const sent: SentMessage[] = [];
-    const logger = createLogger();
-    const ch = new QuestionChannel(createManager(), createSender(sent), { requireMention: false, askTimeoutMs: 60_000 }, logger);
-    ch.install({ get: () => undefined });
-    expect(logger.warn).not.toHaveBeenCalled();
+    await expect(p).rejects.toThrow('unloaded');
   });
 });

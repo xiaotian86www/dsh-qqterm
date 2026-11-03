@@ -38,8 +38,10 @@ export function buildKeyboard(question: UserQuestion): InlineKeyboard | undefine
             click_limit: 1,
             data: encodeButtonData({ t: 'question', q: question.id, i: idx }),
           },
-          // 同一题的选项共享分组：点一个后其余变灰（单选互斥）
-          group_id: `q-${question.id}`,
+          // 不设 group_id：QQ v2 消息接口在单聊直接拒绝该字段
+          // （40011021 请求参数 rows.buttons.group_id 无效），整条带按钮的消息会
+          // 被退回纯文本。互斥交给状态机：首答即结算，后续点击因 pending 已清或
+          // 问题 id 不匹配而被忽略。
         };
       }),
     });

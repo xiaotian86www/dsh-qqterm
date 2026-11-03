@@ -8,6 +8,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`ask_user_question` prompts were not pushed to QQ**: the question channel wrapped `userQuestions.ask` once during plugin apply — when the service had not activated yet (or mounted later), installation was silently skipped and never retried, so the channel worked only intermittently and prompts fell through to the Web client. It now listens on the official `user-questions/request` waterfall (the same seam the approval channel uses, with no service probing) and claims requests before the Web answerer; only a failed QQ delivery falls back to the host answerer, so a delivered question is never shown twice.
+
+- **Option buttons never appeared in private chats, leaving number replies as the only way to answer**: the keyboard carried `group_id`, which the QQ v2 message API rejects in c2c with `40011021 请求参数 rows.buttons.group_id 无效`; the whole button message was refused and the channel fell back to plain text. Neither the question nor the approval keyboard sends that field any more — exclusivity is enforced by the state machine anyway (the first answer settles, later clicks are ignored) — so c2c now shows clickable options and the allow/deny approval buttons.
+
+- **Session-open failures now reach stderr**: the host logger is not visible in a headless profile, so the user only saw "processing failed" with no way to diagnose it, for example a `SessionAlreadyOwnedError` from a session another process holds; the keyboard fallback logs its original error the same way.
+
 ### Added
 
 - **New `/sessions` session-management command**: list the agent workspace's sessions (same source as the Web sidebar, so sessions created in the Web UI are visible too), resume the current chat into a session by index or id prefix, or delete one. Deletion also removes the on-disk session log (the host has no deletion API, so the JSONL session directory is located and removed), disposes the agent, repoints dangling mappings to a new session, and cascades to subagent children. Private chat + allowlist only.
