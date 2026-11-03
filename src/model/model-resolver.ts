@@ -148,6 +148,27 @@ export class ModelResolver {
   }
 
   /**
+   * 获取指定 sessionKey 当前所在的工作目录（工作区跟随会话）
+   */
+  getDirectory(sessionKey: string): string | undefined {
+    return this.prefs.getDirectory(sessionKey);
+  }
+
+  /**
+   * 记录指定 sessionKey 当前所在的工作目录并持久化
+   */
+  setDirectory(sessionKey: string, directory: string): void {
+    this.prefs.setDirectory(sessionKey, directory);
+  }
+
+  /**
+   * 清除指定 sessionKey 的工作目录记录
+   */
+  clearDirectory(sessionKey: string): boolean {
+    return this.prefs.clearDirectory(sessionKey);
+  }
+
+  /**
    * 解析默认模型路由（不含 per-peer 偏好）
    *
    * 优先级：config 显式指定 > settings.yaml（只读） > 宿主 agentDefaultModel

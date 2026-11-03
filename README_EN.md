@@ -98,7 +98,6 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqbot/cordis.dev.yml
 | `provider` | string | `deepseek-official` | LLM provider name |
 | `model` | string | `deepseek-chat` | Model name |
 | `preset` | string | - | Agent preset id |
-| `cwd` | string | `process.cwd()` | Agent working directory |
 | `requireMention` | boolean | `true` | Whether group messages require @bot to trigger |
 | `groupPrompt` | string | - | Extra system prompt for group chats |
 | `directPrompt` | string | - | Extra system prompt for direct chats |
@@ -144,7 +143,7 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqbot/cordis.dev.yml
 
 | Config | Type | Default | Description |
 |------|------|--------|------|
-| `sendFile.restrictPaths` | boolean | `true` | Enable path allowlist (media + cwd + extraRoots only) |
+| `sendFile.restrictPaths` | boolean | `true` | Enable path allowlist (media + the session's working directory + extraRoots only) |
 | `sendFile.extraRoots` | string[] | `[]` | Extra allowed root directories |
 
 ## Built-in Commands
@@ -153,7 +152,7 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqbot/cordis.dev.yml
 |------|------|
 | `/new` (aliases `/reset` `/clear`) | Start a new session (clear context) |
 | `/compact` | Compact session history (replace old records with a summary) |
-| `/sessions` (alias `/session`) | Session management: list, resume, or delete a session |
+| `/sessions` (alias `/session`) | Session management: list by workspace, resume, archive / unarchive |
 | `/model` | View or switch model |
 | `/preset` | View or switch agent preset (applies to new sessions) |
 | `/cost` | View token usage of the current session |
@@ -164,22 +163,39 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqbot/cordis.dev.yml
 | `/bot-status` | View current session status |
 | `/bot-help` | View all commands |
 
+## Workspaces
+
+A workspace is the host's durable grouping record for "one directory + the sessions running in it" (`ctx.workspaceRegistry`) — the project groups in the Web sidebar. This plugin follows the same rules:
+
+- **No `cwd` config**: the session's working directory comes from the host; the plugin no longer pins a directory.
+- **New sessions land in the host's default workspace** (`Documents/deepseek-harness/default-workspace` on first use); when there is no default workspace it falls back to the dsh launch directory.
+- **The workspace follows the session**: `/sessions resume` moves this chat into that session's directory; a later `/new` stays in the same workspace, and it survives a restart (persisted in the `dirs` section of `~/.dsh-qqbot/model-prefs.json`).
+- **Titles come from directory names**: the plugin no longer names workspaces `QQBot`; the host derives the title from the last path segment. Legacy `QQBot` titles are migrated on the next attach (titles the user changed are left alone).
+
 ### Session management (`/sessions`)
 
-`/sessions` lists the same sessions the Web sidebar shows (host `sessionQuery` / `sessionPersistence`), filtered by the agent working directory — a session created in the Web UI inside this workspace is visible and resumable from QQ too.
+`/sessions` lists the same sessions the Web sidebar shows (host `sessionQuery` / `sessionPersistence`), scoped to **the workspace of the current session** — a session created in the Web UI inside this workspace is visible and resumable from QQ too.
 
 | Usage | Description |
 |------|------|
-| `/sessions` | List workspace sessions; each row is a clickable command that fills `/sessions resume <index>` into the input box |
-| `/sessions resume <index\|id>` | Rebind this chat to that session and continue its history |
-| `/sessions delete <index\|id>` | Delete the session **including its on-disk log** (no host deletion API — the JSONL session directory is removed); irreversible |
+| `/sessions` | List unarchived sessions of the current workspace (newest first, 10 per page); every row shows its 8-char short id, and clicking fills `/sessions resume <id>` into the input box |
+| `/sessions <page>` | Next page of the same list, e.g. `/sessions 2` |
+| `/sessions all` | List every session grouped by workspace (pinned first inside a group); groups show **no index**, only short ids |
+| `/sessions resume <index\|id>` | Rebind this chat to that session and continue its history (an archived target is unarchived on the way); the workspace follows |
+| `/sessions archive <index\|id>[,<index\|id>…]` | Archive the session: hidden from this command and the Web sidebar, **on-disk log kept**, restorable at any time; separate multiple targets with commas (up to 10 per command) |
+| `/sessions archived [page]` | List archived sessions; each row shows its short id and workspace and fills `/sessions unarchive <id>` into the input box |
+| `/sessions unarchive <id>[,<id>…]` | Restore the session to the regular list |
 
 Notes:
 
-- Private chat only, and the operator must be in the allowlist (`access.c2cAllow`) — titles and deletion touch other chats' data; with no allowlist configured the command is disabled (`/bot-me` shows your OpenID).
-- Deletion disposes the agent, repoints per-peer mappings to a new session, and cascades to its subagent children.
-- If a Web client or another process holds the session, the files are locked and deletion fails loudly; retry later.
+- **One handle rule**: every row shows an 8-char short id (like `#3f2a9b1c`; the `#` is optional) that works from any view; an **index only means a row of the `/sessions` page**. `/sessions all` numbers rows per group, which cannot match the command's resolution order, so it shows no indexes at all — only short ids.
+- Private chat only, and the operator must be in the allowlist (`access.c2cAllow`) — titles and archive state touch other chats' data; with no allowlist configured the command is disabled (`/bot-me` shows your OpenID).
+- Archiving goes through the host `workspaceRegistry.archiveSession` and only writes the registry-global archive set — **no file is deleted**. This plugin offers no hard delete; clean up on disk from the Web side or by hand.
+- Archiving needs the host workspace registry (`@deepseek-ai/dsh-workspace`): the web / Desktop profiles ship it, while a minimal custom profile (just `dsh-base` + this plugin) must mount it explicitly, otherwise the command reports "no session archive API mounted".
+- Archiving disposes the session's agent in this process and repoints per-chat mappings to a new session — an archived session is rejected by the host `agent/pre-step` gate, so a chat left bound to it would stop getting replies.
+- The time column is the **creation time** (the host header stores no "last used" timestamp), which is why the heading says "newest first".
 - A session can be held by one chat per process — resuming one that another chat is using is refused.
+- After a cross-workspace resume the agent works inside **that session's own directory**, and the file-send allowlist follows it.
 
 
 ## Core Modules

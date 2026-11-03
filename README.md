@@ -98,7 +98,6 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqbot/cordis.dev.yml
 | `provider` | string | `deepseek-official` | LLM 提供商名称 |
 | `model` | string | `deepseek-chat` | 模型名称 |
 | `preset` | string | - | Agent preset id |
-| `cwd` | string | `process.cwd()` | Agent 工作目录 |
 | `requireMention` | boolean | `true` | 群聊是否需要 @bot 才触发 |
 | `groupPrompt` | string | - | 群聊额外 system prompt |
 | `directPrompt` | string | - | 私聊额外 system prompt |
@@ -144,7 +143,7 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqbot/cordis.dev.yml
 
 | 配置 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `sendFile.restrictPaths` | boolean | `true` | 是否启用路径白名单（仅 media + cwd + extraRoots） |
+| `sendFile.restrictPaths` | boolean | `true` | 是否启用路径白名单（仅 media + 当前会话工作目录 + extraRoots） |
 | `sendFile.extraRoots` | string[] | `[]` | 额外允许访问的根目录 |
 
 ## 内置命令
@@ -153,7 +152,7 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqbot/cordis.dev.yml
 |------|------|
 | `/new`（别名 `/reset` `/clear`） | 开始新会话（清空上下文） |
 | `/compact` | 压缩会话历史（摘要替换旧记录，保留上下文） |
-| `/sessions`（别名 `/session`） | 会话管理：列出工作区会话、恢复指定会话、删除指定会话 |
+| `/sessions`（别名 `/session`） | 会话管理：按工作区列出会话、恢复指定会话、归档 / 取消归档 |
 | `/model` | 查看或切换模型 |
 | `/preset` | 查看或切换 agent preset（新会话生效） |
 | `/cost` | 查看当前会话的 token 消耗 |
@@ -164,22 +163,39 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqbot/cordis.dev.yml
 | `/bot-status` | 查看当前会话状态 |
 | `/bot-help` | 查看所有指令 |
 
+## 工作区（workspace）
+
+工作区是宿主对「一个目录 + 跑在这个目录里的会话」的持久分组记录（`ctx.workspaceRegistry`），Web 侧栏看到的项目分组就是它。本插件遵循同一套规则：
+
+- **没有 `cwd` 配置**：会话的工作目录由宿主决定，插件不再写死一个目录。
+- **新会话落在宿主的默认工作区**（首次使用时建在 `Documents/deepseek-harness/default-workspace`）；宿主没有默认工作区时退回 dsh 的启动目录。
+- **工作区跟着会话走**：`/sessions resume` 切到哪个会话，这个聊天的工作目录就变成那个会话的目录；之后 `/new` 也留在同一个工作区，重启后依然记得（记录在 `~/.dsh-qqbot/model-prefs.json` 的 `dirs` 里）。
+- **显示名用目录名**：插件不再给工作区起 `QQBot` 这种名字，宿主按目录最后一段自动命名；老版本留下的 `QQBot` 标题会在下次挂载时迁移成目录名（用户自己改过的名字不动）。
+
 ### 会话管理（`/sessions`）
 
-`/sessions` 列出的会话与 Web 侧栏同一来源（宿主 `sessionQuery` / `sessionPersistence`），按 agent 工作目录过滤——Web 端创建、在本工作区里的会话，QQ 这边也能看到并接回来。
+`/sessions` 列出的会话与 Web 侧栏同一来源（宿主 `sessionQuery` / `sessionPersistence`），范围是**当前会话所在的工作区**——Web 端创建、在本工作区里的会话，QQ 这边也能看到并接回来。
 
 | 用法 | 说明 |
 |------|------|
-| `/sessions` | 列出工作区会话；每条都是可点击命令，点一下就把 `/sessions resume <序号>` 填进输入框 |
-| `/sessions resume <序号\|id>` | 把当前聊天切到该会话，历史接上继续聊 |
-| `/sessions delete <序号\|id>` | 删除该会话，**连磁盘日志一起删**（宿主无删除 API，按 JSONL 布局移除会话目录），不可恢复 |
+| `/sessions` | 列出当前工作区里未归档的会话（按创建时间倒序，每页 10 条）；每行都带 8 位短 id，点一下把 `/sessions resume <id>` 填进输入框 |
+| `/sessions <页码>` | 同一列表的下一页，例如 `/sessions 2` |
+| `/sessions all` | 按工作区分组列出全部会话（组内先置顶），跨项目找会话用；组内**不显示序号**，只用短 id |
+| `/sessions resume <序号\|id>` | 把当前聊天切到该会话，历史接上继续聊（目标若已归档会顺带取消归档），工作区跟着切 |
+| `/sessions archive <序号\|id>[,<序号\|id>…]` | 归档会话：从本命令与 Web 侧栏隐藏，**磁盘日志保留**，可随时取消归档；多个目标用英文逗号分隔（一次最多 10 个） |
+| `/sessions archived [页码]` | 查看已归档会话；每行带短 id 与所属工作区，点一下把 `/sessions unarchive <id>` 填进输入框 |
+| `/sessions unarchive <id>[,<id>…]` | 取消归档，让它重新出现在列表里 |
 
 注意：
 
-- 只允许**私聊**使用，且操作者必须在白名单（`access.c2cAllow`）内——会话标题、删除都涉及其他聊天的数据；未配置名单时命令直接不可用（`/bot-me` 可查自己的 OpenID）。
-- 删除前会释放该会话的 agent、把指向它的 per-peer 映射改到新会话，并连带删除其 subagent 子会话。
-- 若会话正被 Web 端或其它进程打开，磁盘文件被占用会删除失败，命令会如实报告（换个时间再删即可）。
+- **句柄只有一条规则**：每行都显示 8 位短 id（形如 `#3f2a9b1c`，`#` 可省略），任何视图都能用它操作；**序号只对 `/sessions` 这一页有效**。`/sessions all` 按工作区分组、组内从 1 编号，和命令的解析顺序对不上，所以那里不显示序号，只给短 id。
+- 只允许**私聊**使用，且操作者必须在白名单（`access.c2cAllow`）内——会话标题、归档状态都涉及其他聊天的数据；未配置名单时命令直接不可用（`/bot-me` 可查自己的 OpenID）。
+- 归档走宿主 `workspaceRegistry.archiveSession`，只写 registry 的全局归档集，**不删任何文件**；本插件不提供物理删除，需要清理磁盘请到 Web 端或手动处理。
+- 归档依赖宿主的 workspace registry（`@deepseek-ai/dsh-workspace`）：web / Desktop profile 自带；只装 `dsh-base` + 本插件的自建最小 profile 需要手动挂载它，否则命令会提示「宿主未挂载会话归档接口」。
+- 归档前会释放该会话在本进程内的 agent，并把指向它的 per-chat 映射改到新会话——归档会话会被宿主的 `agent/pre-step` 闸门拒绝，继续挂在它上面聊天会收不到回复。
+- 列表里的时间是**创建时间**（宿主 header 不存「最后使用时间」），所以标题写的是「按创建时间倒序」。
 - 同一进程内一个会话只能被一个聊天持有：把别人正在聊的会话切过来会被拒绝。
+- 跨工作区恢复后，agent 会在**那个会话自己的目录**里干活；文件发送白名单也随该目录变化。
 
 
 ## 核心模块

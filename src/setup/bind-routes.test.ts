@@ -365,7 +365,7 @@ describe('bind-routes', () => {
     expect(json(res)).toMatchObject({ ok: false, error: expect.stringContaining('凭据') });
   });
 
-  it('POST config：cwd 只读字段被拒绝', async () => {
+  it('POST config：已删除的 cwd 字段不再接受（工作目录跟随会话）', async () => {
     const { routes } = createHarness();
     const res = fakeRes();
     await invoke(
@@ -374,7 +374,7 @@ describe('bind-routes', () => {
       res,
     );
     expect(res.statusCode).toBe(400);
-    expect(json(res)).toMatchObject({ ok: false, error: expect.stringContaining('只读') });
+    expect(json(res)).toMatchObject({ ok: false, error: expect.stringContaining('不支持') });
   });
 
   it('POST config：未知/超时类字段不在白名单被拒绝', async () => {

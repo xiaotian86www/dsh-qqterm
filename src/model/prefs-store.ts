@@ -27,6 +27,8 @@ interface PrefsFile {
   sessionIds: Record<string, string>;
   /** sessionKey → preset id（per-peer preset 覆盖） */
   presets: Record<string, string>;
+  /** sessionKey → 该聊天当前所在的工作目录（换会话后跟着会话走，/new 保留） */
+  dirs: Record<string, string>;
 }
 
 /** 各段的删除墓碑（key 集合），合并时用于压住磁盘上的旧值 */
@@ -34,6 +36,7 @@ interface Tombstones {
   overrides: Set<string>;
   sessionIds: Set<string>;
   presets: Set<string>;
+  dirs: Set<string>;
 }
 
 export class PrefsStore {
@@ -43,8 +46,15 @@ export class PrefsStore {
   private sessionIds = new Map<string, string>();
   /** per-peer preset 偏好（内存态） */
   private presets = new Map<string, string>();
+  /** per-peer 当前工作目录（内存态） */
+  private dirs = new Map<string, string>();
   /** 本进程显式删除的 key（防止并发合并把删除复活） */
-  private deleted: Tombstones = { overrides: new Set(), sessionIds: new Set(), presets: new Set() };
+  private deleted: Tombstones = {
+    overrides: new Set(),
+    sessionIds: new Set(),
+    presets: new Set(),
+    dirs: new Set(),
+  };
   /** 隔离偏好文件路径 */
   private readonly prefsPath: string;
   private readonly debugLog?: DebugFn;
@@ -129,6 +139,28 @@ export class PrefsStore {
     return deleted;
   }
 
+  // ── 工作目录操作 ──
+
+  getDirectory(sessionKey: string): string | undefined {
+    return this.dirs.get(sessionKey);
+  }
+
+  setDirectory(sessionKey: string, directory: string): void {
+    if (this.dirs.get(sessionKey) === directory) return;
+    this.dirs.set(sessionKey, directory);
+    this.deleted.dirs.delete(sessionKey);
+    this.write();
+  }
+
+  clearDirectory(sessionKey: string): boolean {
+    const deleted = this.dirs.delete(sessionKey);
+    if (deleted) {
+      this.deleted.dirs.add(sessionKey);
+      this.write();
+    }
+    return deleted;
+  }
+
   // ── 私有方法 ──
 
   private load(): void {
@@ -154,6 +186,13 @@ export class PrefsStore {
         for (const [key, presetId] of Object.entries(data.presets)) {
           if (typeof presetId === 'string' && presetId) {
             this.presets.set(key, presetId);
+          }
+        }
+      }
+      if (data.dirs && typeof data.dirs === 'object') {
+        for (const [key, dir] of Object.entries(data.dirs)) {
+          if (typeof dir === 'string' && dir) {
+            this.dirs.set(key, dir);
           }
         }
       }
@@ -221,6 +260,7 @@ export class PrefsStore {
       overrides: pick(this.overrides, disk?.overrides, this.deleted.overrides),
       sessionIds: pick(this.sessionIds, disk?.sessionIds, this.deleted.sessionIds),
       presets: pick(this.presets, disk?.presets, this.deleted.presets),
+      dirs: pick(this.dirs, disk?.dirs, this.deleted.dirs),
     };
   }
 

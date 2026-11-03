@@ -114,22 +114,145 @@ describe('host adapter', () => {
   });
 });
 
+describe('会话归档（workspaceRegistry）', () => {
+  function makeRegistry(over: Record<string, unknown> = {}) {
+    return {
+      create: vi.fn(async () => ({ path: '/proj', attachSession: async () => {} })),
+      archivedSessionIds: ['session-a'],
+      archiveSession: vi.fn(async () => {}),
+      unarchiveSession: vi.fn(async () => {}),
+      ...over,
+    };
+  }
+
+  it('archiveSession 带 stopActivity 调宿主（先停工作再写归档集）', async () => {
+    const registry = makeRegistry();
+    const adapter = createHostAdapter(makeCtx({ workspaceRegistry: registry }));
+
+    expect(await adapter.archiveSession('session-x')).toEqual({ ok: true });
+    expect(registry.archiveSession).toHaveBeenCalledWith('session-x', { stopActivity: true });
+  });
+
+  it('archivedSessionIds 返回 Set，未挂载时为空集（不抛）', () => {
+    const mounted = createHostAdapter(makeCtx({ workspaceRegistry: makeRegistry() }));
+    expect([...mounted.archivedSessionIds()]).toEqual(['session-a']);
+
+    const bare = createHostAdapter(makeCtx({}));
+    expect(bare.archivedSessionIds().size).toBe(0);
+  });
+
+  it('宿主没有归档接口时返回 unavailable', async () => {
+    const adapter = createHostAdapter(makeCtx({ workspaceRegistry: makeRegistry({ archiveSession: undefined }) }));
+
+    const outcome = await adapter.archiveSession('session-x');
+
+    expect(outcome.ok).toBe(false);
+    expect(outcome.ok === false && outcome.reason).toBe('unavailable');
+  });
+
+  it('未知会话 → not-found（按错误名识别，不依赖 instanceof）', async () => {
+    const error = new Error('no such session');
+    error.name = 'WorkspaceUnknownSessionError';
+    const registry = makeRegistry({ archiveSession: vi.fn(async () => { throw error; }) });
+    const adapter = createHostAdapter(makeCtx({ workspaceRegistry: registry }));
+
+    const outcome = await adapter.archiveSession('session-x');
+
+    expect(outcome.ok).toBe(false);
+    expect(outcome.ok === false && outcome.reason).toBe('not-found');
+  });
+
+  it('会话仍活跃 → busy', async () => {
+    const error = new Error('the session is active (generating)');
+    error.name = 'WorkspaceActiveSessionError';
+    const registry = makeRegistry({ archiveSession: vi.fn(async () => { throw error; }) });
+    const adapter = createHostAdapter(makeCtx({ workspaceRegistry: registry }));
+
+    const outcome = await adapter.archiveSession('session-x');
+
+    expect(outcome.ok).toBe(false);
+    expect(outcome.ok === false && outcome.reason).toBe('busy');
+  });
+
+  it('其它宿主错误 → failed，并保留原始文案', async () => {
+    const registry = makeRegistry({ archiveSession: vi.fn(async () => { throw new Error('EIO'); }) });
+    const adapter = createHostAdapter(makeCtx({ workspaceRegistry: registry }));
+
+    const outcome = await adapter.archiveSession('session-x');
+
+    expect(outcome.ok).toBe(false);
+    expect(outcome.ok === false && outcome.reason).toBe('failed');
+    expect(outcome.ok === false && outcome.message).toContain('EIO');
+  });
+
+  it('unarchiveSession 成功返回 ok，宿主缺失时 unavailable', async () => {
+    const registry = makeRegistry();
+    const adapter = createHostAdapter(makeCtx({ workspaceRegistry: registry }));
+    expect(await adapter.unarchiveSession('session-x')).toEqual({ ok: true });
+    expect(registry.unarchiveSession).toHaveBeenCalledWith('session-x');
+
+    const bare = createHostAdapter(makeCtx({ workspaceRegistry: makeRegistry({ unarchiveSession: undefined }) }));
+    const outcome = await bare.unarchiveSession('session-x');
+    expect(outcome.ok === false && outcome.reason).toBe('unavailable');
+  });
+
+  it('能力摘要里记录归档接口是否可用', () => {
+    const withArchive = createHostAdapter(makeCtx({ workspaceRegistry: makeRegistry() }));
+    expect(withArchive.capabilities.join('\n')).toContain('workspaceRegistry.archiveSession(可用');
+
+    const withoutArchive = createHostAdapter(makeCtx({}));
+    expect(withoutArchive.capabilities.join('\n')).toContain('workspaceRegistry.archiveSession(不可用');
+  });
+});
+
 describe('attachSessionToWorkspace', () => {
   function makeLogger() {
     return { info: vi.fn(), warn: vi.fn(), debug: vi.fn() };
   }
 
-  it('把会话挂载到 cwd 对应的工作区（title=qqbot）', async () => {
-    const ws = { path: '/proj', attachSession: vi.fn().mockResolvedValue(undefined) };
+  it('把会话挂载到 cwd 对应的工作区（标题交给宿主按目录名生成）', async () => {
+    const ws = { path: '/proj', title: 'proj', attachSession: vi.fn().mockResolvedValue(undefined) };
     const registry = { create: vi.fn().mockResolvedValue(ws) };
     const logger = makeLogger();
     const adapter = createHostAdapter(makeCtx({ workspaceRegistry: registry }), logger);
 
     await adapter.attachSessionToWorkspace('sess-1', '/proj');
 
-    expect(registry.create).toHaveBeenCalledWith('/proj', 'QQBot');
+    // 不再传自定义标题：宿主的自动标题 = 目录名
+    expect(registry.create).toHaveBeenCalledWith('/proj');
     expect(ws.attachSession).toHaveBeenCalledWith('sess-1');
     expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  it('旧的硬编码标题 QQBot 就地迁移成目录名', async () => {
+    const ws = {
+      path: 'D:\\thirdparty\\dsh-qqbot',
+      title: 'QQBot',
+      attachSession: vi.fn().mockResolvedValue(undefined),
+      setTitle: vi.fn().mockResolvedValue(undefined),
+    };
+    const registry = { create: vi.fn().mockResolvedValue(ws) };
+    const adapter = createHostAdapter(makeCtx({ workspaceRegistry: registry }));
+
+    await adapter.attachSessionToWorkspace('sess-1', 'D:\\thirdparty\\dsh-qqbot');
+
+    expect(ws.setTitle).toHaveBeenCalledWith('dsh-qqbot');
+    expect(ws.attachSession).toHaveBeenCalledWith('sess-1');
+  });
+
+  it('用户自己改过的工作区标题不动', async () => {
+    const ws = {
+      path: 'D:\\thirdparty\\dsh-qqbot',
+      title: '我的项目',
+      attachSession: vi.fn().mockResolvedValue(undefined),
+      setTitle: vi.fn().mockResolvedValue(undefined),
+    };
+    const registry = { create: vi.fn().mockResolvedValue(ws) };
+    const adapter = createHostAdapter(makeCtx({ workspaceRegistry: registry }));
+
+    await adapter.attachSessionToWorkspace('sess-1', 'D:\\thirdparty\\dsh-qqbot');
+
+    expect(ws.setTitle).not.toHaveBeenCalled();
   });
 
   it('workspaceRegistry 未挂载时静默降级（debug，不 warn）', async () => {

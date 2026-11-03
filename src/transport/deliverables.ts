@@ -24,23 +24,27 @@ export class DeliverablesDeliverer implements DeliverablesDelivererLike {
   private readonly mediaBot: MediaSenderLike;
   private readonly config: ImQQBotConfig;
   private readonly logger: Logger;
+  private readonly dirOf?: (record: SessionRecord) => string | undefined;
 
   public constructor(
     sender: QQBotSender,
     mediaBot: MediaSenderLike,
     config: ImQQBotConfig,
     logger: Logger,
+    dirOf?: (record: SessionRecord) => string | undefined,
   ) {
     this.sender = sender;
     this.mediaBot = mediaBot;
     this.config = config;
     this.logger = logger;
+    this.dirOf = dirOf;
   }
 
   /** 轮末投递一批声明文件：逐个发送，未送达的聚合为一条文字提示 */
   public async deliver(record: SessionRecord, files: PresentedFileRef[]): Promise<void> {
     const limit = Math.max(1, this.config.sendFile?.maxFiles ?? 4);
-    const cwd = resolveAgentCwd(this.config.cwd);
+    // 会话目录优先（工作区跟着会话走）；拿不到才退回插件兜底目录
+    const cwd = this.dirOf?.(record) ?? resolveAgentCwd(undefined);
     const missed: string[] = [];
     let sent = 0;
 

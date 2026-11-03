@@ -111,7 +111,14 @@ export async function bootstrapGateway(
   };
 
   // 交付物投递：present 声明的文件在轮末发送到当前会话（outbound 路由触发）
-  const deliverablesDeliverer = new DeliverablesDeliverer(sender, mediaSender, config, logger);
+  // 白名单/相对路径以「该会话当前的工作目录」为基准：工作区跟着会话走，不能再读固定配置。
+  const deliverablesDeliverer = new DeliverablesDeliverer(
+    sender,
+    mediaSender,
+    config,
+    logger,
+    (record) => manager.directoryForAgent(record.agent),
+  );
 
   const outbound = createOutboundHandler(manager, sender, config, logger, toolsRegistry, deliverablesDeliverer);
   (ctx as unknown as { on(event: string, handler: (...args: unknown[]) => void): void })

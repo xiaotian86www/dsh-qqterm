@@ -211,6 +211,10 @@ export interface WorkspaceSession {
   live: boolean;
   /** 是否由 fork 派生（/model 换模型产生） */
   isSeeded: boolean;
+  /** 是否在宿主的归档集里（归档 = 从列表/侧栏隐藏，日志仍在，可取消归档） */
+  archived: boolean;
+  /** 所属工作区标题（分组列举时填充；归档页用来区分同名会话） */
+  workspace?: string;
 }
 
 /** 切换会话结果 */
@@ -218,29 +222,33 @@ export interface SwitchSessionOutcome {
   ok: boolean;
   reason?: 'same' | 'not-found' | 'in-use' | 'failed';
   message?: string;
+  /** 目标会话原先已归档，本次恢复时顺带取消了归档 */
+  unarchived?: boolean;
 }
 
-/** 删除会话的单个结果 */
-export interface DeletedSessionInfo {
-  id: string;
-  path: string;
-  bytes: number;
-}
-
-/** 删除会话结果 */
-export interface DeleteSessionsOutcome {
+/** 归档 / 取消归档结果 */
+export interface ArchiveSessionOutcome {
   ok: boolean;
-  reason?: 'no-root' | 'not-found' | 'failed';
+  /** unavailable = 宿主没有归档接口；not-found = 会话不存在；busy = 有工作停不下来 */
+  reason?: 'unavailable' | 'not-found' | 'busy' | 'failed';
   message?: string;
-  /** 已删除的会话目录 */
-  removed: DeletedSessionInfo[];
-  /** 删除失败（多为宿主仍占用文件） */
-  failed: Array<{ id: string; path?: string; message: string }>;
-  /** 磁盘上没有目录的 id（从未落盘 / 已被删） */
-  missing: string[];
-  /** 被连带删除的子 agent 会话数 */
-  cascaded: number;
-  /** 因指向被删会话而被改写的 per-peer 映射数 */
-  remapped: number;
+  /** 因指向该会话而被改写的 per-chat 映射数（归档当前会话时 > 0） */
+  remapped?: number;
+  /** 归档前是否已经处于归档状态（幂等命中，未产生写入） */
+  alreadyArchived?: boolean;
+}
+
+/** 一个工作区分组（/sessions all 用） */
+export interface WorkspaceGroup {
+  /** 工作区 id；「未分组」固定为 `ungrouped` */
+  id: string;
+  /** 显示标题（宿主自动标题 = 目录名；未分组为「未分组」） */
+  title: string;
+  /** 规范化目录路径；未分组为空串 */
+  path: string;
+  /** 目录是否已不存在（未分组恒 false） */
+  missing: boolean;
+  /** 组内会话（先置顶、再按记账/创建时间顺序） */
+  sessions: WorkspaceSession[];
 }
 

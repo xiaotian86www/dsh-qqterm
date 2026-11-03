@@ -5,8 +5,6 @@
  */
 export { SessionManager } from './session-manager.ts';
 export { IdleEvictor } from './idle-evictor.ts';
-export { findSessionDirs, removeSessionDirs, isPathInside } from './session-store.ts';
-export type { FoundSessionDir, RemoveSessionsResult } from './session-store.ts';
 export type {
   AgentSetup,
   SessionEventLike,
@@ -21,7 +19,7 @@ export type {
   SessionStatus,
   TokenUsageStats,
   WorkspaceSession,
+  WorkspaceGroup,
   SwitchSessionOutcome,
-  DeleteSessionsOutcome,
-  DeletedSessionInfo,
+  ArchiveSessionOutcome,
 } from './types.ts';

@@ -62,8 +62,6 @@ export function registerSendFileTool(
     return;
   }
 
-  const cwd = resolveAgentCwd(config.cwd);
-
   const definition = {
     name: SEND_FILE_TOOL_NAME,
     description: DESCRIPTION,
@@ -120,8 +118,10 @@ export function registerSendFileTool(
         throw new Error('qqbot_send_file: 无法确定发送目标，请显式传 target 参数');
       }
 
-      // 2. 校验文件 + 路径白名单
+      // 2. 校验文件 + 路径白名单（根目录 = 本会话当前工作目录，随工作区切换）
       const absPath = resolve(file_path);
+      const cwd = (exec.agent !== undefined ? manager.directoryForAgent(exec.agent as DshAgent) : undefined)
+        ?? resolveAgentCwd(undefined);
       if (!isPathAllowed(absPath, config.sendFile, cwd)) {
         throw new Error(`qqbot_send_file: file_path 不在允许的目录内: ${absPath}`);
       }

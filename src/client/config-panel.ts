@@ -11,8 +11,8 @@
  * 已由宿主剔除）→ 表单编辑 → dirty diff → POST 仅提交变更键 →
  * 宿主白名单 + Schema 校验 → 最小写入 profile patch → HMR 重载生效。
  *
- * 字段策略：只开放用户必要的配置；cwd 只读展示；超时与性能调优
- * 类字段走 profile patch / 环境变量。
+ * 字段策略：只开放用户必要的配置；工作目录跟随会话（不再是一项配置）；
+ * 超时与性能调优类字段走 profile patch / 环境变量。
  */
 import { createElement, useCallback, useEffect, useState, type CSSProperties, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
 import { BIND_CONFIG_PATH } from '../shared/bind-protocol.ts';
@@ -37,7 +37,6 @@ type ConfigWire = {
   groupPrompt?: string;
   directPrompt?: string;
   access?: AccessControlWire;
-  cwd?: string;
 };
 
 /** 样式注入标记（幂等） */
@@ -140,8 +139,6 @@ function useConfigPanelStyles(): void {
   outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
   outline-offset: 1px;
 }
-/* cwd 只读行 */
-.imqb2-readonly { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--dsw-alias-label-secondary); word-break: break-all; margin: 0; }
     `;
     document.head.appendChild(style);
     return () => { style.remove(); };
@@ -401,16 +398,6 @@ export function ConfigPanel(props?: { bindPhase?: string }): ReactNode {
       label: '私聊额外 system prompt', value: form.directPrompt ?? '',
       onChange: (v) => { patch('directPrompt', v); },
     }),
-
-    form.cwd !== undefined
-      ? createElement('div', { className: 'imqb2-field' },
-          createElement('div', { className: 'imqb2-head' },
-            createElement('span', { className: 'imqb2-label' }, 'Agent 工作目录'),
-            createElement('span', { className: 'imqb2-hint' }, '只读'),
-          ),
-          createElement('p', { className: 'imqb2-readonly' }, form.cwd),
-        )
-      : null,
 
     createElement('div', { className: 'imqb2-footer' },
       result !== null

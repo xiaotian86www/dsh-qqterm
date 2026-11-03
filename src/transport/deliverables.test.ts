@@ -24,9 +24,8 @@ function createMediaBot(): MediaSenderLike {
   };
 }
 
-function createConfig(cwd: string): ImQQBotConfig {
+function createConfig(): ImQQBotConfig {
   return {
-    cwd,
     textChunkLimit: 4500,
     sendFile: { restrictPaths: true, extraRoots: [], sendPresentedFiles: true, maxFiles: 4 },
   } as unknown as ImQQBotConfig;
@@ -46,7 +45,7 @@ describe('DeliverablesDeliverer', () => {
 
     const mediaBot = createMediaBot();
     const sender = createSender();
-    const deliverer = new DeliverablesDeliverer(sender, mediaBot, createConfig(dir), logger);
+    const deliverer = new DeliverablesDeliverer(sender, mediaBot, createConfig(), logger, () => dir);
 
     await deliverer.deliver(createRecord(), [{ path: png }, { path: md, description: '文档' }]);
 
@@ -62,7 +61,7 @@ describe('DeliverablesDeliverer', () => {
 
     const mediaBot = createMediaBot();
     const sender = createSender();
-    const deliverer = new DeliverablesDeliverer(sender, mediaBot, createConfig(dir), logger);
+    const deliverer = new DeliverablesDeliverer(sender, mediaBot, createConfig(), logger, () => dir);
 
     await deliverer.deliver(createRecord(), [{ path: ok }, { path: join(dir, 'gone.txt') }]);
 
@@ -80,7 +79,7 @@ describe('DeliverablesDeliverer', () => {
 
     const mediaBot = createMediaBot();
     const sender = createSender();
-    const deliverer = new DeliverablesDeliverer(sender, mediaBot, createConfig(dir), logger);
+    const deliverer = new DeliverablesDeliverer(sender, mediaBot, createConfig(), logger, () => dir);
 
     await deliverer.deliver(createRecord(), [{ path: outside }]);
 
@@ -99,9 +98,9 @@ describe('DeliverablesDeliverer', () => {
 
     const mediaBot = createMediaBot();
     const sender = createSender();
-    const config = createConfig(dir);
+    const config = createConfig();
     (config as { sendFile: { maxFiles: number } }).sendFile.maxFiles = 2;
-    const deliverer = new DeliverablesDeliverer(sender, mediaBot, config, logger);
+    const deliverer = new DeliverablesDeliverer(sender, mediaBot, config, logger, () => dir);
 
     await deliverer.deliver(createRecord(), files);
 
