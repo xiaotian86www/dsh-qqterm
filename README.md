@@ -157,6 +157,7 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqbot/cordis.dev.yml
 | `/ls` | 列出目录里的子目录，点条目逐层进入 |
 | `/model` | 查看或切换模型 |
 | `/preset` | 查看或切换 agent preset（新会话生效） |
+| `/permission` | 查看或切换权限预设（沙箱模式 + 审批策略，当前会话立即生效；仅白名单可用） |
 | `/cost` | 查看当前会话的 token 消耗 |
 | `/status` | 查看会话状态：工作区 / 模型 / 上下文 / token |
 | `/stop` | 中止当前生成 |
@@ -165,6 +166,8 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqbot/cordis.dev.yml
 | `/bot-me` | 查看你的 OpenID（配置白名单用） |
 | `/bot-status` | 查看当前会话状态（简版，完整状态看 `/status`） |
 | `/bot-help` | 查看所有指令 |
+
+> 指令名拼错（如 `/modle`、`/sesions`）不会被当作提问转发给大模型：机器人直接回「没有这个指令」，能猜到意图时给出可点击的正确指令。只有「斜杠 + ASCII 指令名」算指令，`/usr/local/bin`、`/今天` 这类文本照旧交给模型；全角 `／` 与半角 `/` 等价，中文输入法下可以直接敲。
 
 ## 工作区（workspace）
 
@@ -263,6 +266,7 @@ src/
 │   └── media-cleaner.ts        # 媒体 TTL 清理
 ├── middleware/                 # 中间件
 │   ├── question-answer.ts      # 问答答案处理
+│   ├── unknown-command.ts      # 拼错指令拦截（不转发给模型）
 │   └── attachment.ts           # 附件处理
 ├── shared/                     # 共享工具
 │   ├── utils.ts                # 通用函数

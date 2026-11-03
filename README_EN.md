@@ -157,6 +157,7 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqbot/cordis.dev.yml
 | `/ls` | List the subdirectories of a directory; click a row to go deeper |
 | `/model` | View or switch model |
 | `/preset` | View or switch agent preset (applies to new sessions) |
+| `/permission` | View or switch the permission preset (sandbox mode + approval policy, effective immediately; allowlisted users only) |
 | `/cost` | View token usage of the current session |
 | `/status` | View session status: workspace / model / context / tokens |
 | `/stop` | Abort the current generation |
@@ -165,6 +166,8 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqbot/cordis.dev.yml
 | `/bot-me` | View your OpenID (for access allowlists) |
 | `/bot-status` | View current session status (brief; see `/status` for the full view) |
 | `/bot-help` | View all commands |
+
+> A misspelled command (like `/modle` or `/sesions`) is no longer forwarded to the model as a prompt: the bot replies "no such command" and, when the intent is clear enough, offers the correct one as a clickable command. Only "slash + ASCII command name" counts as a command, so text like `/usr/local/bin` or `/今天` still goes to the model; the full-width `／` is equivalent to `/`, so it works straight from a Chinese IME.
 
 ## Workspaces
 
@@ -254,6 +257,7 @@ src/
 │   └── media-cleaner.ts        # Media TTL cleanup
 ├── middleware/                 # Middleware
 │   ├── question-answer.ts      # Q&A answer handling
+│   ├── unknown-command.ts      # Misspelled-command guard (never forwarded to the model)
 │   └── attachment.ts           # Attachment handling
 ├── shared/                     # Shared utilities
 │   ├── utils.ts                # Common helpers
