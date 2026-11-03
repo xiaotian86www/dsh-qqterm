@@ -4,8 +4,8 @@
  * 每个命令拆分为独立文件，此处仅编排。工厂函数注入依赖，统一导出命令列表。
  *
  * 命令按 category 分两类：
- *   - agent：底层 dsh agent 通用能力（new/compact/model/stop）
- *   - qqbot：插件自身特有（ping/version/status/help）
+ *   - agent：底层 dsh agent 通用能力（new/compact/model/status/cost）
+ *   - qqbot：插件自身特有（bot-ping/bot-version/bot-status/bot-help）
  */
 import type { CommandDeps, CategorizedCommand } from './types.ts';
 import { newCommand, compactCommand } from './session.ts';
@@ -14,6 +14,7 @@ import { workspaceCommand } from './workspace.ts';
 import { lsCommand } from './ls.ts';
 import { modelCommand } from './model.ts';
 import { costCommand } from './cost.ts';
+import { sessionStatusCommand } from './session-status.ts';
 import { presetCommand } from './preset.ts';
 import { statusCommand } from './status.ts';
 import { helpCommand } from './help.ts';
@@ -32,6 +33,7 @@ export function buildCommandList(deps: CommandDeps): CategorizedCommand[] {
     lsCommand(deps),
     modelCommand(deps),
     costCommand(deps),
+    sessionStatusCommand(deps),
     presetCommand(deps),
     stopCommand(deps),
     // QQBot 特有

@@ -158,11 +158,12 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqbot/cordis.dev.yml
 | `/model` | 查看或切换模型 |
 | `/preset` | 查看或切换 agent preset（新会话生效） |
 | `/cost` | 查看当前会话的 token 消耗 |
+| `/status` | 查看会话状态：工作区 / 模型 / 上下文 / token |
 | `/stop` | 中止当前生成 |
 | `/bot-ping` | 网络延迟检测（返回传输与处理耗时） |
 | `/bot-version` | 查看版本信息 |
 | `/bot-me` | 查看你的 OpenID（配置白名单用） |
-| `/bot-status` | 查看当前会话状态 |
+| `/bot-status` | 查看当前会话状态（简版，完整状态看 `/status`） |
 | `/bot-help` | 查看所有指令 |
 
 ## 工作区（workspace）

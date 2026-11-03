@@ -17,6 +17,7 @@ export type {
   PresetSwitchOutcome,
   SessionRecord,
   SessionStatus,
+  SessionContextUsage,
   TokenUsageStats,
   WorkspaceSession,
   WorkspaceGroup,

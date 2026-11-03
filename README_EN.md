@@ -158,11 +158,12 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqbot/cordis.dev.yml
 | `/model` | View or switch model |
 | `/preset` | View or switch agent preset (applies to new sessions) |
 | `/cost` | View token usage of the current session |
+| `/status` | View session status: workspace / model / context / tokens |
 | `/stop` | Abort the current generation |
 | `/bot-ping` | Network latency test (transport & processing time) |
 | `/bot-version` | View version info |
 | `/bot-me` | View your OpenID (for access allowlists) |
-| `/bot-status` | View current session status |
+| `/bot-status` | View current session status (brief; see `/status` for the full view) |
 | `/bot-help` | View all commands |
 
 ## Workspaces
