@@ -1,0 +1,155 @@
+/**
+ * /permission：权限预设的查看 / 切换 / 重置
+ *
+ * manager 用替身，只验证「参数 → 调用 → 文案」；鉴权要求白名单（与 /model 不同），
+ * 宿主侧真正写沙箱与审批策略的行为由 permission-presets.test.ts 覆盖。
+ */
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { SlashCommandHandlerContext } from '@tencent-connect/qqbot-nodejs';
+import { ConfigSchema, type ImQQBotConfig } from '../config.ts';
+import type { PermissionPresetEntry, PermissionSwitchOutcome, SessionManager } from '../session/index.ts';
+import type { Logger } from '../types.ts';
+import { permissionCommand } from './permission.ts';
+
+const state = vi.hoisted(() => ({ sent: [] as string[] }));
+
+vi.mock('../shared/send-helper.ts', () => ({
+  sendMarkdownChunked: async (_ctx: unknown, content: string): Promise<void> => {
+    state.sent.push(content);
+  },
+}));
+
+const config = ConfigSchema({
+  appId: 'app',
+  appSecret: 'secret',
+  access: { c2cMode: 'open', c2cAllow: ['owner'], groupMode: 'open', groupAllow: [] },
+} as ImQQBotConfig);
+const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+
+const PRESETS: PermissionPresetEntry[] = [
+  { id: 'read-only', name: 'read-only' },
+  { id: 'workspace-write', name: 'workspace-write' },
+  { id: 'danger-full-access', name: 'danger-full-access' },
+  { id: 'auto', name: 'auto' },
+];
+
+interface StubOptions {
+  presets?: PermissionPresetEntry[];
+  current?: string;
+  outcome?: PermissionSwitchOutcome;
+}
+
+function makeManager(options: StubOptions = {}) {
+  return {
+    listPermissionPresets: vi.fn(() => options.presets ?? PRESETS),
+    getPermissionPreset: vi.fn(() => options.current),
+    setPermissionPreset: vi.fn(async () => options.outcome ?? { ok: true, preset: 'auto' }),
+  } as unknown as SessionManager;
+}
+
+function makeCtx(raw: string, senderId: string | undefined = 'owner'): SlashCommandHandlerContext {
+  return {
+    message: { senderId, kind: 'c2c', messageId: 'm1' },
+    command: { raw },
+  } as unknown as SlashCommandHandlerContext;
+}
+
+/** 跑一次命令：查看类走 sendMarkdownChunked，切换类直接返回文本 */
+async function run(manager: SessionManager, raw = '', senderId: string | undefined = 'owner'): Promise<string> {
+  state.sent.length = 0;
+  const command = permissionCommand({ manager, config, logger });
+  const result = await command.handler(makeCtx(raw, senderId));
+  return typeof result === 'string' ? result : state.sent.at(-1) ?? '';
+}
+
+beforeEach(() => {
+  state.sent.length = 0;
+});
+
+describe('/permission 命令声明与鉴权', () => {
+  it('私聊/群聊都可用，但鉴权是严格白名单（不看 c2cMode）', () => {
+    const command = permissionCommand({ manager: makeManager(), config, logger });
+    expect(command.name).toBe('permission');
+    expect(command.scope).toBe('all');
+    const authorized = command.authorized as (ctx: { message: { senderId?: string } }) => boolean | string;
+    // open 模式也要求名单内：这是唯一能关沙箱的指令
+    expect(authorized({ message: { senderId: 'stranger' } })).toBeTypeOf('string');
+    expect(authorized({ message: { senderId: 'owner' } })).toBe(true);
+    expect(authorized({ message: {} })).toBeTypeOf('string');
+  });
+
+  it('空名单在 open 模式下也拒绝（fail-closed）', () => {
+    const empty = ConfigSchema({
+      appId: 'app',
+      appSecret: 'secret',
+      access: { c2cMode: 'open', c2cAllow: [], groupMode: 'open', groupAllow: [] },
+    } as ImQQBotConfig);
+    const command = permissionCommand({ manager: makeManager(), config: empty, logger });
+    const authorized = command.authorized as (ctx: { message: { senderId?: string } }) => boolean | string;
+    expect(authorized({ message: { senderId: 'anyone' } })).toBeTypeOf('string');
+  });
+});
+
+describe('/permission（查看）', () => {
+  it('一行现状 + 可点击选项，不铺说明文字，也不提默认值', async () => {
+    const text = await run(makeManager({ current: 'workspace-write' }));
+    expect(text).toContain('### 🛡️ 权限预设');
+    expect(text).toContain('当前: 工作区内修改 (workspace-write)');
+    expect(text).toContain('text="/permission auto"');
+    expect(text).toContain('/permission 自动审查 (auto) · EXP');
+    // 默认值与说明性的页脚/提示都不要
+    expect(text).not.toContain('默认');
+    expect(text).not.toContain('手动指定');
+    expect(text).not.toContain('立即生效');
+  });
+
+  it('取不到当前值（宿主无服务）时不显示当前行', async () => {
+    const text = await run(makeManager({ current: undefined }));
+    expect(text).not.toContain('当前:');
+    expect(text).toContain('### 🛡️ 权限预设');
+  });
+
+  it('宿主没有 permissionPresets 服务时如实报不可用', async () => {
+    const text = await run(makeManager({ presets: [] }));
+    expect(text).toContain('permissionPresets 服务未注入');
+  });
+});
+
+describe('/permission（切换）', () => {
+  it('切换成功只回一行结果', async () => {
+    const manager = makeManager({ outcome: { ok: true, preset: 'workspace-write' } });
+    const text = await run(manager, 'workspace-write');
+    expect(manager.setPermissionPreset).toHaveBeenCalledWith(
+      'c2c',
+      'owner',
+      'workspace-write',
+      expect.objectContaining({ replyTarget: expect.objectContaining({ scope: 'c2c' }) }),
+    );
+    expect(text).toBe('✅ 权限已切换: 工作区内修改 (workspace-write)');
+  });
+
+  it('切到 auto 只补一行风险提示', async () => {
+    const text = await run(makeManager({ outcome: { ok: true, preset: 'auto' } }), 'auto');
+    expect(text.split('\n')).toEqual(['✅ 权限已切换: 自动审查 (auto)', '⚠️ 不启用沙箱，每次工具调用先由模型预审（额外消耗 token）']);
+  });
+
+  it('未知预设列出可用项，不写会话', async () => {
+    const manager = makeManager({ outcome: { ok: false, reason: 'unknown-preset' } });
+    const text = await run(manager, 'nope');
+    expect(text).toContain('未知权限预设: nope');
+    expect(text).toContain('read-only, workspace-write, danger-full-access, auto');
+  });
+
+  it('reset 不再特殊处理，按未知预设拒绝', async () => {
+    const manager = makeManager({ outcome: { ok: false, reason: 'unknown-preset' } });
+    const text = await run(manager, 'reset');
+    expect(manager.setPermissionPreset).toHaveBeenCalledWith('c2c', 'owner', 'reset', expect.anything());
+    expect(text).toContain('未知权限预设: reset');
+  });
+
+  it('写入失败时把宿主错误原样带出（如 auto 集成下线）', async () => {
+    const manager = makeManager({ outcome: { ok: false, reason: 'failed', message: 'auto-review: integration is closing' } });
+    const text = await run(manager, 'auto');
+    expect(text).toContain('切换失败: auto-review: integration is closing');
+  });
+});

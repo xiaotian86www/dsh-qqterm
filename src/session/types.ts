@@ -136,6 +136,40 @@ export interface PresetEntry {
   description?: string;
 }
 
+/**
+ * permission-presets 服务接口（可选，部署中可能没有）
+ *
+ * 它是「一个预设 = 沙箱模式 + 审批策略」的执行入口；`names` 里除配置表之外，
+ * 实验 Auto 审查集成在线时还会多一个 `auto`（选择它要求集成仍在准入期）。
+ */
+export interface PermissionPresetsLike {
+  /** 可切换的预设名（配置表顺序 + 在线的 auto） */
+  readonly names: readonly string[];
+  /** 未来会话的默认预设（会话还没起来时按它展示当前值） */
+  readonly defaultPreset: string;
+  /** 某会话当前生效的预设 */
+  current(session: unknown): string;
+  /** 切换某会话的沙箱模式与审批策略（未知名字抛错） */
+  set(session: unknown, name: string): void;
+  /** 单条预设的展示信息（可选，缺失时按 id 展示） */
+  optionOf?(name: string): { value: string; name?: string; description?: string };
+}
+
+/** 权限预设条目（/permission 展示用） */
+export interface PermissionPresetEntry {
+  id: string;
+  name?: string;
+  description?: string;
+}
+
+/** 权限预设切换结果 */
+export interface PermissionSwitchOutcome {
+  ok: boolean;
+  reason?: 'unavailable' | 'unknown-preset' | 'no-session' | 'failed';
+  preset?: string;
+  message?: string;
+}
+
 /** preset 组合结果 */
 export interface PresetComposition {
   agentPreset?: string;
