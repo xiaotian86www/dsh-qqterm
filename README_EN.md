@@ -154,6 +154,7 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqbot/cordis.dev.yml
 | `/compact` | Compact session history (replace old records with a summary) |
 | `/sessions` (alias `/session`) | Session management: list by workspace, resume, archive / unarchive |
 | `/workspace` | Workspace: view / switch (only right after `/new`) |
+| `/ls` | List the subdirectories of a directory (click a row to go deeper; `.` / `..` are current / parent) |
 | `/model` | View or switch model |
 | `/preset` | View or switch agent preset (applies to new sessions) |
 | `/cost` | View token usage of the current session |
@@ -185,6 +186,7 @@ A workspace *is* the session's `cwd`. It is written into the session header when
 
 - There are only two moments: **right after `/new`**, or before this chat has ever talked. Once a session exists `/workspace` refuses and points at `/new <name|path>` — the directory is already in that session's header, and editing the record would not take effect (a resumed session keeps its own `cwd`).
 - A workspace is matched by **title**, **directory name** (case-insensitive, unique prefix), or an **absolute path**; the next message creates the session in the new directory and the workspace shows up in the host sidebar. A missing directory (or a file) is rejected without leaving a half-applied state, and `/new <path>` validates the target *before* touching the session, so a typo never costs you the current one.
+- Not sure how to spell the path? Use `/ls`: it lists the subdirectories of the current workspace and every row is clickable to go one level deeper (`.` is the current directory, `..` the parent). Rows always fill an absolute path, so descending never drifts.
 - Same permission surface as `/sessions`: **private chat + allowlist** (`access.c2cAllow`) only — switching workspace means changing the directories the agent may touch. A plain `/new` is unrestricted.
 
 ### Session management (`/sessions`)
