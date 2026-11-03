@@ -248,29 +248,27 @@ export interface WorkspaceInfo {
   missing: boolean;
 }
 
-/** 切换工作区结果 */
-export interface ChangeWorkspaceOutcome {
-  ok: boolean;
-  /**
-   * 失败原因：
-   * - has-session：这个聊天已经有落盘的会话，cwd 改不动；
-   * - missing：目标目录不存在 / 不是目录；
-   * - ambiguous：标题匹配到多个工作区；
-   * - not-found：既不是绝对路径，也没有同名工作区。
-   */
-  reason?: 'has-session' | 'missing' | 'ambiguous' | 'not-found';
-  /** ok 时：生效的工作区标题与绝对路径 */
-  title?: string;
-  path?: string;
-  /** ok 时：宿主还没有这个工作区，会在下一条消息时创建 */
-  isNew?: boolean;
-  /** has-session 时：挡住本次修改的会话 id */
-  sessionId?: string;
-  /** ambiguous 时：候选工作区标题 */
-  matches?: string[];
-  /** not-found 时：用户原样输入的参数 */
-  arg?: string;
-}
+/**
+ * 切换工作区结果（按 `reason` 区分失败原因）
+ *
+ * - has-session：这个聊天已经有落盘的会话，cwd 改不动；
+ * - missing：目标目录不存在 / 不是目录；
+ * - ambiguous：标题匹配到多个工作区；
+ * - not-found：既不是绝对路径，也没有同名工作区。
+ */
+export type ChangeWorkspaceOutcome =
+  | {
+    ok: true;
+    /** 生效的工作区标题与绝对路径 */
+    title: string;
+    path: string;
+    /** 宿主还没有这个工作区，会在下一条消息时创建 */
+    isNew: boolean;
+  }
+  | { ok: false; reason: 'has-session'; /** 挡住本次修改的会话 id */ sessionId?: string }
+  | { ok: false; reason: 'missing'; path: string }
+  | { ok: false; reason: 'ambiguous'; matches: string[] }
+  | { ok: false; reason: 'not-found'; arg: string };
 
 /** 一个工作区分组（/sessions all 用） */
 export interface WorkspaceGroup {

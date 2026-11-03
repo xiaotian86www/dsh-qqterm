@@ -890,23 +890,15 @@ export class SessionManager {
   }
 
   /**
-   * 改这个聊天的工作区（下一个会话落在哪个目录）。
+   * 解析工作区参数：宿主工作区的标题、目录名（大小写不敏感，支持唯一前缀）
+   * 或绝对路径。
    *
-   * 参数可以是宿主工作区的标题、目录名（都大小写不敏感，支持唯一前缀），或绝对
-   * 路径。只在会话还没落盘时生效：已有会话时改目录是静默无效的——resume 回来的
-   * 会话以自己的 header.cwd 为准，紧接着 `rememberDirectory` 会把记录覆盖回去
-   * ——所以这里直接拒绝，由命令层给出「先 /new」的下一步。
+   * 只做解析与目录校验，不看会话状态、不写任何记录。`/new <工作区>` 要先用它
+   * 验一遍：路径写错不该把当前会话弄丢。
    *
-   * @param scope 当前 chat 作用域
-   * @param peerId 当前 chat 的 peer id
    * @param arg 工作区标题 / 目录名 / 绝对路径
    */
-  async changeChatWorkspace(
-    scope: ChatScope,
-    peerId: string,
-    arg: string,
-  ): Promise<ChangeWorkspaceOutcome> {
-    const key = this.sessionKey(scope, peerId);
+  resolveWorkspace(arg: string): ChangeWorkspaceOutcome {
     const target = arg.trim();
     if (target === '') return { ok: false, reason: 'not-found', arg: target };
 
@@ -927,13 +919,35 @@ export class SessionManager {
     }
 
     if (!isDirectory(path)) return { ok: false, reason: 'missing', path };
+    return { ok: true, title, path, isNew };
+  }
 
+  /**
+   * 改这个聊天的工作区（下一个会话落在哪个目录）。
+   *
+   * 只在会话还没落盘时生效：已有会话时改目录是静默无效的——resume 回来的会话
+   * 以自己的 header.cwd 为准，紧接着 `rememberDirectory` 会把记录覆盖回去——所以
+   * 这里直接拒绝，由命令层给出「先 /new」的下一步。
+   *
+   * @param scope 当前 chat 作用域
+   * @param peerId 当前 chat 的 peer id
+   * @param arg 工作区标题 / 目录名 / 绝对路径
+   */
+  async changeChatWorkspace(
+    scope: ChatScope,
+    peerId: string,
+    arg: string,
+  ): Promise<ChangeWorkspaceOutcome> {
+    const resolved = this.resolveWorkspace(arg);
+    if (!resolved.ok) return resolved;
+
+    const key = this.sessionKey(scope, peerId);
     const blocked = await this.workspaceBlocker(key);
     if (blocked !== undefined) return { ok: false, reason: 'has-session', sessionId: blocked };
 
-    this.modelResolver.setDirectory(key, path);
-    this.logger.info(`chat workspace changed: key=${key} dir=${path}`);
-    return { ok: true, title, path, isNew };
+    this.modelResolver.setDirectory(key, resolved.path);
+    this.logger.info(`chat workspace changed: key=${key} dir=${resolved.path}`);
+    return resolved;
   }
 
   /** 挡住工作区修改的会话 id；undefined = 还没有落盘的会话，可以改 */

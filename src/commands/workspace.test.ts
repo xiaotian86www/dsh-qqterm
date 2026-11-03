@@ -95,7 +95,7 @@ describe('/workspace（查看）', () => {
     const text = await run(makeManager({ canChoose: false }));
     expect(text).toContain('#9d2c4410');
     expect(text).toContain('改不了');
-    expect(text).toContain('先 `/new`，再 `/workspace <名字|路径>`');
+    expect(text).toContain('`/new <名字|路径>`');
     expect(text).not.toContain('下一条消息会在这里开新会话');
   });
 
@@ -139,7 +139,7 @@ describe('/workspace <名字|路径>（切换）', () => {
       'other',
     );
     expect(text).toContain('已经有会话（`#9d2c4410`）');
-    expect(text).toContain('先 `/new`，再 `/workspace <名字|路径>`');
+    expect(text).toContain('`/new <名字|路径>`');
   });
 
   it('目录不存在', async () => {
