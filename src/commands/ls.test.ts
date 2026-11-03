@@ -88,15 +88,13 @@ describe('/ls（当前目录）', () => {
     expect(text).toContain(`### 📁 ${root.split(/[\\/]/).at(-1)} · \`${root}\``);
   });
 
-  it('`.` 与 `..` 排在最前，且指向当前目录 / 上一级', async () => {
+  it('不显示 `.` 与 `..`（按钮太窄，点起来费劲）', async () => {
     const text = await run(makeManager());
-    const dot = text.indexOf(buttonText(`/ls ${root}`, '.'));
-    const dotdot = text.indexOf(buttonText(`/ls ${dirname(root)}`, '..'));
-    const first = text.indexOf(buttonText(`/ls ${join(root, 'alpha')}`, 'alpha'));
-
-    expect(dot).toBeGreaterThan(-1);
-    expect(dotdot).toBeGreaterThan(dot);
-    expect(first).toBeGreaterThan(dotdot);
+    expect(text).not.toContain('show="."');
+    expect(text).not.toContain('show=".."');
+    // 回上一级直接写路径，不再有固定条目
+    expect(text).not.toContain(buttonText(`/ls ${dirname(root)}`, '..'));
+    expect(text).not.toContain(buttonText(`/ls ${root}`, '.'));
   });
 
   it('只列子目录，不列文件，并按名字排序', async () => {
@@ -138,9 +136,9 @@ describe('/ls <路径>', () => {
     expect(text).toContain(buttonText(`/ls ${join(root, 'alpha', 'inner')}`, 'inner'));
   });
 
-  it('进到子目录后，`..` 指向它的上一级（而不是工作区根）', async () => {
-    const text = await run(makeManager(), 'alpha');
-    expect(text).toContain(buttonText(`/ls ${root}`, '..'));
+  it('输出里没有额外的操作提示', async () => {
+    const text = await run(makeManager());
+    expect(text).not.toContain('/new');
   });
 
   it('目录不存在', async () => {

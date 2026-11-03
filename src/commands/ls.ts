@@ -8,8 +8,8 @@
  * `/new <路径>` 把会话切过去。所以每个条目都是一个可点击命令，点一下就把该目录
  * 的 `/ls` 填进输入框。
  *
- * 只列**子目录**（文件对切工作区没有意义），另外给两个固定条目：`.` 当前目录、
- * `..` 上一级（到盘符根目录时不再给 `..`，避免原地打转）。
+ * 只列**子目录**：文件对切工作区没有意义。也不给 `.` / `..` 这类固定条目——在
+ * QQ 里它们渲染成的按钮太小，点起来费劲，回上一级直接写路径更实在。
  *
  * 条目的命令文本一律用**绝对路径**：相对路径的基准会随「当前工作区」变化，点进
  * 第二层就会跑偏，而绝对路径点进任何一层都稳。
@@ -23,7 +23,7 @@ import { getScopePeer, sendMarkdownChunked } from '../shared/index.ts';
 import { sessionAdminAuth } from './sessions.ts';
 import { readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
+import { basename, isAbsolute, join, resolve } from 'node:path';
 
 /** 一次最多列多少个子目录（够逛，又不至于刷屏） */
 const MAX_ENTRIES = 40;
@@ -32,7 +32,6 @@ const USAGE = [
   '**目录**',
   '`/ls` 看当前工作区的子目录',
   '`/ls <路径>` 看指定目录（相对当前工作区、绝对路径、`~` 都行）',
-  '`.` 当前目录 · `..` 上一级；点条目进下一层',
 ].join('\n');
 
 /** 列目录的结果 */
@@ -158,19 +157,12 @@ async function renderListing(
   }
 
   const lines = [`### 📁 ${basename(target) || target} · \`${target}\``, ''];
-  // `.` 重列当前层，`..` 回上一级；盘符根目录没有上一级，就不给
-  lines.push(button(target, '.'));
-  const parent = dirname(target);
-  if (parent !== target) lines.push(button(parent, '..'));
-
   const shown = listing.dirs.slice(0, MAX_ENTRIES);
   for (const name of shown) lines.push(button(join(target, name), name));
   if (listing.dirs.length === 0) lines.push('（没有子目录）');
 
-  lines.push('');
   if (listing.dirs.length > shown.length) {
-    lines.push(`还有 ${listing.dirs.length - shown.length} 个子目录未列出：直接 \`/ls <路径>\` 进去`);
+    lines.push('', `还有 ${listing.dirs.length - shown.length} 个子目录未列出：直接 \`/ls <路径>\` 进去`);
   }
-  lines.push('看中了就 `/new <路径>` 在这个目录开新会话');
   return lines.join('\n');
 }
