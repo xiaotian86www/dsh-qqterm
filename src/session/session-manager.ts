@@ -18,7 +18,7 @@ import { SessionId } from '@deepseek-ai/dsh-session';
 import type { Context } from '@deepseek-ai/cordis';
 import { createHostAdapter, type HostAdapter, type HostSessionInfo } from '../host/adapter.ts';
 import { mkdirSync, statSync } from 'node:fs';
-import { basename, resolve } from 'node:path';
+import { basename, isAbsolute, resolve } from 'node:path';
 import { resolveAgentCwd } from '../shared/dirs.ts';
 import type { ChatScope, Logger, ReplyTarget } from '../types.ts';
 import type { ImQQBotConfig } from '../config.ts';
@@ -44,6 +44,8 @@ import type {
   CompactOutcome,
   WorkspaceSession,
   WorkspaceGroup,
+  WorkspaceInfo,
+  ChangeWorkspaceOutcome,
   SwitchSessionOutcome,
   ArchiveSessionOutcome,
 } from './types.ts';
@@ -861,6 +863,91 @@ export class SessionManager {
     return { title: basename(workspace), path: workspace, missing: !isDirectory(workspace) };
   }
 
+  /** 宿主工作区清单（`/workspace` 匹配与提示用）；registry 未挂载时为空数组 */
+  listWorkspaceInfos(): WorkspaceInfo[] {
+    return this.host.workspaceList().map((item) => ({
+      title: item.title,
+      path: item.path,
+      missing: !isDirectory(item.path),
+    }));
+  }
+
+  /**
+   * 这个聊天的工作区还能不能改（= 还没有落盘的会话）。
+   *
+   * 会话的 cwd 在创建时写进 header，宿主没有改它的接口（`workingDirectory` 只读），
+   * 所以工作区只能在会话落盘**之前**选：`/new` 之后，或这个聊天从没说过话。
+   *
+   * @param scope 当前 chat 作用域
+   * @param peerId 当前 chat 的 peer id
+   */
+  async canChooseWorkspace(
+    scope: ChatScope,
+    peerId: string,
+  ): Promise<{ canChoose: boolean; sessionId?: string }> {
+    const blocked = await this.workspaceBlocker(this.sessionKey(scope, peerId));
+    return blocked === undefined ? { canChoose: true } : { canChoose: false, sessionId: blocked };
+  }
+
+  /**
+   * 改这个聊天的工作区（下一个会话落在哪个目录）。
+   *
+   * 参数可以是宿主工作区的标题、目录名（都大小写不敏感，支持唯一前缀），或绝对
+   * 路径。只在会话还没落盘时生效：已有会话时改目录是静默无效的——resume 回来的
+   * 会话以自己的 header.cwd 为准，紧接着 `rememberDirectory` 会把记录覆盖回去
+   * ——所以这里直接拒绝，由命令层给出「先 /new」的下一步。
+   *
+   * @param scope 当前 chat 作用域
+   * @param peerId 当前 chat 的 peer id
+   * @param arg 工作区标题 / 目录名 / 绝对路径
+   */
+  async changeChatWorkspace(
+    scope: ChatScope,
+    peerId: string,
+    arg: string,
+  ): Promise<ChangeWorkspaceOutcome> {
+    const key = this.sessionKey(scope, peerId);
+    const target = arg.trim();
+    if (target === '') return { ok: false, reason: 'not-found', arg: target };
+
+    let path: string;
+    let title: string;
+    let isNew = false;
+
+    if (isAbsolute(target)) {
+      path = resolve(target);
+      const known = this.listWorkspaceInfos().find((item) => samePath(item.path, path));
+      title = known?.title ?? basename(path);
+      isNew = known === undefined;
+    } else {
+      const picked = matchWorkspace(this.listWorkspaceInfos(), target);
+      if ('error' in picked) return picked.error;
+      path = picked.workspace.path;
+      title = picked.workspace.title;
+    }
+
+    if (!isDirectory(path)) return { ok: false, reason: 'missing', path };
+
+    const blocked = await this.workspaceBlocker(key);
+    if (blocked !== undefined) return { ok: false, reason: 'has-session', sessionId: blocked };
+
+    this.modelResolver.setDirectory(key, path);
+    this.logger.info(`chat workspace changed: key=${key} dir=${path}`);
+    return { ok: true, title, path, isNew };
+  }
+
+  /** 挡住工作区修改的会话 id；undefined = 还没有落盘的会话，可以改 */
+  private async workspaceBlocker(key: string): Promise<string | undefined> {
+    const live = this.sessions.get(key);
+    if (live) return live.sessionId;
+
+    const mapped = this.modelResolver.getSessionId(key);
+    if (mapped === undefined) return undefined;
+    // undefined = 宿主没有 stat 能力，按「已有会话」处理（与 resume 同一约定）
+    const exists = await this.host.sessionExists(mapped).catch(() => undefined);
+    return exists === false ? undefined : mapped;
+  }
+
   /**
    * 按宿主的 workspace 分组列出全部会话（`/sessions all`）。
    *
@@ -1208,6 +1295,42 @@ function isDirectory(path: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * 按标题 / 目录名匹配一个工作区。
+ *
+ * 大小写不敏感；先全等，没有全等才退到唯一前缀（和 `/sessions` 的 id 前缀同一
+ * 手感）。标题一般是宿主按目录名自动生成的，但用户可能改过，所以目录名也算
+ * 别名。
+ */
+function matchWorkspace(
+  workspaces: readonly WorkspaceInfo[],
+  raw: string,
+): { workspace: WorkspaceInfo } | { error: ChangeWorkspaceOutcome } {
+  const needle = raw.toLowerCase();
+  const namesOf = (item: WorkspaceInfo): string[] => [
+    item.title.toLowerCase(),
+    basename(item.path).toLowerCase(),
+  ];
+
+  const exact = workspaces.filter((item) => namesOf(item).includes(needle));
+  const candidates = exact.length > 0
+    ? exact
+    : workspaces.filter((item) => namesOf(item).some((name) => name.startsWith(needle)));
+
+  const [only] = candidates;
+  if (candidates.length === 1 && only) return { workspace: only };
+  if (candidates.length > 1) {
+    return {
+      error: {
+        ok: false,
+        reason: 'ambiguous',
+        matches: candidates.map((item) => item.title),
+      },
+    };
+  }
+  return { error: { ok: false, reason: 'not-found', arg: raw } };
 }
 
 /** 从消息对象中提取纯文本（用于导出/统计） */

@@ -20,6 +20,8 @@ export type {
   TokenUsageStats,
   WorkspaceSession,
   WorkspaceGroup,
+  WorkspaceInfo,
+  ChangeWorkspaceOutcome,
   SwitchSessionOutcome,
   ArchiveSessionOutcome,
 } from './types.ts';

@@ -153,6 +153,7 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqbot/cordis.dev.yml
 | `/new` (aliases `/reset` `/clear`) | Start a new session (clear context) |
 | `/compact` | Compact session history (replace old records with a summary) |
 | `/sessions` (alias `/session`) | Session management: list by workspace, resume, archive / unarchive |
+| `/workspace` | Workspace: view / switch (only right after `/new`) |
 | `/model` | View or switch model |
 | `/preset` | View or switch agent preset (applies to new sessions) |
 | `/cost` | View token usage of the current session |
@@ -171,6 +172,19 @@ A workspace is the host's durable grouping record for "one directory + the sessi
 - **New sessions land in the host's default workspace** (`Documents/deepseek-harness/default-workspace` on first use); when there is no default workspace it falls back to the dsh launch directory.
 - **The workspace follows the session**: `/sessions resume` moves this chat into that session's directory; a later `/new` stays in the same workspace, and it survives a restart (persisted in the `dirs` section of `~/.dsh-qqbot/model-prefs.json`).
 - **Titles come from directory names**: the plugin no longer names workspaces `QQBot`; the host derives the title from the last path segment. Legacy `QQBot` titles are migrated on the next attach (titles the user changed are left alone).
+
+### Switching workspace (`/workspace`)
+
+A workspace *is* the session's `cwd`. It is written into the session header when the session is created and the host exposes no API to change it, so switching workspace only takes effect **before a session is persisted**:
+
+| Usage | Description |
+|------|------|
+| `/workspace` | Show the current workspace (title / path / whether it can still change) |
+| `/workspace <name\|path>` | Switch workspace: accepts a workspace title or directory name (case-insensitive, unique prefix) or an absolute path |
+
+- There are only two moments: **right after `/new`**, or before this chat has ever talked. Once a session exists the command refuses and points at "`/new` first, then `/workspace <name>`" — the directory is already in that session's header, and editing the record would not take effect (a resumed session keeps its own `cwd`).
+- The next message after a switch creates the session in the new directory, and the workspace shows up in the host sidebar; a missing directory (or a file) is rejected without leaving a half-applied state.
+- Same permission surface as `/sessions`: **private chat + allowlist** (`access.c2cAllow`) only — switching workspace means changing the directories the agent may touch.
 
 ### Session management (`/sessions`)
 

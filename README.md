@@ -153,6 +153,7 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqbot/cordis.dev.yml
 | `/new`（别名 `/reset` `/clear`） | 开始新会话（清空上下文） |
 | `/compact` | 压缩会话历史（摘要替换旧记录，保留上下文） |
 | `/sessions`（别名 `/session`） | 会话管理：按工作区列出会话、恢复指定会话、归档 / 取消归档 |
+| `/workspace` | 工作区：查看 / 切换（只能在 `/new` 之后改） |
 | `/model` | 查看或切换模型 |
 | `/preset` | 查看或切换 agent preset（新会话生效） |
 | `/cost` | 查看当前会话的 token 消耗 |
@@ -171,6 +172,19 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqbot/cordis.dev.yml
 - **新会话落在宿主的默认工作区**（首次使用时建在 `Documents/deepseek-harness/default-workspace`）；宿主没有默认工作区时退回 dsh 的启动目录。
 - **工作区跟着会话走**：`/sessions resume` 切到哪个会话，这个聊天的工作目录就变成那个会话的目录；之后 `/new` 也留在同一个工作区，重启后依然记得（记录在 `~/.dsh-qqbot/model-prefs.json` 的 `dirs` 里）。
 - **显示名用目录名**：插件不再给工作区起 `QQBot` 这种名字，宿主按目录最后一段自动命名；老版本留下的 `QQBot` 标题会在下次挂载时迁移成目录名（用户自己改过的名字不动）。
+
+### 换工作区（`/workspace`）
+
+工作区就是会话的 `cwd`。它在会话创建时写进会话 header，宿主没有修改它的接口，所以换工作区只能在**会话落盘之前**生效：
+
+| 用法 | 说明 |
+|------|------|
+| `/workspace` | 查看当前工作区（标题 / 路径 / 还能不能改） |
+| `/workspace <名字\|路径>` | 换工作区：认宿主工作区的标题、目录名（大小写不敏感，支持唯一前缀），也认绝对路径 |
+
+- 时机只有两个：**`/new` 之后**，或这个聊天还没说过话。已有会话时命令会拒绝，并提示「先 `/new`，再 `/workspace <名字>`」——已有会话的目录已经写进它的 header，改记录不会生效（恢复会话时以 header 为准）。
+- 换完的下一条消息会在新目录里创建会话，宿主的侧边栏里同时出现对应工作区；目录不存在或不是目录会被拒绝，不会留下半改状态。
+- 与 `/sessions` 同一权限面：只允许**私聊 + 白名单**（`access.c2cAllow`）——换工作区等于换 agent 能读写的目录。
 
 ### 会话管理（`/sessions`）
 

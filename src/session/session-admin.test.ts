@@ -5,7 +5,7 @@
  * 映射回滚、悬空映射重指向、归档前先停工作）都在 manager 里，这里逐条钉住。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import type { Context } from '@deepseek-ai/cordis';
@@ -101,6 +101,8 @@ function createCtx(options: {
   archiveThrows?: 'WorkspaceUnknownSessionError' | 'WorkspaceActiveSessionError';
   /** 模拟宿主 workingDirectory 服务（默认工作目录 / 会话生效目录） */
   workingDirectory?: { defaultDirectory?: string; get?: (session: unknown) => string };
+  /** registry 里的工作区（`/workspace` 按标题匹配、`/sessions all` 分组用） */
+  workspaces?: Array<{ id: string; path: string; title: string; sessionIds?: string[] }>;
   resume?: (sessionId: string) => Promise<DshAgentHandle>;
 }): Context {
   const sessions = options.sessions ?? [];
@@ -132,7 +134,10 @@ function createCtx(options: {
       title: basename(path),
       attachSession: async () => {},
     })),
-    list: vi.fn(() => [] as Array<{ id: string; path: string; title: string; sessionIds: string[] }>),
+    list: vi.fn(() => (options.workspaces ?? []).map((workspace) => ({
+      ...workspace,
+      sessionIds: workspace.sessionIds ?? [],
+    }))),
     get archivedSessionIds(): readonly string[] {
       return [...archivedIds];
     },
@@ -480,6 +485,156 @@ describe('工作区跟随会话', () => {
     const calls = (registryStub?.['create'] as ReturnType<typeof vi.fn>).mock.calls;
     expect(calls.length).toBeGreaterThanOrEqual(2);
     expect(calls.every((args) => args[0] === defaultWs)).toBe(true);
+  });
+});
+
+describe('changeChatWorkspace（换工作区）', () => {
+  const OTHER = () => join(env.home, 'other-ws');
+
+  it('还没有会话时按标题切换，记录落到 prefs', async () => {
+    mkdirSync(OTHER(), { recursive: true });
+    const ctx = createCtx({ workspaces: [{ id: 'w2', path: OTHER(), title: 'other-ws' }] });
+    const { manager } = createManager(ctx);
+
+    const outcome = await manager.changeChatWorkspace('c2c', PEER, 'other-ws');
+
+    expect(outcome).toMatchObject({ ok: true, title: 'other-ws', path: OTHER(), isNew: false });
+    expect(new PrefsStore().getDirectory(KEY)).toBe(OTHER());
+  });
+
+  it('大小写不敏感，也认目录名和唯一前缀', async () => {
+    mkdirSync(OTHER(), { recursive: true });
+    const renamed = join(env.home, 'renamed');
+    mkdirSync(renamed, { recursive: true });
+    const ctx = createCtx({
+      workspaces: [
+        { id: 'w2', path: OTHER(), title: 'other-ws' },
+        { id: 'w3', path: renamed, title: '用户改过的标题' },
+      ],
+    });
+    const { manager } = createManager(ctx);
+
+    expect(await manager.changeChatWorkspace('c2c', PEER, 'OTHER-WS')).toMatchObject({ ok: true });
+    // 标题被改过时，目录名仍然能选中它
+    expect(await manager.changeChatWorkspace('c2c', PEER, 'renamed')).toMatchObject({
+      ok: true,
+      title: '用户改过的标题',
+    });
+    // 前缀只要唯一就认
+    expect(await manager.changeChatWorkspace('c2c', PEER, 'other')).toMatchObject({ ok: true });
+  });
+
+  it('标题有歧义时返回候选，不写记录', async () => {
+    // 目录名不能参与匹配（否则 basename 会把前缀歧义解掉），所以用 a1 / b1
+    const a = join(env.home, 'a1');
+    const b = join(env.home, 'b1');
+    mkdirSync(a, { recursive: true });
+    mkdirSync(b, { recursive: true });
+    const ctx = createCtx({
+      workspaces: [
+        { id: 'w1', path: a, title: 'repo-x' },
+        { id: 'w2', path: b, title: 'repo-y' },
+      ],
+    });
+    const { manager } = createManager(ctx);
+
+    const outcome = await manager.changeChatWorkspace('c2c', PEER, 'repo');
+
+    expect(outcome).toMatchObject({ ok: false, reason: 'ambiguous', matches: ['repo-x', 'repo-y'] });
+    expect(new PrefsStore().getDirectory(KEY)).toBeUndefined();
+  });
+
+  it('全等优先于前缀：repo 不会命中 repo-old', async () => {
+    const a = join(env.home, 'repo');
+    const b = join(env.home, 'repo-old');
+    mkdirSync(a, { recursive: true });
+    mkdirSync(b, { recursive: true });
+    const ctx = createCtx({
+      workspaces: [
+        { id: 'w1', path: a, title: 'repo' },
+        { id: 'w2', path: b, title: 'repo-old' },
+      ],
+    });
+    const { manager } = createManager(ctx);
+
+    expect(await manager.changeChatWorkspace('c2c', PEER, 'repo')).toMatchObject({ ok: true, title: 'repo' });
+    expect(await manager.changeChatWorkspace('c2c', PEER, 'repo-')).toMatchObject({ ok: true, title: 'repo-old' });
+  });
+
+  it('绝对路径可以指向宿主还不认识的新目录', async () => {
+    const fresh = join(env.home, 'brand-new');
+    mkdirSync(fresh, { recursive: true });
+    const ctx = createCtx({ workspaces: [] });
+    const { manager } = createManager(ctx);
+
+    const outcome = await manager.changeChatWorkspace('c2c', PEER, fresh);
+
+    expect(outcome).toMatchObject({ ok: true, isNew: true, path: fresh, title: 'brand-new' });
+  });
+
+  it('目录不存在 / 不是目录时拒绝，且不写记录', async () => {
+    const file = join(env.home, 'a-file.txt');
+    writeFileSync(file, 'x');
+    const ctx = createCtx({ workspaces: [] });
+    const { manager } = createManager(ctx);
+
+    expect(await manager.changeChatWorkspace('c2c', PEER, join(env.home, 'nope'))).toMatchObject({
+      ok: false,
+      reason: 'missing',
+    });
+    expect(await manager.changeChatWorkspace('c2c', PEER, file)).toMatchObject({
+      ok: false,
+      reason: 'missing',
+    });
+    expect(new PrefsStore().getDirectory(KEY)).toBeUndefined();
+  });
+
+  it('已经有落盘的会话时拒绝，并给出挡路的会话 id', async () => {
+    const other = OTHER();
+    mkdirSync(other, { recursive: true });
+    new PrefsStore().setSessionId(KEY, 'session-a');
+    const ctx = createCtx({
+      withQuery: true,
+      sessions: [{ id: 'session-a', cwd: WORKSPACE() }],
+    });
+    const { manager } = createManager(ctx);
+    await manager.getOrCreate('c2c', PEER, PEER, REPLY);
+
+    const outcome = await manager.changeChatWorkspace('c2c', PEER, other);
+
+    expect(outcome).toMatchObject({ ok: false, reason: 'has-session', sessionId: 'session-a' });
+    expect(new PrefsStore().getDirectory(KEY)).toBe(WORKSPACE());
+  });
+
+  it('/new 之后又能改，且下一个会话真的落在新目录', async () => {
+    const other = OTHER();
+    mkdirSync(other, { recursive: true });
+    new PrefsStore().setSessionId(KEY, 'session-a');
+    const ctx = createCtx({
+      withQuery: true,
+      sessions: [{ id: 'session-a', cwd: WORKSPACE() }],
+    });
+    const { registry } = createRegistry();
+    registry.resume.mockImplementation(async ({ resumeSessionId }: { resumeSessionId: string }) => {
+      // 老会话能 resume，/new 铸出来的新 id 不在盘上 → 走创建分支
+      if (resumeSessionId === 'session-a') return fakeHandle('session-a', WORKSPACE());
+      throw new Error('session not found');
+    });
+    const { manager } = createManager(ctx, registry);
+    await manager.getOrCreate('c2c', PEER, PEER, REPLY);
+    expect((await manager.canChooseWorkspace('c2c', PEER)).canChoose).toBe(false);
+
+    await manager.remove('c2c', PEER); // = /new
+
+    expect((await manager.canChooseWorkspace('c2c', PEER)).canChoose).toBe(true);
+    expect(await manager.changeChatWorkspace('c2c', PEER, other)).toMatchObject({ ok: true });
+
+    await manager.getOrCreate('c2c', PEER, PEER, REPLY);
+
+    // 新会话的 meta.cwd 与工作区归属都用新目录
+    const createCall = registry.create.mock.calls.at(-1)?.[0] as { meta?: { cwd?: string } } | undefined;
+    expect(createCall?.meta?.cwd).toBe(other);
+    expect(registryStub?.['create']).toHaveBeenCalledWith(other);
   });
 });
 

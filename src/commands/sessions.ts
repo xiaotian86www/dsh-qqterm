@@ -185,7 +185,7 @@ function parseTargetsOrError(
 }
 
 /** 展示用短 id：去掉统一的 `session-` 前缀，避免只显示出一个前缀 */
-function shortId(id: string): string {
+export function shortId(id: string): string {
   return id.replace(/^session-/, '').slice(0, 8);
 }
 

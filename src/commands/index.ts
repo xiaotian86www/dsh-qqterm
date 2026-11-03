@@ -10,6 +10,7 @@
 import type { CommandDeps, CategorizedCommand } from './types.ts';
 import { newCommand, compactCommand } from './session.ts';
 import { sessionsCommand } from './sessions.ts';
+import { workspaceCommand } from './workspace.ts';
 import { modelCommand } from './model.ts';
 import { costCommand } from './cost.ts';
 import { presetCommand } from './preset.ts';
@@ -26,6 +27,7 @@ export function buildCommandList(deps: CommandDeps): CategorizedCommand[] {
     newCommand(deps),
     compactCommand(deps),
     sessionsCommand(deps),
+    workspaceCommand(deps),
     modelCommand(deps),
     costCommand(deps),
     presetCommand(deps),
