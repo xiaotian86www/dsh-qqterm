@@ -7,10 +7,35 @@ import type { ChatScope, ReplyTarget } from '../types.ts';
 /** AgentSetup hook 类型 */
 export type AgentSetup = (agentCtx: Context) => Promise<void> | void;
 
+/**
+ * dsh 事件上的 usage（真实形状）
+ *
+ * 取自 session.v4 日志的 assistant/message 事件：
+ *   data.usage = { inputTokens, outputTokens, totalTokens, cacheReadTokens }
+ * totalTokens 是上下文总量，不等于 input + output，展示时不要拿它当合计。
+ */
+export interface SessionUsageLike {
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  totalTokens?: number;
+}
+
 /** dsh SessionEvent 简化类型（用于统计 token 用量 / 导出） */
 export interface SessionEventLike {
   type: string;
   seq?: number;
+  /** 事件载荷（usage / message 等真实字段都在这里） */
+  data?: {
+    usage?: SessionUsageLike;
+    message?: {
+      content?: Array<{ type: string; text?: string }>;
+      [key: string]: unknown;
+    };
+    [key: string]: unknown;
+  };
+  /** 兼容形状：部分事件/旧版本把 usage 放在顶层（扁平命名） */
   usage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number };
   message?: {
     content?: Array<{ type: string; text?: string }>;
@@ -148,4 +173,17 @@ export interface TokenUsageStats {
   output: number;
   cacheRead: number;
   cacheWrite: number;
+}
+
+/**
+ * 上下文占用（/cost 用）
+ *
+ * used 取自最后一条 assistant/message 的 data.usage.totalTokens（= 该轮请求的上下文大小）；
+ * window 取自最后一条 request/context 的 data.contextWindow。
+ */
+export interface SessionContextUsage {
+  used?: number;
+  window?: number;
+  provider?: string;
+  model?: string;
 }

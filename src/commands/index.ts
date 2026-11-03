@@ -10,6 +10,7 @@
 import type { CommandDeps, CategorizedCommand } from './types.ts';
 import { newCommand, compactCommand } from './session.ts';
 import { modelCommand } from './model.ts';
+import { costCommand } from './cost.ts';
 import { presetCommand } from './preset.ts';
 import { statusCommand } from './status.ts';
 import { helpCommand } from './help.ts';
@@ -24,6 +25,7 @@ export function buildCommandList(deps: CommandDeps): CategorizedCommand[] {
     newCommand(deps),
     compactCommand(deps),
     modelCommand(deps),
+    costCommand(deps),
     presetCommand(deps),
     stopCommand(deps),
     // QQBot 特有
