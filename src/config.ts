@@ -52,6 +52,18 @@ export interface SendFileConfig {
   maxFiles: number;
 }
 
+/** 指令面板配置 */
+export interface PanelConfig {
+  /** 机器人就绪后是否自动把当前指令同步到 QQ 指令面板 */
+  autoSync: boolean;
+}
+
+/** 自定义菜单配置 */
+export interface MenuConfig {
+  /** 机器人就绪后是否自动把固定按钮同步到单聊自定义菜单 */
+  autoSync: boolean;
+}
+
 export interface ImQQBotConfig {
   /** QQ Bot AppID */
   appId: string;
@@ -95,6 +107,10 @@ export interface ImQQBotConfig {
   vision: VisionConfig;
   /** 附件发送（qqbot_send_file 工具与交付物投递共用） */
   sendFile: SendFileConfig;
+  /** 指令面板（把当前指令写进 QQ 指令面板） */
+  panel: PanelConfig;
+  /** 自定义菜单（单聊窗口底部的固定按钮） */
+  menu: MenuConfig;
 }
 
 /** 访问控制子 Schema（独立导出：config 路由的服务端校验复用） */
@@ -166,4 +182,14 @@ export const ConfigSchema: Schema<ImQQBotConfig> = Schema.object({
     sendPresentedFiles: true,
     maxFiles: 4,
   }).description('附件发送配置'),
+  panel: Schema.object({
+    autoSync: Schema.boolean().default(true).description('机器人就绪后自动同步指令面板'),
+  }).default({
+    autoSync: true,
+  }).description('指令面板配置'),
+  menu: Schema.object({
+    autoSync: Schema.boolean().default(true).description('机器人就绪后自动同步自定义菜单'),
+  }).default({
+    autoSync: true,
+  }).description('自定义菜单配置'),
 });

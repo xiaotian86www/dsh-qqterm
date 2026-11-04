@@ -1,0 +1,100 @@
+/**
+ * 自定义菜单同步 — 单聊窗口底部的三个按钮（`/v2/menu`）
+ *
+ * 菜单是机器人级全局配置，仅 C2C 生效：所有用户看到同一份，改完要退出对话框
+ * 再进来才看得到新内容，所以不做按会话变化的动态文案——只写静态动作。
+ *
+ * 平台限制：最多 10 项，按钮名最多 10 字符（一个汉字算 2）。
+ * 同步策略：菜单接口是整体覆盖且没有归属字段，按 `send_message` 认领本插件
+ * 建的按钮，用户手工加的其它按钮原样保留；内容一致时不发 PUT。
+ */
+import type { Logger, OpenApiLike } from '../types.ts';
+
+/** 菜单最多 10 项 */
+export const MENU_MAX_ITEMS = 10;
+
+/** 一个菜单按钮：点击后把命令填进聊天输入框 */
+export interface MenuButton {
+  /** 按钮文案（≤10 字符，一个汉字算 2） */
+  name: string;
+  /** 点击后填入输入框的命令 */
+  command: string;
+}
+
+/** 本插件固定的三个按钮（四个汉字的动作名） */
+export const MENU_BUTTONS: readonly MenuButton[] = [
+  { name: '会话状态', command: '/status' },
+  { name: '创建会话', command: '/new' },
+  { name: '压缩会话', command: '/compact' },
+];
+
+export interface MenuSyncResult {
+  action: 'updated' | 'unchanged';
+  /** 同步后菜单里的按钮总数 */
+  count: number;
+}
+
+type RawMenuItem = { type?: string; send_message?: string; [key: string]: unknown };
+
+interface MenuResponse {
+  version?: number;
+  menu?: { items?: RawMenuItem[] };
+}
+
+const OUR_COMMANDS = new Set(MENU_BUTTONS.map((button) => button.command));
+
+function toMenuItem(button: MenuButton): RawMenuItem {
+  return { type: 'send_message', name: button.name, send_message: button.command };
+}
+
+/** 按 send_message 认领：用户把按钮改名的，还是认作本插件的 */
+function isOurs(item: RawMenuItem): boolean {
+  return item.type === 'send_message'
+    && typeof item.send_message === 'string'
+    && OUR_COMMANDS.has(item.send_message);
+}
+
+/** 按字段判断两个菜单是否等价：本插件按钮只比我们写的字段（服务端会补 icon 等） */
+function sameMenu(existing: RawMenuItem[], merged: RawMenuItem[]): boolean {
+  if (existing.length !== merged.length) return false;
+  return merged.every((item, index) => {
+    const current = existing[index]!;
+    if (isOurs(item)) {
+      return current.type === item.type
+        && current.name === item.name
+        && current.send_message === item.send_message;
+    }
+    return JSON.stringify(current) === JSON.stringify(item);
+  });
+}
+
+/**
+ * 把三个固定按钮同步进全局菜单
+ *
+ * 已有菜单里的其它按钮（link / switch / 自定义指令）保持原样追加在后面；
+ * 完全一致时不发 PUT（省配额，也避免无意义覆盖）。
+ */
+export async function syncCommandMenu(
+  api: OpenApiLike,
+  logger?: Pick<Logger, 'debug' | 'warn'>,
+): Promise<MenuSyncResult> {
+  const current = await api.get<MenuResponse>('/v2/menu');
+  const existing = current.menu?.items ?? [];
+
+  const ours = MENU_BUTTONS.map(toMenuItem);
+  const foreign = existing.filter((item) => !isOurs(item));
+  const merged = [...ours, ...foreign].slice(0, MENU_MAX_ITEMS);
+
+  if (sameMenu(existing, merged)) {
+    logger?.debug?.(`[im-qqbot] 自定义菜单已是最新: ${merged.length} 项`);
+    return { action: 'unchanged', count: merged.length };
+  }
+
+  if (ours.length + foreign.length > MENU_MAX_ITEMS) {
+    logger?.warn(`[im-qqbot] 自定义菜单超出 ${MENU_MAX_ITEMS} 项，只保留前 ${MENU_MAX_ITEMS} 项`);
+  }
+
+  await api.put('/v2/menu', { menu: { items: merged } });
+  logger?.debug?.(`[im-qqbot] 自定义菜单已更新: ${merged.length} 项`);
+  return { action: 'updated', count: merged.length };
+}

@@ -14,6 +14,7 @@ export function pingCommand(): CategorizedCommand {
     category: 'qqbot',
     scope: 'all',
     description: '测试当前 dsh 与 QQ 连接的网络延迟',
+    panelDesc: '测试网络延迟',
     usage: [
       '/bot-ping',
       '',

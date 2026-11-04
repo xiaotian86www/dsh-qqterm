@@ -41,3 +41,14 @@ export interface Logger {
   error(msg: string, ...args: unknown[]): void;
   debug(msg: string, ...args: unknown[]): void;
 }
+
+/**
+ * OpenAPI 最小接口（指令面板 / 自定义菜单这类直连 REST 的功能用）
+ *
+ * QQBot 实例的 `bot.api` 结构上满足它；单测直接注入假实现。
+ */
+export interface OpenApiLike {
+  get<T = unknown>(path: string, query?: Record<string, string | number | boolean>): Promise<T>;
+  post<T = unknown>(path: string, body?: unknown): Promise<T>;
+  put<T = unknown>(path: string, body?: unknown): Promise<T>;
+}

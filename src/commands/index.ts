@@ -19,6 +19,7 @@ import { presetCommand } from './preset.ts';
 import { permissionCommand } from './permission.ts';
 import { statusCommand } from './status.ts';
 import { helpCommand } from './help.ts';
+import { syncCommand } from './sync.ts';
 import { pingCommand, versionCommand, stopCommand, meCommand } from './misc.ts';
 
 /**
@@ -45,8 +46,9 @@ export function buildCommandList(deps: CommandDeps): CategorizedCommand[] {
     statusCommand(deps),
   ];
 
-  // help 需要访问完整列表（含自身），通过闭包惰性引用
+  // help / sync 需要访问完整列表（含自身），通过闭包惰性引用
   commands.push(helpCommand(deps, () => commands));
+  commands.push(syncCommand(deps, () => commands));
 
   return commands;
 }

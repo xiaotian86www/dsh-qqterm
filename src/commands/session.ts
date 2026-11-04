@@ -10,6 +10,11 @@ import type { CommandDeps, CategorizedCommand } from './types.ts';
 import { getScopePeer } from '../shared/index.ts';
 import { describeChangeFailure } from './workspace.ts';
 
+/** 千分位（与 /status 一致，避免不同环境的本地化分隔符） */
+function num(n: number): string {
+  return n.toLocaleString('en-US');
+}
+
 /**
  * /new（别名 /reset /clear）— 开始新会话
  *
@@ -82,7 +87,8 @@ export function compactCommand({ manager }: CommandDeps): CategorizedCommand {
 
       if (outcome.ok) {
         if (!outcome.shadowed) return '没有可压缩的历史';
-        return `✅ 已压缩 ${outcome.shadowed} 条历史记录（约 ${outcome.tokens ?? 0} tokens）`;
+        // 不估算压缩后的占比：真实占用要等下一轮请求才更新，估出来的值会自相矛盾
+        return `✅ 已压缩 ${outcome.shadowed} 条历史记录（约 ${num(outcome.tokens ?? 0)} tokens）`;
       }
 
       switch (outcome.reason) {
