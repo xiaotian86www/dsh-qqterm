@@ -7,6 +7,7 @@
  *   /sessions all                 按工作区分组列出全部会话
  *   /sessions archived [页码]     列出已归档的会话（每条都可点击取消归档）
  *   /sessions resume <序号|id>     把当前聊天切到指定会话，接上历史继续
+ *   /sessions archive              列出可归档的会话，每条都可点击归档
  *   /sessions archive <目标[,目标…]>   归档会话（从列表与 Web 侧栏隐藏，日志保留）
  *   /sessions unarchive <目标[,目标…]> 取消归档，让它重新可用
  *
@@ -70,7 +71,7 @@ const USAGE = [
   '🗂 **会话管理**',
   '`/sessions` 当前工作区 · `/sessions all` 全部 · `/sessions archived` 归档',
   '`/sessions resume <序号|id>` 切到某个会话，接上历史继续（工作区跟着切）',
-  '`/sessions archive <序号|id>[,…]` 归档（可逆，一次最多 10 个）',
+  '`/sessions archive [序号|id,…]` 归档（可逆，一次最多 10 个）；不带目标时列出候选',
   '`/sessions unarchive <id>[,…]` 取消归档',
   'id 是列表里的 8 位；序号只对 `/sessions` 这一页有效',
 ].join('\n');
@@ -179,7 +180,7 @@ function parseTargetsOrError(
   const tokens = parseTargetTokens(raw);
   if (tokens.length === 0) return { message: `⚠️ 缺少目标。用法: \`${usage}\`` };
   if (tokens.length > MAX_TARGETS) {
-    return { message: `⚠️ 一次最多处理 ${MAX_TARGETS} 个会话，分几次来吧。` };
+    return { message: `⚠️ 一次最多处理 ${MAX_TARGETS} 个会话` };
   }
   return { tokens };
 }
@@ -241,14 +242,34 @@ function renderRow(entry: WorkspaceSession, index: number, options: RowOptions =
  * `<qqbot-cmd-input>` 渲染成带内边距的块，纯文本行是齐左的，混在一起会错位。
  */
 function renderLine(entry: WorkspaceSession, label: string): string {
-  return `<qqbot-cmd-input text="/sessions resume ${displayId(entry.id)}" show="${label}"/>`;
+  return commandLink(`/sessions resume ${displayId(entry.id)}`, label);
 }
 
-/** `/sessions` 列表底部的单行操作提示 */
+/**
+ * 可点击命令：QQ 会把它渲染成按钮，点一下就把 `command` 填进输入框。
+ *
+ * 只用于**真能执行**的命令；`show` 是纯文本标签（不能再带 markdown）。
+ */
+function commandLink(command: string, show: string): string {
+  return `<qqbot-cmd-input text="${command}" show="${show}"/>`;
+}
+
+/** `/sessions` 列表底部的单行操作入口：每项都是可点击命令 */
 function listFooter(archivedCount: number): string {
-  const parts = ['归档 `/sessions archive <序号>`', '`/sessions all` 看全部工作区'];
-  if (archivedCount > 0) parts.push(`\`/sessions archived\` 看归档（${archivedCount}）`);
+  const parts = [
+    commandLink('/sessions archive', '归档'),
+    commandLink('/sessions all', '查看全部'),
+  ];
+  if (archivedCount > 0) parts.push(commandLink('/sessions archived', `已归档 ${archivedCount}`));
   return parts.join(' · ');
+}
+
+/** 分页导航：只给存在的方向，标签固定「上一页 / 下一页」 */
+function pageLinks(page: number, pages: number, command: (page: number) => string): string[] {
+  const links: string[] = [];
+  if (page > 1) links.push(commandLink(command(page - 1), '上一页'));
+  if (page < pages) links.push(commandLink(command(page + 1), '下一页'));
+  return links;
 }
 
 /** 当前工作区摘要（/sessions 顶部那行） */
@@ -361,7 +382,7 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Categ
           case 'resume':
           case 'r': {
             const arg = rest[0] ?? '';
-            if (arg.trim() === '') return '⚠️ 缺少目标。用法: `/sessions resume <序号|id>`';
+            if (arg.trim() === '') return `⚠️ 缺少目标 · ${commandLink('/sessions', '选择会话')}`;
 
             const loaded = await loadEntries();
             if (typeof loaded === 'string') return loaded;
@@ -391,9 +412,9 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Categ
             }
             switch (outcome.reason) {
               case 'not-found':
-                return '⚠️ 磁盘上没有这个会话（可能已被删除），先 /sessions 看看列表';
+                return `⚠️ 磁盘上没有这个会话（可能已被删除） · ${commandLink('/sessions', '查看会话')}`;
               case 'in-use':
-                return '⚠️ 该会话正在另一个聊天中使用，先在那个聊天里 /new 再切过来';
+                return '⚠️ 该会话正在另一个聊天中使用，先在那边 /new';
               default:
                 return `⚠️ 恢复失败: ${outcome.message ?? '未知错误（可能被 Web 端打开占用）'}`;
             }
@@ -406,9 +427,12 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Categ
             const active = loaded.filter((entry) => !entry.archived);
             if (active.length === 0) {
               return loaded.length === 0
-                ? '⚠️ 这个工作区还没有会话，没有可归档的对象。'
-                : '⚠️ 没有未归档的会话：都已在归档里，用 `/sessions archived` 查看。';
+                ? '⚠️ 这个工作区还没有会话'
+                : `⚠️ 没有未归档的会话 · ${commandLink('/sessions archived', '查看已归档')}`;
             }
+
+            // 不带目标 = 页脚「归档」链接的落地页：给可点击候选，不猜要归档哪一个
+            if (rest.length === 0) return renderArchivePicker(active);
 
             const parsed = parseTargetsOrError(rest.join(' '), '/sessions archive <序号|id>[,…]');
             if ('message' in parsed) return parsed.message;
@@ -445,14 +469,18 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Categ
             const all = flattenGroups(groups);
             const archived = all.filter((entry) => entry.archived);
             if (archived.length === 0) {
-              return '⚠️ 没有已归档的会话。用 `/sessions archive <序号>` 可以归档一个会话。';
+              return `⚠️ 没有已归档的会话 · ${commandLink('/sessions archive', '归档会话')}`;
+            }
+
+            if (rest.length === 0) {
+              return `⚠️ 缺少目标 · ${commandLink('/sessions archived', '查看已归档')}`;
             }
 
             const parsed = parseTargetsOrError(rest.join(' '), '/sessions unarchive <id>[,…]');
             if ('message' in parsed) return parsed.message;
             // 序号只对应 /sessions 那一页，在归档页上没有意义：直接说清楚，别猜
             if (parsed.tokens.some((token) => /^\d+$/.test(token))) {
-              return '⚠️ 序号只对应 `/sessions` 列表；取消归档请用列表里 `#` 开头那 8 位，例如 `/sessions unarchive #9d2c4410`。';
+              return `⚠️ 序号只对应 \`/sessions\` 列表；取消归档用 8 位 id · ${commandLink('/sessions archived', '查看已归档')}`;
             }
 
             const batch = resolveTargets(archived, all, parsed.tokens);
@@ -475,7 +503,7 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Categ
             return USAGE;
 
           default:
-            return `⚠️ 未知子命令: ${sub}。\`/sessions help\` 看全部用法`;
+            return `⚠️ 未知子命令: ${sub} · ${commandLink('/sessions help', '查看用法')}`;
         }
       };
 
@@ -516,14 +544,16 @@ function renderList(
   if (total === 0) {
     const lines = ['### 🗂 会话（共 0 个）', '', ...workspaceLine];
     lines.push(archivedCount === 0
-      ? '这个工作区还没有会话。发一条消息就会创建第一个会话。'
-      : `这个工作区没有未归档的会话；已归档 ${archivedCount} 个: \`/sessions archived\``);
-    if (elsewhere > 0) lines.push(`其它工作区里还有 ${elsewhere} 个会话: \`/sessions all\``);
+      ? '这个工作区还没有会话'
+      : `这个工作区没有未归档的会话；已归档 ${archivedCount} 个: ${commandLink('/sessions archived', '查看归档')}`);
+    if (elsewhere > 0) lines.push(`其它工作区里还有 ${elsewhere} 个会话: ${commandLink('/sessions all', '查看全部')}`);
     return lines.join('\n');
   }
 
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  if (page > pages) return `⚠️ 第 ${page} 页没有内容（共 ${pages} 页）。`;
+  if (page < 1 || page > pages) {
+    return `⚠️ 第 ${page} 页没有内容（共 ${pages} 页） · ${commandLink('/sessions 1', '回到第 1 页')}`;
+  }
 
   const start = (page - 1) * PAGE_SIZE;
   const shown = entries.slice(start, start + PAGE_SIZE);
@@ -538,9 +568,30 @@ function renderList(
     lines.push(renderLine(entry, renderRow(entry, index, { numbered: true })));
   });
 
-  const rest = total - start - shown.length;
-  if (rest > 0) lines.push('', `还有 ${rest} 个更早的会话: \`/sessions ${page + 1}\``);
+  const nav = pageLinks(page, pages, (next) => `/sessions ${next}`);
+  if (nav.length > 0) lines.push('', nav.join(' · '));
   lines.push('', listFooter(archivedCount));
+  return lines.join('\n');
+}
+
+/**
+ * 渲染「选择要归档的会话」（`/sessions archive` 不带目标时的落地页）。
+ *
+ * 页脚里的「归档」只能填进不带目标的命令，所以这里再给一层可点击候选：
+ * 点一条就把 `/sessions archive <id>` 填进输入框。只列最近 10 条，与
+ * `/sessions` 第一页同序；更早的会话用 `/sessions all` 里的短 id 直接归档。
+ */
+function renderArchivePicker(entries: readonly WorkspaceSession[]): string {
+  const shown = entries.slice(0, PAGE_SIZE);
+  const lines: string[] = [`### 🗄 归档会话（共 ${entries.length} 个）`, ''];
+  shown.forEach((entry, offset) => {
+    const label = renderRow(entry, offset + 1, { numbered: true });
+    lines.push(commandLink(`/sessions archive ${displayId(entry.id)}`, label));
+  });
+  const rest = entries.length - shown.length;
+  if (rest > 0) {
+    lines.push('', `还有 ${rest} 个更早的会话 · ${commandLink('/sessions all', '查看全部')}`);
+  }
   return lines.join('\n');
 }
 
@@ -556,9 +607,7 @@ function renderGroups(groups: readonly WorkspaceGroup[]): string {
     return [
       '### 🗂 全部工作区（0 个工作区）',
       '',
-      '还没有任何工作区会话。',
-      '',
-      '发一条消息就会在宿主默认工作区里创建第一个会话。',
+      '还没有任何工作区会话',
     ].join('\n');
   }
 
@@ -579,7 +628,7 @@ function renderGroups(groups: readonly WorkspaceGroup[]): string {
     );
 
     if (active.length === 0) {
-      lines.push(`${archivedCount} 个会话全部已归档: \`/sessions archived\``);
+      lines.push(`${archivedCount} 个会话全部已归档 · ${commandLink('/sessions archived', '查看已归档')}`);
     } else {
       active.slice(0, PAGE_SIZE).forEach((entry) => {
         lines.push(renderLine(entry, renderRow(entry, 0)));
@@ -592,7 +641,6 @@ function renderGroups(groups: readonly WorkspaceGroup[]): string {
     lines.push('');
   }
 
-  lines.push('点条目或 `/sessions resume <id>`；工作区会跟着切');
   return lines.join('\n').trimEnd();
 }
 
@@ -606,15 +654,17 @@ function renderArchived(entries: readonly WorkspaceSession[], page = 1): string 
     return [
       '### 🗄 已归档（共 0 个）',
       '',
-      '没有已归档的会话。',
+      '没有已归档的会话',
       '',
-      '归档 `/sessions archive <序号>`（隐藏，日志保留）',
+      commandLink('/sessions archive', '归档会话'),
     ].join('\n');
   }
 
   const total = entries.length;
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  if (page > pages) return `⚠️ 第 ${page} 页没有内容（共 ${pages} 页）。`;
+  if (page < 1 || page > pages) {
+    return `⚠️ 第 ${page} 页没有内容（共 ${pages} 页） · ${commandLink('/sessions archived 1', '回到第 1 页')}`;
+  }
 
   const start = (page - 1) * PAGE_SIZE;
   const shown = entries.slice(start, start + PAGE_SIZE);
@@ -625,15 +675,12 @@ function renderArchived(entries: readonly WorkspaceSession[], page = 1): string 
 
   for (const entry of shown) {
     const label = renderRow(entry, 0, { withWorkspace: true });
-    lines.push(`<qqbot-cmd-input text="/sessions unarchive ${displayId(entry.id)}" show="${label}"/>`);
+    lines.push(commandLink(`/sessions unarchive ${displayId(entry.id)}`, label));
   }
 
-  const rest = total - start - shown.length;
-  if (rest > 0) lines.push('', `还有 ${rest} 个更早的: \`/sessions archived ${page + 1}\``);
-  lines.push(
-    '',
-    '`/sessions unarchive <id>` 取消归档 · `/sessions resume <id>` 直接继续（会自动取消归档）',
-  );
+  const nav = pageLinks(page, pages, (next) => `/sessions archived ${next}`);
+  nav.push(commandLink('/sessions', '返回会话列表'));
+  lines.push('', nav.join(' · '));
   return lines.join('\n');
 }
 
@@ -694,12 +741,10 @@ function renderArchiveResults(
   for (const error of errors) lines.push(`⚠️ ${error}`);
 
   const remapped = results.reduce((sum, item) => sum + (item.outcome.remapped ?? 0), 0);
-  if (remapped > 0) {
-    lines.push('', `当前聊天已切到新会话（${remapped} 个映射被改写），下一条消息不会落到归档会话里。`);
-  }
+  if (remapped > 0) lines.push('', '当前聊天已切到新会话');
   lines.push('', verb === 'archive'
-    ? '`/sessions archived` 查看已归档，`/sessions unarchive <id>` 取消归档。'
-    : '它们回到 `/sessions` 列表，`/sessions resume <序号|id>` 可接上历史继续聊。');
+    ? commandLink('/sessions archived', '查看已归档')
+    : commandLink('/sessions', '返回会话列表'));
   return lines.join('\n');
 }
 
@@ -707,12 +752,10 @@ function renderArchiveResults(
 function renderArchive(entry: WorkspaceSession, outcome: ArchiveSessionOutcome): string {
   if (!outcome.ok) return `⚠️ ${archiveFailureText(entry, outcome, 'archive')}`;
 
-  const lines = [`🗄 已归档会话「${shortTitle(entry)}」\`${displayId(entry.id)}\``];
-  if (outcome.alreadyArchived) lines.push('它本来就在归档里，这次没有重复写入。');
-  if ((outcome.remapped ?? 0) > 0) {
-    lines.push('当前聊天已切到一个新会话，下一条消息不会落到归档会话里。');
-  }
-  lines.push(`Web 侧栏刷新后也会隐藏它；\`/sessions unarchive ${displayId(entry.id)}\` 可随时取消归档。`);
+  const lines = [`🗄 已归档「${shortTitle(entry)}」 · \`${displayId(entry.id)}\``];
+  if (outcome.alreadyArchived) lines.push('它本来就在归档里');
+  if ((outcome.remapped ?? 0) > 0) lines.push('当前聊天已切到新会话');
+  lines.push(commandLink(`/sessions unarchive ${displayId(entry.id)}`, '取消归档'));
   return lines.join('\n');
 }
 
@@ -721,8 +764,8 @@ function renderUnarchive(entry: WorkspaceSession, outcome: ArchiveSessionOutcome
   if (!outcome.ok) return `⚠️ ${archiveFailureText(entry, outcome, 'unarchive')}`;
 
   return [
-    `♻️ 已取消归档「${shortTitle(entry)}」\`${displayId(entry.id)}\``,
-    `回到 \`/sessions\` 列表；\`/sessions resume ${displayId(entry.id)}\` 可以接上历史继续聊。`,
+    `♻️ 已取消归档「${shortTitle(entry)}」 · \`${displayId(entry.id)}\``,
+    commandLink(`/sessions resume ${displayId(entry.id)}`, '继续会话'),
   ].join('\n');
 }
 

@@ -42,7 +42,7 @@ describe('/bot-sync', () => {
     await expect(run()).resolves.toBe([
       '✅ 已同步 QQ 侧配置',
       '指令面板: 私聊 2 项 · 群聊 2 项',
-      '自定义菜单: 3 项',
+      '自定义菜单: 4 项',
     ].join('\n'));
   });
 
@@ -101,8 +101,8 @@ describe('/bot-sync', () => {
 
 describe('formatSyncReply', () => {
   it('菜单未变化时原样给出计数', () => {
-    expect(formatSyncReply([{ ok: true, text: '自定义菜单: 3 项（已是最新）' }])).toBe(
-      '✅ 已同步 QQ 侧配置\n自定义菜单: 3 项（已是最新）',
+    expect(formatSyncReply([{ ok: true, text: '自定义菜单: 4 项（已是最新）' }])).toBe(
+      '✅ 已同步 QQ 侧配置\n自定义菜单: 4 项（已是最新）',
     );
   });
 });

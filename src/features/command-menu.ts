@@ -1,5 +1,5 @@
 /**
- * 自定义菜单同步 — 单聊窗口底部的三个按钮（`/v2/menu`）
+ * 自定义菜单同步 — 单聊窗口底部的四个按钮（`/v2/menu`）
  *
  * 菜单是机器人级全局配置，仅 C2C 生效：所有用户看到同一份，改完要退出对话框
  * 再进来才看得到新内容，所以不做按会话变化的动态文案——只写静态动作。
@@ -21,9 +21,10 @@ export interface MenuButton {
   command: string;
 }
 
-/** 本插件固定的三个按钮（四个汉字的动作名） */
+/** 本插件固定的四个按钮（四个汉字的动作名） */
 export const MENU_BUTTONS: readonly MenuButton[] = [
   { name: '会话状态', command: '/status' },
+  { name: '会话列表', command: '/sessions' },
   { name: '创建会话', command: '/new' },
   { name: '压缩会话', command: '/compact' },
 ];
@@ -69,7 +70,7 @@ function sameMenu(existing: RawMenuItem[], merged: RawMenuItem[]): boolean {
 }
 
 /**
- * 把三个固定按钮同步进全局菜单
+ * 把四个固定按钮同步进全局菜单
  *
  * 已有菜单里的其它按钮（link / switch / 自定义指令）保持原样追加在后面；
  * 完全一致时不发 PUT（省配额，也避免无意义覆盖）。

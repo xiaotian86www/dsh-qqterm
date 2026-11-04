@@ -194,7 +194,7 @@ export async function bootstrapGateway(
         });
     }
 
-    // 自定义菜单：单聊窗口底部的三个固定按钮（会话状态 / 创建会话 / 压缩会话）
+    // 自定义菜单：单聊窗口底部的四个固定按钮（会话状态 / 会话列表 / 创建会话 / 压缩会话）
     if (config.menu?.autoSync ?? true) {
       void syncCommandMenu(bot.api, logger)
         .then((result: MenuSyncResult) => {
