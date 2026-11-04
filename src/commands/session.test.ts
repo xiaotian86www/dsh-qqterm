@@ -54,7 +54,7 @@ describe('/new（不带参数）', () => {
   it('留在当前工作区：只开新会话，不碰工作区', async () => {
     const manager = makeManager();
     expect(await run(manager)).toBe('✅ 已开启新会话');
-    expect(manager.remove).toHaveBeenCalledWith('c2c', 'user1');
+    expect(manager.remove).toHaveBeenCalledWith();
     expect(manager.changeChatWorkspace).not.toHaveBeenCalled();
     expect(manager.resolveWorkspace).not.toHaveBeenCalled();
   });
@@ -71,7 +71,7 @@ describe('/new <工作区>', () => {
     const manager = makeManager();
     const text = await run(manager, 'repo');
 
-    expect(manager.remove).toHaveBeenCalledWith('c2c', 'user1');
+    expect(manager.remove).toHaveBeenCalledWith();
     expect(manager.changeChatWorkspace).toHaveBeenCalledWith('c2c', 'user1', 'repo');
     // 顺序：先 remove 再改目录（改目录只在会话没落盘时生效）
     const removeAt = manager.remove.mock.invocationCallOrder[0] ?? 0;
@@ -131,6 +131,6 @@ describe('/new <工作区>', () => {
     // 同一群里不带参数 = 普通开新会话
     const plain = { ...groupCtx, command: { raw: '' } } as unknown as SlashCommandHandlerContext;
     expect(await command.handler(plain)).toBe('✅ 已开启新会话');
-    expect(manager.remove).toHaveBeenCalledWith('group', 'g1');
+    expect(manager.remove).toHaveBeenCalledWith();
   });
 });

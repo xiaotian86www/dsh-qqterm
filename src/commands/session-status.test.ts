@@ -23,14 +23,11 @@ const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi
 const config = ConfigSchema({ appId: 'app', appSecret: 'secret' } as ImQQBotConfig);
 
 const SESSION_ID = 'session-9d2c4410-1111-1111-1111-111111111111';
-const MINUTE = 60_000;
 
 interface StubOptions {
   active?: boolean;
   /** 生成状态（默认空闲） */
   agentStatus?: 'idle' | 'running';
-  /** 距最后一次活动多久（ms） */
-  idleFor?: number;
   messageCount?: number;
   usage?: { input: number; output: number };
   context?: { used?: number; window?: number };
@@ -39,9 +36,8 @@ interface StubOptions {
 
 function makeManager(options: StubOptions = {}) {
   const active = options.active ?? true;
-  const lastActivity = Date.now() - (options.idleFor ?? MINUTE);
   const record = active
-    ? { sessionId: SESSION_ID, agent: { status: options.agentStatus ?? 'idle' }, lastActivity }
+    ? { sessionId: SESSION_ID, agent: { status: options.agentStatus ?? 'idle' } }
     : undefined;
 
   return {
@@ -51,7 +47,6 @@ function makeManager(options: StubOptions = {}) {
       provider: 'deepseek',
       model: 'deepseek-v4',
       preset: active ? 'default' : undefined,
-      lastActivity: active ? lastActivity : undefined,
       messageCount: options.messageCount ?? 12,
     })),
     getSessionRecord: vi.fn(() => record),
@@ -139,17 +134,6 @@ describe('/status（有会话）', () => {
     expect(await run(makeManager({ usage: { input: 0, output: 0 } }))).not.toContain('**Token**:');
   });
 
-  it('最后活动与闲置回收倒计时', async () => {
-    const text = await run(makeManager({ idleFor: 3 * MINUTE }));
-    expect(text).toContain('**最后活动**: 3m 前');
-    expect(text).toContain('**闲置回收**: 27m 后释放内存（会话不丢）');
-  });
-
-  it('关掉闲置回收（timeout=0）时不显示倒计时', async () => {
-    const cfg = ConfigSchema({ appId: 'app', appSecret: 'secret', sessionIdleTimeout: 0 } as ImQQBotConfig);
-    expect(await run(makeManager(), cfg)).not.toContain('闲置回收');
-  });
-
   it('目录已不存在时明确告警', async () => {
     const text = await run(makeManager({ workspace: { title: 'gone', path: 'D:\\gone', missing: true } }));
     expect(text).toContain('⚠️ 目录已不存在');
@@ -170,7 +154,5 @@ describe('/status（没有会话）', () => {
     expect(text).toContain('**模型**: deepseek/deepseek-v4');
     expect(text).not.toContain('**Preset**:');
     expect(text).not.toContain('**消息**:');
-    expect(text).not.toContain('**最后活动**:');
-    expect(text).not.toContain('闲置回收');
   });
 });

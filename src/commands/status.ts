@@ -2,7 +2,7 @@
  * 状态命令：/bot-status（QQBot 特有）
  */
 import type { CommandDeps, CategorizedCommand } from './types.ts';
-import { getScopePeer, formatRelativeTime } from '../shared/index.ts';
+import { getScopePeer } from '../shared/index.ts';
 
 /** /bot-status — 查看当前会话状态 */
 export function statusCommand({ manager }: CommandDeps): CategorizedCommand {
@@ -22,7 +22,6 @@ export function statusCommand({ manager }: CommandDeps): CategorizedCommand {
         `模型: ${modelInfo}`,
         `Preset: ${status.preset ?? '无'}`,
         `消息数: ${status.messageCount ?? 0}`,
-        `最后活动: ${formatRelativeTime(status.lastActivity)}`,
       ].join('\n');
     },
   };

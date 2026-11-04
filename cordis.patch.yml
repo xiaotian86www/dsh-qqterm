@@ -20,7 +20,6 @@
         # 用户可通过 /model 命令在聊天中切换
         requireMention: true
         textChunkLimit: 4500
-        sessionIdleTimeout: 1800000
         maxQueue: 20
         processingTimeoutMs: 1800000
         historyLimit: 10

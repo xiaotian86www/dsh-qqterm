@@ -198,7 +198,6 @@ export interface SessionRecord {
   scope: ChatScope;
   peerId: string;
   senderId: string;
-  lastActivity: number;
   agentPreset?: string;
 }
 
@@ -209,7 +208,6 @@ export interface SessionStatus {
   provider?: string;
   model?: string;
   preset?: string;
-  lastActivity?: number;
   messageCount?: number;
 }
 

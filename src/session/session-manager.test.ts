@@ -1,8 +1,8 @@
 /**
- * SessionManager.getOrCreate 会话 id 迁移/铸造路径的回归用例
+ * SessionManager.getOrCreate 会话 id 恢复/铸造路径的回归用例
  *
  * - E1：resume 失败只在确认「会话不存在」时才首次创建，其余故障 warn 后向上抛
- * - E2：0.5.x 确定性 id 不进入新建路径；同 key 并发 getOrCreate 合并为一次
+ * - E2：resume 期间 /new 并发改写映射时不丢新 id；同 key 并发 getOrCreate 合并为一次
  * - E3 连带：prefs 损坏导致映射丢失时必须留下可见日志
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -23,14 +23,15 @@ vi.mock('../shared/dirs.ts', () => ({
 
 const { SessionManager } = await import('./session-manager.ts');
 const { PrefsStore } = await import('../model/prefs-store.ts');
-const { legacyDerivedSessionId } = await import('./session-id.ts');
 
 const APP_ID = 'app1';
 const PEER = 'user1';
-const KEY = `qqbot:${APP_ID}:c2c:${PEER}`;
-const LEGACY_ID = legacyDerivedSessionId(KEY);
+const PEER_B = 'user2';
+/** 聊天会话只有一个：固定 key */
+const KEY = `qqbot:${APP_ID}:chat`;
 const MINTED = /^session-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const REPLY: ReplyTarget = { scope: 'c2c', targetId: PEER, msgId: 'm1' };
+const REPLY_B: ReplyTarget = { scope: 'c2c', targetId: PEER_B, msgId: 'm2' };
 
 /** agents.resume 对不存在会话的报错 */
 const notFound = (id: string): Error =>
@@ -137,8 +138,6 @@ function createManagerWithCtx(
     appSecret: 'secret',
     provider: 'p',
     model: 'm',
-    cwd: join(env.home, 'workspace'),
-    sessionIdleTimeout: 0,
   } as ImQQBotConfig);
   const manager = new SessionManager(ctx, registry as DshAgentRegistry, config, logger);
   managers.push(manager);
@@ -168,29 +167,19 @@ afterEach(async () => {
   rmSync(env.home, { recursive: true, force: true });
 });
 
-describe('getOrCreate — 对照组（迁移主路径行为正确）', () => {
-  it('全新用户：legacy 不存在 → 铸造 session- 前缀 id 创建并落盘', async () => {
+describe('getOrCreate — 对照组（主路径行为正确）', () => {
+  it('全新用户：无映射 → 铸造 session- 前缀 id，resume miss 后创建并落盘', async () => {
     const { registry } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
 
     const record = await createManager(registry).getOrCreate('c2c', PEER, PEER, REPLY);
 
-    expect(registry.resume).toHaveBeenCalledWith(expect.objectContaining({ resumeSessionId: LEGACY_ID }));
+    expect(registry.resume).toHaveBeenCalledWith(expect.objectContaining({ resumeSessionId: record.sessionId }));
     expect(record.sessionId).toMatch(MINTED);
     expect(createdIds(registry)).toEqual([record.sessionId]);
     expect(persistedId()).toBe(record.sessionId);
   });
 
-  it('0.5.x 老用户：legacy 会话 resume 成功 → 沿用并落盘，不创建', async () => {
-    const { registry } = createRegistry(async ({ resumeSessionId }) => fakeHandle(resumeSessionId));
-
-    const record = await createManager(registry).getOrCreate('c2c', PEER, PEER, REPLY);
-
-    expect(record.sessionId).toBe(LEGACY_ID);
-    expect(registry.create).not.toHaveBeenCalled();
-    expect(persistedId()).toBe(LEGACY_ID);
-  });
-
-  it('prefs 已记录：resume 该 id 成功 → 不再探测 legacy', async () => {
+  it('prefs 已记录：resume 该 id 成功 → 不创建，映射不变', async () => {
     new PrefsStore().setSessionId(KEY, 'session-current');
     const { registry } = createRegistry(async ({ resumeSessionId }) => fakeHandle(resumeSessionId));
 
@@ -244,26 +233,6 @@ describe('getOrCreate — E1 resume 失败按会话是否存在分流', () => {
     expect(allLogText(logger)).toContain('EIO');
   });
 
-  it('E1-2 0.5.x 老会话在盘上但 resume 遇瞬时错误 → 不弃用，故障恢复后仍能恢复', async () => {
-    const first = createRegistry(async ({ resumeSessionId }) => { throw corrupt(resumeSessionId); });
-
-    await expect(
-      createManagerWithCtx(first.registry, onDiskCtx(LEGACY_ID)).getOrCreate('c2c', PEER, PEER, REPLY),
-    ).rejects.toThrow(/EIO/);
-    expect(first.registry.create).not.toHaveBeenCalled();
-    expect(persistedId()).toBeUndefined();
-
-    // 重启：瞬时故障已恢复，legacy 会话正常 resume
-    const second = createRegistry(async ({ resumeSessionId }) => {
-      if (resumeSessionId === LEGACY_ID) return fakeHandle(resumeSessionId);
-      throw notFound(resumeSessionId);
-    });
-    const record = await createManager(second.registry).getOrCreate('c2c', PEER, PEER, REPLY);
-
-    expect(record.sessionId).toBe(LEGACY_ID); // 老会话历史仍可恢复
-    expect(persistedId()).toBe(LEGACY_ID);
-  });
-
   it('E1-3 存在性求证本身失败（持久化后端故障）→ 按存在处理，不重建', async () => {
     new PrefsStore().setSessionId(KEY, 'session-current');
     const { registry } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
@@ -313,20 +282,21 @@ describe('getOrCreate — E1 resume 失败按会话是否存在分流', () => {
   });
 });
 
-describe('getOrCreate — E2 确定性 id 不进入新建路径', () => {
-  it('E2-1 resume(legacy) 期间 /new 写入新 id → 采用 prefs 最新 id 新建，内存与 prefs 一致', async () => {
+describe('getOrCreate — E2 并发改写映射', () => {
+  it('E2-1 resume 期间 /new 写入新 id → 采用 prefs 最新 id 新建，内存与 prefs 一致', async () => {
     const pending = deferred<DshAgentHandle>();
     const { registry } = createRegistry(() => pending.promise);
     const manager = createManager(registry);
 
     const creating = manager.getOrCreate('c2c', PEER, PEER, REPLY);
     await vi.waitFor(() => expect(registry.resume).toHaveBeenCalled());
-    await manager.remove('c2c', PEER); // /new：同步把 prefs 写为新铸 id
-    pending.reject(notFound(LEGACY_ID));
+    const candidate = registry.resume.mock.calls[0]![0].resumeSessionId;
+    await manager.remove(); // /new：同步把 prefs 写为新铸 id
+    pending.reject(notFound(candidate));
     const record = await creating;
 
     expect(record.sessionId).toMatch(MINTED);
-    expect(record.sessionId).not.toBe(LEGACY_ID);
+    expect(record.sessionId).not.toBe(candidate);
     expect(createdIds(registry)).toEqual([record.sessionId]);
     expect(persistedId()).toBe(record.sessionId); // 重启后仍是同一会话
   });
@@ -344,7 +314,8 @@ describe('getOrCreate — E2 确定性 id 不进入新建路径', () => {
     const compacting = manager.compact('c2c', PEER, { senderId: PEER, replyTarget: REPLY });
     const messaging = manager.getOrCreate('c2c', PEER, PEER, REPLY);
     await vi.waitFor(() => expect(resumes).toHaveLength(1));
-    for (const d of resumes) d.reject(notFound(LEGACY_ID));
+    const candidate = registry.resume.mock.calls[0]![0].resumeSessionId;
+    for (const d of resumes) d.reject(notFound(candidate));
     const [, record] = await Promise.all([compacting, messaging]);
 
     expect(resumes).toHaveLength(1);
@@ -374,15 +345,15 @@ describe('getOrCreate — E2 确定性 id 不进入新建路径', () => {
 });
 
 describe('getOrCreate — E3 连带（prefs 损坏导致映射丢失）', () => {
-  it('E3-4 prefs 文件损坏 → 回落 legacy 探测，且映射丢失留下可见日志', async () => {
+  it('E3-4 prefs 文件损坏 → 按全新会话铸造 id，且映射丢失留下可见日志', async () => {
     writeFileSync(join(env.home, 'model-prefs.json'), `{"overrides":{},"sessionIds":{"${KEY}":"session-cur`, 'utf8');
     const { registry } = createRegistry(async ({ resumeSessionId }) => fakeHandle(resumeSessionId));
     const logger = createLogger();
 
     const record = await createManager(registry, logger).getOrCreate('c2c', PEER, PEER, REPLY);
 
-    expect(registry.resume).toHaveBeenCalledWith(expect.objectContaining({ resumeSessionId: LEGACY_ID }));
-    expect(record.sessionId).toBe(LEGACY_ID);
+    expect(record.sessionId).toMatch(MINTED);
+    expect(registry.resume).toHaveBeenCalledWith(expect.objectContaining({ resumeSessionId: record.sessionId }));
     expect(allLogText(logger)).toMatch(/model-prefs\.json/); // 不再静默
   });
 });
@@ -483,5 +454,49 @@ describe('切换类操作 — 可重入', () => {
     expect(first).toEqual({ ok: true, presetId: 'alpha' });
     expect(second).toEqual({ ok: true, presetId: 'alpha', unchanged: true });
     expect(new PrefsStore().getPreset(KEY)).toBe('alpha');
+  });
+});
+
+describe('聊天会话（全 bot 一个）', () => {
+  it('不同聊天窗口共用同一个聊天会话，只建一个 agent', async () => {
+    const { registry } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
+    const manager = createManager(registry);
+
+    const first = await manager.getOrCreate('c2c', PEER, PEER, REPLY);
+    const second = await manager.getOrCreate('group', 'group1', PEER_B, REPLY_B);
+
+    expect(second).toBe(first);
+    expect(second.sessionId).toBe(first.sessionId);
+    expect(createdIds(registry)).toHaveLength(1);
+    expect(new PrefsStore().getSessionId(KEY)).toBe(first.sessionId);
+  });
+
+  it('/new 换后台会话后，所有窗口都跟着切到新会话', async () => {
+    const { registry } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
+    const manager = createManager(registry);
+
+    const before = await manager.getOrCreate('c2c', PEER, PEER, REPLY);
+    await manager.remove();
+    const after = await manager.getOrCreate('c2c', PEER_B, PEER_B, REPLY_B);
+
+    expect(after.sessionId).not.toBe(before.sessionId);
+    expect(new PrefsStore().getSessionId(KEY)).toBe(after.sessionId);
+  });
+
+  it('/sessions 切到另一个后台会话后，所有窗口都续写它', async () => {
+    new PrefsStore().setSessionId(KEY, 'session-a');
+    const { registry } = createRegistry(async ({ resumeSessionId }) => fakeHandle(resumeSessionId));
+    const manager = createManagerWithCtx(registry, onDiskCtx('session-a', 'session-b'));
+
+    const before = await manager.getOrCreate('c2c', PEER, PEER, REPLY);
+    expect(before.sessionId).toBe('session-a');
+
+    const outcome = await manager.switchSession('c2c', PEER_B, 'session-b', PEER_B, REPLY_B);
+    expect(outcome).toEqual({ ok: true });
+
+    // 另一个窗口的下一条消息落在同一个（已切换的）聊天会话上
+    const after = await manager.getOrCreate('c2c', PEER, PEER, REPLY);
+    expect(after.sessionId).toBe('session-b');
+    expect(new PrefsStore().getSessionId(KEY)).toBe('session-b');
   });
 });

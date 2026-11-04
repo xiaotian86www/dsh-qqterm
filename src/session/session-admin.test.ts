@@ -25,9 +25,8 @@ const { PrefsStore } = await import('../model/prefs-store.ts');
 
 const APP_ID = 'app1';
 const PEER = 'user1';
-const PEER2 = 'user2';
-const KEY = `qqbot:${APP_ID}:c2c:${PEER}`;
-const KEY2 = `qqbot:${APP_ID}:c2c:${PEER2}`;
+/** 聊天会话只有一个 */
+const KEY = `qqbot:${APP_ID}:chat`;
 const MINTED = /^session-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const REPLY: ReplyTarget = { scope: 'c2c', targetId: PEER, msgId: 'm1' };
 
@@ -169,7 +168,6 @@ function createManager(ctx: Context, registry = createRegistry().registry, logge
     appSecret: 'secret',
     provider: 'p',
     model: 'm',
-    sessionIdleTimeout: 0,
   } as ImQQBotConfig);
   const manager = new SessionManager(ctx, registry as DshAgentRegistry, config, logger);
   managers.push(manager);
@@ -329,16 +327,15 @@ describe('switchSession', () => {
     expect(manager.getSessionRecord('c2c', PEER)).toBeUndefined();
   });
 
-  it('会话正被另一个聊天持有时拒绝切换', async () => {
-    const shared = 'session-shared';
-    new PrefsStore().setSessionId(KEY2, shared);
-    const ctx = createCtx({ sessions: [{ id: shared, cwd: WORKSPACE() }] });
+  it('归档不是当前的会话：不动当前映射', async () => {
+    new PrefsStore().setSessionId(KEY, 'session-current');
+    const ctx = createCtx({ sessions: [{ id: 'session-other', cwd: WORKSPACE() }] });
     const { manager } = createManager(ctx);
-    await manager.getOrCreate('c2c', PEER2, PEER2, REPLY);
 
-    const outcome = await manager.switchSession('c2c', PEER, shared, PEER, REPLY);
+    const outcome = await manager.archiveSession('session-other');
 
-    expect(outcome.reason).toBe('in-use');
+    expect(outcome.ok).toBe(true);
+    expect(new PrefsStore().getSessionId(KEY)).toBe('session-current');
   });
 });
 
@@ -364,17 +361,16 @@ describe('archiveSession', () => {
     expect(persistedId()).not.toBe(id);
   });
 
-  it('归档别的聊天正在用的会话：映射也被改写成新会话', async () => {
+  it('归档别的会话：映射不指向它就保持不变', async () => {
     const id = 'session-shared';
-    new PrefsStore().setSessionId(KEY2, id);
+    new PrefsStore().setSessionId(KEY, 'session-current');
     const ctx = createCtx({ sessions: [{ id, cwd: WORKSPACE() }] });
     const { manager } = createManager(ctx);
 
     const outcome = await manager.archiveSession(id);
 
     expect(outcome.ok).toBe(true);
-    expect(new PrefsStore().getSessionId(KEY2)).toMatch(MINTED);
-    expect(new PrefsStore().getSessionId(KEY2)).not.toBe(id);
+    expect(new PrefsStore().getSessionId(KEY)).toBe('session-current');
   });
 
   it('重复归档是幂等的：仍返回成功并标记 alreadyArchived', async () => {
@@ -477,7 +473,7 @@ describe('工作区跟随会话', () => {
     const { manager } = createManager(ctx);
 
     await manager.getOrCreate('c2c', PEER, PEER, REPLY);
-    await manager.remove('c2c', PEER);
+    await manager.remove();
     await manager.getOrCreate('c2c', PEER, PEER, REPLY);
 
     expect(new PrefsStore().getDirectory(KEY)).toBe(defaultWs);
@@ -624,7 +620,7 @@ describe('changeChatWorkspace（换工作区）', () => {
     await manager.getOrCreate('c2c', PEER, PEER, REPLY);
     expect((await manager.canChooseWorkspace('c2c', PEER)).canChoose).toBe(false);
 
-    await manager.remove('c2c', PEER); // = /new
+    await manager.remove(); // = /new
 
     expect((await manager.canChooseWorkspace('c2c', PEER)).canChoose).toBe(true);
     expect(await manager.changeChatWorkspace('c2c', PEER, other)).toMatchObject({ ok: true });

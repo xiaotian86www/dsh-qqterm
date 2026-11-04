@@ -103,13 +103,22 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqbot/cordis.dev.yml
 | `directPrompt` | string | - | 私聊额外 system prompt |
 | `textChunkLimit` | number | `4500` | 单条消息最大字符数 |
 | `streaming` | boolean | `true` | 是否启用流式输出（群聊始终不启用） |
-| `sessionIdleTimeout` | number | `1800000` | 会话闲置超时(ms)，默认 30 分钟 |
 | `processingTimeoutMs` | number | `1800000` | 处理超时(ms)，超时中断当前 LLM 调用 |
 | `maxQueue` | number | `20` | 并发队列最大长度 |
 | `historyLimit` | number | `10` | 群历史缓冲条数 |
 | `askTimeoutMs` | number | `300000` | 待答问题超时(ms)，默认 5 分钟（ask_user_question） |
 | `showToolResults` | boolean | `false` | 是否展示工具调用成功结果（错误始终展示） |
 | `debug` | boolean | `false` | 调试模式 |
+
+### 聊天会话与后台会话
+
+插件区分两个概念：**聊天会话**是 QQ 这一侧当前的对话现场，**后台会话**是宿主里的 session 日志。
+
+- 聊天会话全 bot 只有一个：任何聊天窗口（私聊或群聊）续写、看到的都是同一段上下文。
+- 后台会话仍有多份：`/sessions` 列出并切换，`/new` 新开一个，切换对所有窗口立即生效。
+- 会话不按闲置时间回收：长任务跑再久也不会被中断。
+
+多个窗口同时说话时，回复发给最后一条消息所在的窗口。
 
 ### 访问控制（access）
 
@@ -232,7 +241,7 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqbot/cordis.dev.yml
 - 只允许**私聊**使用，且操作者必须在白名单（`access.c2cAllow`）内——会话标题、归档状态都涉及其他聊天的数据；未配置名单时命令直接不可用（`/bot-me` 可查自己的 OpenID）。
 - 归档走宿主 `workspaceRegistry.archiveSession`，只写 registry 的全局归档集，**不删任何文件**；本插件不提供物理删除，需要清理磁盘请到 Web 端或手动处理。
 - 归档依赖宿主的 workspace registry（`@deepseek-ai/dsh-workspace`）：web / Desktop profile 自带；只装 `dsh-base` + 本插件的自建最小 profile 需要手动挂载它，否则命令会提示「宿主未挂载会话归档接口」。
-- 归档前会释放该会话在本进程内的 agent，并把指向它的 per-chat 映射改到新会话——归档会话会被宿主的 `agent/pre-step` 闸门拒绝，继续挂在它上面聊天会收不到回复。
+- 归档前会释放该会话在本进程内的 agent，并把聊天会话映射改到新会话——归档会话会被宿主的 `agent/pre-step` 闸门拒绝，继续挂在它上面聊天会收不到回复。
 - 列表里的时间是**创建时间**（宿主 header 不存「最后使用时间」），所以标题写的是「按创建时间倒序」。
 - 同一进程内一个会话只能被一个聊天持有：把别人正在聊的会话切过来会被拒绝。
 - 跨工作区恢复后，agent 会在**那个会话自己的目录**里干活；文件发送白名单也随该目录变化。
@@ -269,11 +278,10 @@ src/
 │   ├── tool-presenter.ts       # 工具调用展示
 │   └── chunker.ts              # Markdown 文本切分
 ├── session/                    # 会话管理层
-│   ├── session-manager.ts      # QQ peer → Agent 映射
-│   └── idle-evictor.ts         # 闲置回收
+│   └── session-manager.ts      # 聊天会话 → Agent 映射与后台会话切换
 ├── model/                      # 模型路由层
 │   ├── model-resolver.ts       # 路由解析
-│   ├── prefs-store.ts          # per-peer 偏好持久化
+│   ├── prefs-store.ts          # 偏好持久化
 │   └── settings-reader.ts      # settings.yaml 只读
 ├── features/                   # 交互特性
 │   ├── question-channel.ts     # ask_user_question 问答通道
@@ -296,7 +304,7 @@ src/
 
 ## 会话路由
 
-sessionKey: `qqbot:${appId}:${scope}:${peerId}`，新会话铸造 UUID 会话 id 并持久化到 `model-prefs.json`，重启后按持久化 id 恢复；0.5.x 老会话按原派生 id 沿用。
+聊天会话的 key 固定为 `qqbot:${appId}:chat`，新会话铸造 UUID 会话 id 并持久化到 `model-prefs.json`，重启后按持久化 id 恢复；没有映射即视为全新会话。
 
 解析策略：进程内复用 → 持久化恢复 → 全新创建。
 
@@ -304,9 +312,8 @@ sessionKey: `qqbot:${appId}:${scope}:${peerId}`，新会话铸造 UUID 会话 id
 
 - **纯 Cordis 插件** — 遵循 dsh "Plugins, not loop changes" 原则
 - **声明式依赖** — `inject = ['agents']`，不直接耦合其他插件
-- **会话隔离** — 每个 QQ 私聊用户/群聊各一个独立 Agent
+- **单聊天会话** — 任何 QQ 窗口续写同一个聊天会话，后台会话由 `/sessions` 与 `/new` 管理
 - **Preset 支持** — 可通过 `agent-presets` 服务挂载预设（工具集、prompt 等）
-- **闲置回收** — 超时自动 dispose Agent，防止内存泄漏
 - **Markdown 输出** — 回复以 Markdown 格式发送，支持代码块/表格感知切分
 - **图片理解** — 支持 `qqbot_describe_image` 视觉理解，可分析用户发送的图片
 - **附件发送** — 支持 `qqbot_send_file` 将本地文件发送给用户（默认启用路径白名单）

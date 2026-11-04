@@ -103,13 +103,23 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqbot/cordis.dev.yml
 | `directPrompt` | string | - | Extra system prompt for direct chats |
 | `textChunkLimit` | number | `4500` | Max chars per message |
 | `streaming` | boolean | `true` | Enable streaming output (always disabled in groups) |
-| `sessionIdleTimeout` | number | `1800000` | Session idle timeout (ms), default 30 min |
 | `processingTimeoutMs` | number | `1800000` | Processing timeout (ms), aborts the current LLM call |
 | `maxQueue` | number | `20` | Max concurrent queue length |
 | `historyLimit` | number | `10` | Group history buffer size |
 | `askTimeoutMs` | number | `300000` | Question timeout (ms), default 5 min (ask_user_question) |
 | `showToolResults` | boolean | `false` | Show successful tool-call results (errors always shown) |
 | `debug` | boolean | `false` | Debug mode |
+
+### Chat session vs background sessions
+
+The plugin separates two things: the **chat session** is the conversation the QQ side is in,
+and **background sessions** are the host's session logs.
+
+- There is exactly one chat session: every chat window (private or group) reads and continues the same context.
+- Background sessions stay multiple: `/sessions` lists and switches them, `/new` starts one, and a switch takes effect in every window immediately.
+- Sessions are never reclaimed by time: with a single chat session, unloading and resuming the same log buys nothing and only interrupts long-running tasks.
+
+On upgrade, the first window to speak adopts the old per-chat session plus its model, preset and workspace preferences; the other old sessions remain reachable through `/sessions`. When several windows talk at once, the reply goes to the window of the latest message.
 
 ### Access control (access)
 
@@ -213,7 +223,7 @@ Notes:
 - Private chat only, and the operator must be in the allowlist (`access.c2cAllow`) — titles and archive state touch other chats' data; with no allowlist configured the command is disabled (`/bot-me` shows your OpenID).
 - Archiving goes through the host `workspaceRegistry.archiveSession` and only writes the registry-global archive set — **no file is deleted**. This plugin offers no hard delete; clean up on disk from the Web side or by hand.
 - Archiving needs the host workspace registry (`@deepseek-ai/dsh-workspace`): the web / Desktop profiles ship it, while a minimal custom profile (just `dsh-base` + this plugin) must mount it explicitly, otherwise the command reports "no session archive API mounted".
-- Archiving disposes the session's agent in this process and repoints per-chat mappings to a new session — an archived session is rejected by the host `agent/pre-step` gate, so a chat left bound to it would stop getting replies.
+- Archiving disposes the session's agent in this process and repoints the chat-session mapping to a new session — an archived session is rejected by the host `agent/pre-step` gate, so a chat left bound to it would stop getting replies.
 - The time column is the **creation time** (the host header stores no "last used" timestamp), which is why the heading says "newest first".
 - A session can be held by one chat per process — resuming one that another chat is using is refused.
 - After a cross-workspace resume the agent works inside **that session's own directory**, and the file-send allowlist follows it.
@@ -241,11 +251,10 @@ src/
 │   ├── tool-presenter.ts       # Tool-call presentation
 │   └── chunker.ts              # Markdown chunking
 ├── session/                    # Session management
-│   ├── session-manager.ts      # QQ peer → Agent mapping
-│   └── idle-evictor.ts         # Idle eviction
+│   └── session-manager.ts      # Chat session → Agent mapping and background switching
 ├── model/                      # Model routing
 │   ├── model-resolver.ts       # Route resolution
-│   ├── prefs-store.ts          # Per-peer preference persistence
+│   ├── prefs-store.ts          # Preference persistence
 │   └── settings-reader.ts      # settings.yaml read-only
 ├── features/                   # Interaction features
 │   ├── question-channel.ts     # ask_user_question Q&A channel
@@ -268,7 +277,7 @@ src/
 
 ## Session Routing
 
-sessionKey: `qqbot:${appId}:${scope}:${peerId}`; a UUID session id is minted for new sessions and persisted to `model-prefs.json`, resuming by the persisted id after restarts; pre-0.6 sessions keep their originally derived ids.
+The chat session key is `qqbot:${appId}:chat`; a UUID session id is minted for new sessions and persisted to `model-prefs.json`, resuming by the persisted id after restarts. No mapping means a fresh chat session; sessions and model/preset/workspace preferences saved under the old per-chat keys are not adopted on upgrade.
 
 Resolution strategy: in-process reuse → persisted resume → fresh create.
 
@@ -276,9 +285,8 @@ Resolution strategy: in-process reuse → persisted resume → fresh create.
 
 - **Pure Cordis plugin** — follows the dsh "Plugins, not loop changes" principle
 - **Declarative dependencies** — `inject = ['agents']`, no direct coupling to other plugins
-- **Session isolation** — one independent Agent per QQ direct user / group
+- **One chat session** — every QQ window continues the same chat session; background sessions are managed by `/sessions` and `/new`
 - **Preset support** — mount presets (toolkits, prompts, etc.) via the `agent-presets` service
-- **Idle eviction** — auto-dispose Agents on timeout to prevent memory leaks
 - **Markdown output** — replies sent as Markdown with code-block/table-aware chunking
 - **Image understanding** — supports `qqbot_describe_image` vision to analyze images sent by users
 - **File sending** — supports `qqbot_send_file` to send local files to users (path allowlist enabled by default)

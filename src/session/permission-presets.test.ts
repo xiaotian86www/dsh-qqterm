@@ -90,7 +90,6 @@ function createManager(
     appSecret: 'secret',
     provider: 'p',
     model: 'm',
-    sessionIdleTimeout: 0,
   } as ImQQBotConfig);
   const manager = new SessionManager(createCtx(permissions), registry as unknown as DshAgentRegistry, config, logger);
   managers.push(manager);

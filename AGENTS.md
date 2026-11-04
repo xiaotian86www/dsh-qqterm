@@ -19,7 +19,7 @@
 | `src/gateway/` | 网关组装：中间件、事件、出站、生命周期 |
 | `src/setup/` | 扫码绑定状态机、凭据持久化、端内绑定页路由 |
 | `src/features/` | 问答（ask_user_question）、审批、历史缓冲、按钮协议 |
-| `src/session/` | 会话管理、闲置回收、会话存储/管理 |
+| `src/session/` | 聊天会话寻址、后台会话切换（`/sessions`、`/new`） |
 | `src/transport/` | 入站、出站、分片、附件、回复目标 |
 | `src/commands/` | `/bot-*`、`/model`、`/preset`、`/sessions` 等指令 |
 | `src/media/` | 富媒体理解、附件发送、清理 |
@@ -56,7 +56,7 @@
 
 - 按钮键盘只在 C2C 稳定可用，群聊可能被 QQ 拒绝；发送失败必须保留文本回退（现有实现会降级并记 warn）。改问答/审批时 C2C 与群聊都要验证。
 - `ask_user_question` / `approval` 走宿主 waterfall 通道，不要再退回 `userQuestions.ask` 这类服务探测式实现。
-- 会话 key 固定为 `qqbot:${appId}:${scope}:${peerId}`；0.5.x 老会话按原派生 id 恢复，改动必须保持向后兼容。
+- 聊天会话 key 固定为 `qqbot:${appId}:chat`：全 bot 只有一个聊天会话，任何 QQ 窗口共享它；后台会话（宿主 session）仍是多份，由 `/sessions` 与 `/new` 管理。没有映射即视为全新会话，会话 id 由 `mintSessionId()` 铸造。
 - Markdown 输出按 `textChunkLimit` 分片，代码块/表格感知切分在 `src/transport/chunker.ts`，不要绕过。
 - 用户可见文案内联在 `src/` 对应模块（`locale/*.json` 只有插件 meta）；写法见 §4，注释与内部日志保持中文。
 

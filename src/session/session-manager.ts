@@ -1,19 +1,18 @@
 /**
- * SessionManager — 管理 QQ peer → dsh Agent 的映射和生命周期
+ * SessionManager — 管理聊天会话 → dsh Agent 的映射和生命周期
  *
- * sessionKey 格式: `qqbot:${appId}:${kind}:${peerId}`
- *   - c2c:   peerId = senderId (用户 openid)
- *   - group: peerId = groupOpenid
+ * 聊天会话只有一个，key 固定为 `qqbot:${appId}:chat`：任何 QQ 聊天窗口（私聊 /
+ * 群聊）续写、看到的都是同一个聊天会话。后台会话（宿主里的 session）仍是多份，
+ * `/sessions` 列出并切换、`/new` 新开，切换对所有窗口立即生效。
  *
  * sessionKey → sessionId 的映射存于 prefs（`model-prefs.json`），新会话 id 由
- * `mintSessionId()` 铸造（`session-` + UUID，与宿主一致）。0.5.x 的 SHA-256 确定性
- * 派生 id 仅用于探测存量会话并迁移，不再用于新建——确定性 id 跨进程必然相同，
- * 两个进程各自新建会把同一 id 写入不同 project 目录。
+ * `mintSessionId()` 铸造（`session-` + UUID，与宿主一致）。没有映射即视为全新会话：
+ * 不复用旧版按聊天保存的会话与偏好。
  *
  * 支持 agent-presets 系统：通过 setup hook 在 create/resume 时
  * 挂载 preset（工具集、prompt sections 等），实现场景化配置。
  */
-import { legacyDerivedSessionId, mintSessionId } from './session-id.ts';
+import { mintSessionId } from './session-id.ts';
 import { SessionId } from '@deepseek-ai/dsh-session';
 import type { Context } from '@deepseek-ai/cordis';
 import { createHostAdapter, type HostAdapter, type HostSessionInfo } from '../host/adapter.ts';
@@ -24,7 +23,6 @@ import type { ChatScope, Logger, ReplyTarget } from '../types.ts';
 import type { ImQQBotConfig } from '../config.ts';
 import { ModelResolver } from '../model/model-resolver.ts';
 import type { ModelRoute, ModelEntry } from '../model/types.ts';
-import { IdleEvictor } from './idle-evictor.ts';
 import type { QuestionChannel } from '../features/question-channel.ts';
 import type { ApprovalChannel } from '../features/approval-channel.ts';
 import type {
@@ -127,16 +125,15 @@ export class SessionManager {
    * 后写入 sessions 的覆盖前者且前者无人 dispose（泄漏）。
    */
   private inflight = new Map<string, Promise<SessionRecord>>();
-  private readonly evictor: IdleEvictor;
   private readonly modelResolver: ModelResolver;
   private readonly ctx: Context;
   private readonly host: HostAdapter;
   private readonly agents: DshAgentRegistry;
   private readonly config: ImQQBotConfig;
   private readonly logger: Logger;
-  /** 由 bootstrap 注入的问答通道（ask_user_question → QQ），会话回收时清理其待答问题 */
+  /** 由 bootstrap 注入的问答通道（ask_user_question → QQ），会话释放时清理其待答问题 */
   public questionChannel?: QuestionChannel;
-  /** 由 bootstrap 注入的审批通道（approval/request → QQ），会话回收时清理其待批审批 */
+  /** 由 bootstrap 注入的审批通道（approval/request → QQ），会话释放时清理其待批审批 */
   public approvalChannel?: ApprovalChannel;
 
   constructor(
@@ -152,20 +149,6 @@ export class SessionManager {
     this.host = createHostAdapter(ctx, logger);
     this.logger.info(`host adapter capabilities: ${this.host.capabilities.join(', ')}`);
     this.modelResolver = new ModelResolver(ctx, config, logger);
-
-    this.evictor = new IdleEvictor(
-      this.sessions,
-      config.sessionIdleTimeout,
-      (key, record) => {
-        this.logger.info(`evicting idle session: key=${key}`);
-        this.sessions.delete(key);
-        record.agent.cancel({ kind: 'user' });
-        void record.handle.dispose().catch(() => {});
-        // 回收会话时统一清理其待答问题/待批审批，避免 pending 悬挂泄漏
-        this.questionChannel?.cancelPending(key);
-        this.approvalChannel?.cancelPending(key);
-      },
-    );
 
     this.registerScopePromptInjection();
   }
@@ -224,15 +207,15 @@ export class SessionManager {
 
   // ── 模型相关（委托给 ModelResolver） ──
 
-  getEffectiveModel(scope: ChatScope, peerId: string): ModelRoute | undefined {
-    return this.modelResolver.getEffectiveRoute(this.sessionKey(scope, peerId));
+  getEffectiveModel(_scope: ChatScope, _peerId: string): ModelRoute | undefined {
+    return this.modelResolver.getEffectiveRoute(this.sessionKey());
   }
 
   /**
    * 获取指定 peer 的生效 preset（per-peer 覆盖 > config.preset）
    */
-  getEffectivePreset(scope: ChatScope, peerId: string): string | undefined {
-    return this.getEffectivePresetByKey(this.sessionKey(scope, peerId));
+  getEffectivePreset(_scope: ChatScope, _peerId: string): string | undefined {
+    return this.getEffectivePresetByKey(this.sessionKey());
   }
 
   /** 按 sessionKey 解析生效 preset */
@@ -262,7 +245,7 @@ export class SessionManager {
    * 也走同一条命令，不需要在链接层做特殊处理。
    */
   async setModelOverride(scope: ChatScope, peerId: string, route: ModelRoute): Promise<ModelSwitchOutcome> {
-    const key = this.sessionKey(scope, peerId);
+    const key = this.sessionKey();
 
     const current = this.getEffectiveModel(scope, peerId);
     if (current && current.provider === route.provider && current.model === route.model) {
@@ -289,8 +272,8 @@ export class SessionManager {
    * 已开始的会话保持锁定（blank-session contract）：只持久化为新会话默认，
    * 不 fork/rebuild 当前会话，避免历史工具调用与新 preset 工具集冲突。
    */
-  async setPresetOverride(scope: ChatScope, peerId: string, presetId: string): Promise<PresetSwitchOutcome> {
-    const key = this.sessionKey(scope, peerId);
+  async setPresetOverride(_scope: ChatScope, _peerId: string, presetId: string): Promise<PresetSwitchOutcome> {
+    const key = this.sessionKey();
 
     // 1. 校验 preset 存在 + 可加载（broken 拒绝）
     const presets = this.getPresetsService();
@@ -324,8 +307,8 @@ export class SessionManager {
   /**
    * 清除 per-peer preset 覆盖，回到 config.preset / 默认（新会话生效）
    */
-  async clearPresetOverride(scope: ChatScope, peerId: string): Promise<PresetSwitchOutcome> {
-    const key = this.sessionKey(scope, peerId);
+  async clearPresetOverride(_scope: ChatScope, _peerId: string): Promise<PresetSwitchOutcome> {
+    const key = this.sessionKey();
     this.modelResolver.clearPreset(key);
     this.logger.info(`preset pref cleared: key=${key} (next session applies)`);
     return { ok: true };
@@ -367,15 +350,15 @@ export class SessionManager {
   /**
    * 某 chat 当前会话生效的权限预设。
    *
-   * 会话还在内存里就读它自己的投影；会话还没起来（新聊天、刚 `/new`、闲置回收）
+   * 会话还在内存里就读它自己的投影；会话还没起来（新聊天、刚 `/new`、重启后尚未打开）
    * 时退回宿主默认预设——下一条消息创建出来的会话就是按这个默认值走的，展示
    * 默认值比什么都不显示更接近「当前」。
    */
-  getPermissionPreset(scope: ChatScope, peerId: string): string | undefined {
+  getPermissionPreset(_scope: ChatScope, _peerId: string): string | undefined {
     const presets = this.getPermissionPresetsService();
     if (!presets) return undefined;
 
-    const record = this.sessions.get(this.sessionKey(scope, peerId));
+    const record = this.sessions.get(this.sessionKey());
     if (record) {
       try {
         return presets.current(record.agent.session);
@@ -404,7 +387,7 @@ export class SessionManager {
     preset: string,
     revive?: { senderId: string; replyTarget: ReplyTarget },
   ): Promise<PermissionSwitchOutcome> {
-    const key = this.sessionKey(scope, peerId);
+    const key = this.sessionKey();
     const presets = this.getPermissionPresetsService();
     if (!presets) return { ok: false, reason: 'unavailable' };
     if (!presets.names.includes(preset)) return { ok: false, reason: 'unknown-preset' };
@@ -499,14 +482,13 @@ export class SessionManager {
     record.agent = created.agent;
     record.handle = created;
     record.agentPreset = composed.agentPreset;
-    record.lastActivity = Date.now();
 
     void oldHandle.dispose().catch(() => {});
     this.logger.info(`session rebuilt via fork: key=${key} preset=${composed.agentPreset ?? 'none'} sessionId=${childId}`);
   }
 
-  clearModelOverride(scope: ChatScope, peerId: string): void {
-    const key = this.sessionKey(scope, peerId);
+  clearModelOverride(_scope: ChatScope, _peerId: string): void {
+    const key = this.sessionKey();
     this.modelResolver.clearOverride(key);
     this.modelResolver.clearSessionId(key);
   }
@@ -521,8 +503,8 @@ export class SessionManager {
 
   // ── 会话状态 / 统计 ──
 
-  getSessionRecord(scope: ChatScope, peerId: string): SessionRecord | undefined {
-    return this.sessions.get(this.sessionKey(scope, peerId));
+  getSessionRecord(_scope: ChatScope, _peerId: string): SessionRecord | undefined {
+    return this.sessions.get(this.sessionKey());
   }
 
   getStatus(scope: ChatScope, peerId: string): SessionStatus {
@@ -535,7 +517,6 @@ export class SessionManager {
       provider: route?.provider,
       model: route?.model,
       preset: record?.agentPreset,
-      lastActivity: record?.lastActivity,
       messageCount: this.countMessages(record),
     };
   }
@@ -651,16 +632,12 @@ export class SessionManager {
 
   // ── Session 生命周期管理 ──
 
-  private sessionKey(scope: ChatScope, peerId: string): string {
-    return `qqbot:${this.config.appId}:${scope}:${peerId}`;
+  /** 聊天会话只有一个：任何窗口（私聊/群聊）都指向同一个 key */
+  private sessionKey(): string {
+    return `qqbot:${this.config.appId}:chat`;
   }
 
-  /** prefs 命中沿用；miss 返回 0.5.x 派生候选，由 getOrCreate 按 resume 结果迁移或铸造 */
-  private currentSessionId(sessionKey: string): string {
-    return this.modelResolver.getSessionId(sessionKey) ?? legacyDerivedSessionId(sessionKey);
-  }
-
-  /** 候选命中后落盘，后续永远走 prefs */
+  /** 把当前会话 id 落盘，后续（重启、切换、并发调用）一律以 prefs 为准 */
   private persistSessionId(sessionKey: string, sessionId: string): void {
     if (this.modelResolver.getSessionId(sessionKey) !== sessionId) {
       this.modelResolver.setSessionId(sessionKey, sessionId);
@@ -695,12 +672,11 @@ export class SessionManager {
     senderId: string,
     replyTarget: ReplyTarget,
   ): Promise<SessionRecord> {
-    const key = this.sessionKey(scope, peerId);
+    const key = this.sessionKey();
     const existing = this.sessions.get(key);
 
     if (existing) {
-      existing.replyTarget = replyTarget;
-      existing.lastActivity = Date.now();
+      this.touch(existing, scope, peerId, senderId, replyTarget);
       return existing;
     }
 
@@ -708,8 +684,7 @@ export class SessionManager {
     const pending = this.inflight.get(key);
     if (pending) {
       const shared = await pending;
-      shared.replyTarget = replyTarget;
-      shared.lastActivity = Date.now();
+      this.touch(shared, scope, peerId, senderId, replyTarget);
       return shared;
     }
 
@@ -722,6 +697,25 @@ export class SessionManager {
     }
   }
 
+  /**
+   * 收到一条消息后刷新会话记录上的「当前聊天」信息。
+   *
+   * 唯一的会话记录被所有窗口复用，这几项必须跟着最后一条消息走，否则群聊/私聊
+   * prompt、提问作答与回复目标会停在第一个说话的窗口上。
+   */
+  private touch(
+    record: SessionRecord,
+    scope: ChatScope,
+    peerId: string,
+    senderId: string,
+    replyTarget: ReplyTarget,
+  ): void {
+    record.replyTarget = replyTarget;
+    record.scope = scope;
+    record.peerId = peerId;
+    record.senderId = senderId;
+  }
+
   /** getOrCreate 的实际打开流程（已通过 singleflight 保证同 key 串行） */
   private async openSession(
     key: string,
@@ -731,9 +725,9 @@ export class SessionManager {
     replyTarget: ReplyTarget,
   ): Promise<SessionRecord> {
     const route = this.modelResolver.getEffectiveRoute(key);
-    // prefs 命中 = 已知存量会话；miss 时取 0.5.x 派生 id 仅作存量探测候选，不用于新建
-    const candidateIsLegacy = this.modelResolver.getSessionId(key) === undefined;
-    let sessionId = SessionId(this.currentSessionId(key));
+    // prefs 命中 = 已知存量会话；miss = 全新会话，铸一个新 id 去试 resume（自然 miss）后创建
+    const mapped = this.modelResolver.getSessionId(key);
+    let sessionId = SessionId(mapped ?? mintSessionId());
     this.logger.info(`getOrCreate: key=${key} route=${route ? `${route.provider}/${route.model}` : 'host-default'} sessionId=${sessionId}`);
 
     let agent: DshAgent;
@@ -764,12 +758,11 @@ export class SessionManager {
         agent = resumed.agent;
         handle = resumed;
         directory = this.host.sessionDirectory(agent.session) ?? directory;
-        // 0.5.x 迁移：候选命中老会话，沿用并落盘
         this.persistSessionId(key, sessionId);
         this.logger.info(`resumed session: key=${key} preset=${agentPreset ?? 'none'} route=${resumeRoute ? `${resumeRoute.provider}/${resumeRoute.model}` : 'session-own'}`);
       } catch (err) {
         if (!(await this.mayCreateAfterResumeFailure(key, sessionId, err))) throw err;
-        sessionId = this.resolveCreateId(key, sessionId, candidateIsLegacy);
+        sessionId = this.resolveCreateId(key, sessionId);
         mkdirSync(directory, { recursive: true });
         const created = await this.agents.create({
           sessionId,
@@ -796,7 +789,6 @@ export class SessionManager {
       scope,
       peerId,
       senderId,
-      lastActivity: Date.now(),
       agentPreset,
     };
 
@@ -807,7 +799,7 @@ export class SessionManager {
 
     // 挂载到对应工作区（侧边栏可见性）；fail-soft、异步执行，不阻塞消息处理。
     // 宿主只在客户端 session.create RPC 时挂载会话，插件会话不走那条路径，
-    // 闲置回收后会从侧边栏消失（详见 host/adapter.ts 的 attachSessionToWorkspace）。
+    // 所以这里补挂一次（幂等，升级后老会话也会补上）。
     // cwd 必须与 meta.cwd 同源，否则 attachSession 的 header.cwd 校验会失败。
     if (directory) void this.host.attachSessionToWorkspace(sessionId, directory);
 
@@ -847,21 +839,15 @@ export class SessionManager {
   /**
    * 确认候选会话缺失后决定用哪个 id 新建。
    *
-   * - resume 等待期间 prefs 被并发改写（`/new` 换新会话）：采用 prefs 的最新 id，
-   *   否则内存与 prefs 指向不同会话，重启后用户被切走；
-   * - 候选来自 0.5.x 确定性派生：一律铸造新 id，确定性 id 不进入新建路径；
-   * - 候选来自 prefs 且确认缺失：沿用该 id 新建，prefs 无需改写。
+   * resume 等待期间 prefs 被并发改写（`/new` 换新会话）：采用 prefs 的最新 id，
+   * 否则内存与 prefs 指向不同会话，重启后用户被切走；否则沿用候选 id 新建，
+   * prefs 无需改写。
    */
-  private resolveCreateId(key: string, candidate: SessionId, candidateIsLegacy: boolean): SessionId {
+  private resolveCreateId(key: string, candidate: SessionId): SessionId {
     const latest = this.modelResolver.getSessionId(key);
     if (latest !== undefined && latest !== candidate) {
       this.logger.info(`adopting concurrently written session id: key=${key} sessionId=${latest}`);
       return SessionId(latest);
-    }
-    if (candidateIsLegacy) {
-      const minted = SessionId(mintSessionId());
-      this.logger.info(`migrated to minted session id: key=${key} sessionId=${minted}`);
-      return minted;
     }
     return candidate;
   }
@@ -880,8 +866,8 @@ export class SessionManager {
     return undefined;
   }
 
-  async remove(scope: ChatScope, peerId: string): Promise<void> {
-    const key = this.sessionKey(scope, peerId);
+  async remove(): Promise<void> {
+    const key = this.sessionKey();
     const record = this.sessions.get(key);
     this.modelResolver.setSessionId(key, mintSessionId());
 
@@ -889,6 +875,7 @@ export class SessionManager {
     this.sessions.delete(key);
     record.agent.cancel({ kind: 'user' });
     await record.handle.dispose().catch(() => {});
+    this.cancelPendingFor(key);
     this.logger.info(`session removed: key=${key}`);
   }
 
@@ -946,8 +933,8 @@ export class SessionManager {
    * @param peerId 当前 chat 的 peer id
    * @throws 宿主列举失败时抛出，由命令层给出明确提示
    */
-  async listWorkspaceSessions(scope: ChatScope, peerId: string): Promise<WorkspaceSession[]> {
-    const key = this.sessionKey(scope, peerId);
+  async listWorkspaceSessions(_scope: ChatScope, _peerId: string): Promise<WorkspaceSession[]> {
+    const key = this.sessionKey();
     const workspace = await this.chatDirectory(key);
     const record = this.sessions.get(key);
     const currentId = record?.sessionId ?? this.modelResolver.getSessionId(key);
@@ -981,10 +968,10 @@ export class SessionManager {
    * @param peerId 当前 chat 的 peer id
    */
   async currentWorkspaceInfo(
-    scope: ChatScope,
-    peerId: string,
+    _scope: ChatScope,
+    _peerId: string,
   ): Promise<{ title: string; path: string; missing: boolean } | undefined> {
-    const key = this.sessionKey(scope, peerId);
+    const key = this.sessionKey();
     const workspace = await this.chatDirectory(key);
     const info = this.host.workspaceList().find((item) => samePath(item.path, workspace));
     if (info) {
@@ -1012,10 +999,10 @@ export class SessionManager {
    * @param peerId 当前 chat 的 peer id
    */
   async canChooseWorkspace(
-    scope: ChatScope,
-    peerId: string,
+    _scope: ChatScope,
+    _peerId: string,
   ): Promise<{ canChoose: boolean; sessionId?: string }> {
-    const blocked = await this.workspaceBlocker(this.sessionKey(scope, peerId));
+    const blocked = await this.workspaceBlocker(this.sessionKey());
     return blocked === undefined ? { canChoose: true } : { canChoose: false, sessionId: blocked };
   }
 
@@ -1064,14 +1051,14 @@ export class SessionManager {
    * @param arg 工作区标题 / 目录名 / 绝对路径
    */
   async changeChatWorkspace(
-    scope: ChatScope,
-    peerId: string,
+    _scope: ChatScope,
+    _peerId: string,
     arg: string,
   ): Promise<ChangeWorkspaceOutcome> {
     const resolved = this.resolveWorkspace(arg);
     if (!resolved.ok) return resolved;
 
-    const key = this.sessionKey(scope, peerId);
+    const key = this.sessionKey();
     const blocked = await this.workspaceBlocker(key);
     if (blocked !== undefined) return { ok: false, reason: 'has-session', sessionId: blocked };
 
@@ -1102,8 +1089,8 @@ export class SessionManager {
    * @param scope 当前 chat 作用域（用于标记 current）
    * @param peerId 当前 chat 的 peer id
    */
-  async listWorkspaceGroups(scope: ChatScope, peerId: string): Promise<WorkspaceGroup[]> {
-    const key = this.sessionKey(scope, peerId);
+  async listWorkspaceGroups(_scope: ChatScope, _peerId: string): Promise<WorkspaceGroup[]> {
+    const key = this.sessionKey();
     const record = this.sessions.get(key);
     const currentId = record?.sessionId ?? this.modelResolver.getSessionId(key);
     const archived = this.host.archivedSessionIds();
@@ -1215,7 +1202,7 @@ export class SessionManager {
     senderId: string,
     replyTarget: ReplyTarget,
   ): Promise<SwitchSessionOutcome> {
-    const key = this.sessionKey(scope, peerId);
+    const key = this.sessionKey();
 
     // 归档即不可用：恢复前先取消归档，失败则如实报错（此时还没动映射）
     const unarchived = this.host.archivedSessionIds().has(sessionId);
@@ -1234,14 +1221,6 @@ export class SessionManager {
     const current = this.sessions.get(key);
     if (current?.sessionId === sessionId) {
       return unarchived ? { ok: true, reason: 'same', unarchived: true } : { ok: true, reason: 'same' };
-    }
-
-    // 同一进程内一个会话只能被一个 chat 持有：直接复用 live agent 会让两个
-    // chat 同时写进同一份历史，出站也会串台
-    for (const [otherKey, record] of this.sessions) {
-      if (otherKey !== key && record.sessionId === sessionId) {
-        return { ok: false, reason: 'in-use', message: '该会话正在另一个聊天中使用' };
-      }
     }
 
     // 存在性求证：undefined = 宿主没有 stat 能力，按存在处理（交给 resume 判定）
@@ -1340,6 +1319,13 @@ export class SessionManager {
     if (this.sessions.get(key) === record) this.sessions.delete(key);
     record.agent.cancel({ kind: 'user' });
     await record.handle.dispose().catch(() => {});
+    this.cancelPendingFor(key);
+  }
+
+  /** 释放会话时统一清理其待答问题/待批审批，避免 pending 悬挂泄漏 */
+  private cancelPendingFor(key: string): void {
+    this.questionChannel?.cancelPending(key);
+    this.approvalChannel?.cancelPending(key);
   }
 
   /**
@@ -1353,10 +1339,10 @@ export class SessionManager {
     peerId: string,
     revive?: { senderId: string; replyTarget: ReplyTarget },
   ): Promise<CompactOutcome> {
-    const key = this.sessionKey(scope, peerId);
+    const key = this.sessionKey();
     let record = this.sessions.get(key);
     if (!record) {
-      // 无活跃会话（重启/闲置回收）时从磁盘拉起，历史在磁盘上仍可压缩
+      // 无活跃会话（重启后尚未打开）时从磁盘拉起，历史在磁盘上仍可压缩
       if (!revive) return { ok: false, reason: 'no-session' };
       record = await this.getOrCreate(scope, peerId, revive.senderId, revive.replyTarget);
     }
@@ -1395,13 +1381,13 @@ export class SessionManager {
   }
 
   async disposeAll(): Promise<void> {
-    this.evictor.dispose();
-    const records = [...this.sessions.values()];
+    const records = [...this.sessions.entries()];
     this.sessions.clear();
-    for (const record of records) {
+    for (const [key, record] of records) {
       record.agent.cancel({ kind: 'user' });
+      this.cancelPendingFor(key);
     }
-    await Promise.allSettled(records.map((r) => r.handle.dispose()));
+    await Promise.allSettled(records.map(([, record]) => record.handle.dispose()));
     this.logger.info(`all sessions disposed (count=${records.length})`);
   }
 

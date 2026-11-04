@@ -1,8 +1,8 @@
 /**
  * 会话状态命令：/status
  *
- * 这个聊天当前会话的「现场」：会话 id 与生成状态、所在工作区、模型 / preset、
- * 消息数、上下文占用、累计 token、最后活动与闲置回收。
+ * 当前聊天会话的「现场」：会话 id 与生成状态、所在工作区、模型 / preset、
+ * 消息数、上下文占用、累计 token。
  *
  * 与其它状态类命令的分工：
  *   - `/bot-status` 是插件最早的最小视图（会话 id / 模型 / preset / 消息数），保持原样；
@@ -11,23 +11,13 @@
  */
 import type { CommandDeps, CategorizedCommand } from './types.ts';
 import type { SessionContextUsage, SessionManager } from '../session/index.ts';
-import type { ImQQBotConfig } from '../config.ts';
 import type { ChatScope } from '../types.ts';
-import { formatRelativeTime, getScopePeer, sendMarkdownChunked } from '../shared/index.ts';
+import { getScopePeer, sendMarkdownChunked } from '../shared/index.ts';
 import { shortId } from './sessions.ts';
 
 /** 千分位（与 /cost 一致，避免不同环境的本地化分隔符） */
 function num(n: number): string {
   return n.toLocaleString('en-US');
-}
-
-/** 毫秒时长 → 「27m」/「2h10m」（回收倒计时用） */
-function span(ms: number): string {
-  const total = Math.max(0, Math.round(ms / 60_000));
-  if (total < 60) return `${total}m`;
-  const hours = Math.floor(total / 60);
-  const minutes = total % 60;
-  return minutes === 0 ? `${hours}h` : `${hours}h${minutes}m`;
 }
 
 /** 上下文占用：占用 / 窗口 / 剩余（窗口没上报时只给占用量） */
@@ -42,23 +32,9 @@ function renderContext(ctx: SessionContextUsage): string | undefined {
   return undefined;
 }
 
-/**
- * 闲置回收：多久之后这个会话会被卸载。
- *
- * 卸载只释放内存里的 agent，会话日志还在盘上，下一条消息会自动 resume，
- * 所以文案要说明「会话不丢」，否则容易被理解成会话到期作废。
- */
-function renderIdle(lastActivity: number | undefined, timeoutMs: number): string | undefined {
-  if (!lastActivity || !(timeoutMs > 0)) return undefined;
-  const remain = lastActivity + timeoutMs - Date.now();
-  if (remain <= 0) return '即将释放内存（会话不丢）';
-  return `${span(remain)} 后释放内存（会话不丢）`;
-}
-
 /** 渲染会话状态正文（handler 只负责兜错与发送） */
 async function renderStatus(
   manager: SessionManager,
-  config: ImQQBotConfig,
   scope: ChatScope,
   peerId: string,
 ): Promise<string> {
@@ -96,10 +72,6 @@ async function renderStatus(
     if (usage.input + usage.output > 0) {
       lines.push(`**Token**: 输入 ${num(usage.input)} · 输出 ${num(usage.output)}（累计）`);
     }
-
-    lines.push(`**最后活动**: ${formatRelativeTime(status.lastActivity)}`);
-    const idle = renderIdle(record?.lastActivity, config.sessionIdleTimeout);
-    if (idle) lines.push(`**闲置回收**: ${idle}`);
   }
 
   return lines.join('\n');
@@ -117,7 +89,7 @@ export function sessionStatusCommand({ manager, config, logger }: CommandDeps): 
 
       let text: string;
       try {
-        text = await renderStatus(manager, config, scope, peerId);
+        text = await renderStatus(manager, scope, peerId);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         logger?.warn(`/status 失败: ${message}`);

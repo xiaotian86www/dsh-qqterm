@@ -103,7 +103,6 @@
     cwd: ${DSH_CWD:-/tmp/dsh-qqbot}
     requireMention: true
     textChunkLimit: 4500
-    sessionIdleTimeout: 1800000
     showToolResults: false
     debug: false
     vision:
