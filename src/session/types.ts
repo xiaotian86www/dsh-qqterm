@@ -91,7 +91,17 @@ export interface PresetSwitchOutcome {
   ok: boolean;
   reason?: 'unavailable' | 'unknown-preset' | 'broken' | 'failed';
   presetId?: string;
+  /** true = 目标就是当前值，未写覆盖 */
+  unchanged?: boolean;
   message?: string;
+}
+
+/** 模型切换结果 */
+export interface ModelSwitchOutcome {
+  provider: string;
+  model: string;
+  /** true = 目标就是当前模型，未写偏好、未 fork 会话 */
+  unchanged?: boolean;
 }
 
 export interface DshAgentHandle {
@@ -167,6 +177,8 @@ export interface PermissionSwitchOutcome {
   ok: boolean;
   reason?: 'unavailable' | 'unknown-preset' | 'no-session' | 'failed';
   preset?: string;
+  /** true = 目标就是当前预设，未写会话 */
+  unchanged?: boolean;
   message?: string;
 }
 

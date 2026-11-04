@@ -128,6 +128,14 @@ describe('/permission（切换）', () => {
     expect(text).toBe('✅ 权限已切换: 工作区内修改 (workspace-write)');
   });
 
+  it('切到当前预设是可重入的：只回一行，不再写会话', async () => {
+    const manager = makeManager({ outcome: { ok: true, preset: 'auto', unchanged: true } });
+    const text = await run(manager, 'auto');
+
+    expect(manager.setPermissionPreset).toHaveBeenCalled();
+    expect(text).toBe('✅ 已是当前权限预设: 自动审查 (auto)');
+  });
+
   it('切到 auto 只补一行风险提示', async () => {
     const text = await run(makeManager({ outcome: { ok: true, preset: 'auto' } }), 'auto');
     expect(text.split('\n')).toEqual(['✅ 权限已切换: 自动审查 (auto)', '⚠️ 不启用沙箱，每次工具调用先由模型预审（额外消耗 token）']);

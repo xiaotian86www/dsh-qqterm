@@ -148,7 +148,7 @@ describe('resolveSessionTarget', () => {
 });
 
 describe('/sessions list', () => {
-  it('统一 markdown 格式：每行带短 id，当前会话是状态行，其余渲染成可点击命令', async () => {
+  it('统一 markdown 格式：每行带短 id，所有行都用同一条 resume 命令', async () => {
     const manager = makeManager({
       listWorkspaceSessions: vi.fn(async () => [
         entry({ id: 'session-cccc1111', current: true, title: '当前会话' }),
@@ -162,12 +162,12 @@ describe('/sessions list', () => {
     // 序号 + 短 id + 标题：id 可见才能直接打字操作
     expect(text).toContain('1. ✅ #cccc1111 · 当前会话');
     expect(text).toContain('2. #dddd2222 · 旧会话');
-    // 当前会话也用按钮渲染，否则纯文本行会比其它行少一段缩进
-    expect(text).toContain('<qqbot-cmd-input text="/sessions" show="1. ✅ #cccc1111');
+    // 当前会话也用按钮渲染（否则缩进不一致），且链接不特殊处理：统一走 resume，
+    // 「已是当前会话」由命令自身识别
+    expect(text).toContain('<qqbot-cmd-input text="/sessions resume #cccc1111" show="1. ✅ #cccc1111');
     // 点击后输入框出现对应操作，且填的是 8 位短 id 而不是完整 uuid
     expect(text).toContain('<qqbot-cmd-input text="/sessions resume #dddd2222" show="2. #dddd2222 · 旧会话');
-    // 当前会话不该出现恢复入口
-    expect(text).not.toContain('/sessions resume #cccc1111');
+    expect(text).not.toContain('show="/sessions"');
     // 标题层级与 /model 一致，且不出现堆叠的 ####
     expect(text.startsWith('### 🗂')).toBe(true);
     expect(text).not.toContain('####');

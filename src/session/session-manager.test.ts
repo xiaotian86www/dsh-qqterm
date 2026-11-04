@@ -430,3 +430,58 @@ describe('getOrCreate — 会话创建/恢复后挂载到对应工作区', () =>
     expect(workspaceRegistry.create).toHaveBeenCalledWith(`${env.home}/workspace`);
   });
 });
+
+describe('切换类操作 — 可重入', () => {
+  /** 带 agentPresets 替身的 ctx（preset 切换需要 resolve） */
+  function presetsCtx(): Context {
+    const presets = {
+      resolve: vi.fn(async (id?: string) => ({ id: id ?? 'default' })),
+      mount: vi.fn(async () => {}),
+      list: vi.fn(async () => []),
+    };
+    return {
+      get: (name: string) => {
+        if (name === 'sessionPersistence') return { stat: async () => undefined };
+        return name === 'agentPresets' ? presets : undefined;
+      },
+      on: vi.fn(),
+    } as unknown as Context;
+  }
+
+  it('模型：目标就是当前模型时不写偏好、不 fork', async () => {
+    const { registry } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
+    const manager = createManager(registry);
+    const record = await manager.getOrCreate('c2c', PEER, PEER, REPLY);
+    const before = record.sessionId;
+    registry.create.mockClear();
+
+    const outcome = await manager.setModelOverride('c2c', PEER, { provider: 'p', model: 'm' });
+
+    expect(outcome).toEqual({ provider: 'p', model: 'm', unchanged: true });
+    expect(registry.create).not.toHaveBeenCalled();
+    expect(manager.getSessionRecord('c2c', PEER)?.sessionId).toBe(before);
+    expect(new PrefsStore().getOverride(KEY)).toBeUndefined();
+  });
+
+  it('模型：没有活跃会话时目标就是默认模型，也不写偏好', async () => {
+    const { registry } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
+    const manager = createManager(registry);
+
+    const outcome = await manager.setModelOverride('c2c', PEER, { provider: 'p', model: 'm' });
+
+    expect(outcome.unchanged).toBe(true);
+    expect(new PrefsStore().getOverride(KEY)).toBeUndefined();
+  });
+
+  it('preset：目标就是当前生效值时不重复写覆盖', async () => {
+    const { registry } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
+    const manager = createManagerWithCtx(registry, presetsCtx());
+
+    const first = await manager.setPresetOverride('c2c', PEER, 'alpha');
+    const second = await manager.setPresetOverride('c2c', PEER, 'alpha');
+
+    expect(first).toEqual({ ok: true, presetId: 'alpha' });
+    expect(second).toEqual({ ok: true, presetId: 'alpha', unchanged: true });
+    expect(new PrefsStore().getPreset(KEY)).toBe('alpha');
+  });
+});

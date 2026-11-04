@@ -93,6 +93,9 @@ export function permissionCommand({ manager, config, logger }: CommandDeps): Cat
       }
 
       const label = presetLabel(target, entries.find((entry) => entry.id === target));
+      if (outcome.unchanged) {
+        return `✅ 已是当前权限预设: ${label}`;
+      }
       const lines = [`✅ 权限已切换: ${label}`];
       const warning = PRESET_WARNINGS[target];
       if (warning) lines.push(warning);

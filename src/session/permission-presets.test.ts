@@ -159,6 +159,31 @@ describe('读取当前权限', () => {
 });
 
 describe('切换权限', () => {
+  it('目标就是当前预设时可重入：不写会话', async () => {
+    const { service, set } = fakePermissions({ current: vi.fn(() => 'auto') });
+    const manager = createManager(service);
+    await manager.getOrCreate('c2c', PEER, PEER, REPLY);
+
+    const outcome = await manager.setPermissionPreset('c2c', PEER, 'auto');
+
+    expect(outcome).toEqual({ ok: true, preset: 'auto', unchanged: true });
+    expect(set).not.toHaveBeenCalled();
+  });
+
+  it('无活跃会话且已是默认预设：不为了切换拉起会话', async () => {
+    const { service, set } = fakePermissions(); // defaultPreset = workspace-write
+    const manager = createManager(service);
+
+    const outcome = await manager.setPermissionPreset('c2c', PEER, 'workspace-write', {
+      senderId: PEER,
+      replyTarget: REPLY,
+    });
+
+    expect(outcome).toEqual({ ok: true, preset: 'workspace-write', unchanged: true });
+    expect(set).not.toHaveBeenCalled();
+    expect(manager.getSessionRecord('c2c', PEER)).toBeUndefined();
+  });
+
   it('有活跃会话：直接写该会话，不新建', async () => {
     const { service, set } = fakePermissions();
     const manager = createManager(service);

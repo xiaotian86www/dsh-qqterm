@@ -26,15 +26,24 @@ export function presetCommand({ manager, config, logger }: CommandDeps): Categor
           return '当前部署无可用的 agent preset';
         }
 
-        const record = manager.getSessionRecord(scope, peerId);
-        const currentId = record?.agentPreset ?? manager.getEffectivePreset(scope, peerId);
+        const effective = manager.getEffectivePreset(scope, peerId);
+        const locked = manager.getSessionRecord(scope, peerId)?.agentPreset;
+        // /preset 决定的是「新会话」的 preset：当前值取 effective，
+        // 已开始会话锁定的旧值只在下面单独说明。
+        const currentId = effective ?? locked;
 
         const lines: string[] = ['### 🧩 Agent Preset', ''];
-        lines.push(`**当前:** ${currentId ?? '默认'}`);
+        lines.push(`**当前**: ${currentId ?? '默认'}`);
+        if (locked && currentId && locked !== currentId) {
+          lines.push(`当前会话仍使用 ${locked}，发送 /new 后切到 ${currentId}`);
+        }
         lines.push('', '**可用 preset（点击切换）:**');
         for (const p of presets) {
           const display = p.name ? `${p.name} (${p.id})` : p.id;
-          lines.push(`<qqbot-cmd-input text="/preset ${p.id}" show="/preset ${display}"/>`);
+          // 当前值带 ✅；链接统一指向真实切换命令，重复切换由命令自身幂等处理
+          const isCurrent = p.id === currentId;
+          const suffix = isCurrent ? ' ✅' : '';
+          lines.push(`<qqbot-cmd-input text="/preset ${p.id}" show="/preset ${display}${suffix}"/>`);
         }
         lines.push('', '手动指定: `/preset <id>`，重置默认: `/preset reset`');
 
@@ -61,6 +70,16 @@ export function presetCommand({ manager, config, logger }: CommandDeps): Categor
           default:
             return `切换失败: ${outcome.message ?? '未知错误'}`;
         }
+      }
+
+      if (outcome.unchanged) {
+        const target = outcome.presetId ?? args;
+        const locked = manager.getSessionRecord(scope, peerId)?.agentPreset;
+        const lines = [`✅ 已是当前 preset: ${target}`];
+        if (locked && locked !== target) {
+          lines.push(`当前会话仍使用 ${locked}，发送 /new 后切到 ${target}`);
+        }
+        return lines.join('\n');
       }
 
       return `✅ preset 已切换: ${args}\n新会话生效（当前会话保持原 preset，发送 /new 后生效）。`;

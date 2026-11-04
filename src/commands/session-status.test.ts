@@ -99,10 +99,10 @@ describe('/status（有会话）', () => {
   it('给出会话短 id、工作区、模型与 preset', async () => {
     const text = await run(makeManager());
     expect(text).toContain('### 📊 会话状态');
-    expect(text).toContain('`#9d2c4410`');
-    expect(text).toContain('**工作区** repo · `D:\\repo`');
-    expect(text).toContain('**模型** deepseek/deepseek-v4');
-    expect(text).toContain('**Preset** default');
+    expect(text).toContain('**会话**: `#9d2c4410` · 空闲');
+    expect(text).toContain('**工作区**: repo · `D:\\repo`');
+    expect(text).toContain('**模型**: deepseek/deepseek-v4');
+    expect(text).toContain('**Preset**: default');
   });
 
   it('生成中与空闲区分开', async () => {
@@ -112,17 +112,17 @@ describe('/status（有会话）', () => {
 
   it('上下文给出占用 / 窗口 / 百分比 / 剩余', async () => {
     const text = await run(makeManager({ context: { used: 12_345, window: 200_000 } }));
-    expect(text).toContain('**上下文** 12,345 / 200,000（6.2%，剩 187,655）');
+    expect(text).toContain('**上下文**: 12,345 / 200,000（6.2%，剩 187,655）');
   });
 
   it('只有占用量时说明窗口未上报', async () => {
     const text = await run(makeManager({ context: { used: 12_345 } }));
-    expect(text).toContain('**上下文** 12,345（窗口未上报）');
+    expect(text).toContain('**上下文**: 12,345（窗口未上报）');
   });
 
   it('只有窗口时说明还没有请求', async () => {
     const text = await run(makeManager({ context: { window: 200_000 } }));
-    expect(text).toContain('**上下文** 窗口 200,000（还没有请求）');
+    expect(text).toContain('**上下文**: 窗口 200,000（还没有请求）');
   });
 
   it('两个数都没有时不显示上下文行', async () => {
@@ -131,18 +131,18 @@ describe('/status（有会话）', () => {
 
   it('累计 token 与消息数', async () => {
     const text = await run(makeManager({ usage: { input: 1234, output: 567 }, messageCount: 12 }));
-    expect(text).toContain('**消息** 12 条');
-    expect(text).toContain('**Token** 输入 1,234 · 输出 567（累计）');
+    expect(text).toContain('**消息**: 12 条');
+    expect(text).toContain('**Token**: 输入 1,234 · 输出 567（累计）');
   });
 
   it('没有 token 消耗时不显示 Token 行', async () => {
-    expect(await run(makeManager({ usage: { input: 0, output: 0 } }))).not.toContain('**Token**');
+    expect(await run(makeManager({ usage: { input: 0, output: 0 } }))).not.toContain('**Token**:');
   });
 
   it('最后活动与闲置回收倒计时', async () => {
     const text = await run(makeManager({ idleFor: 3 * MINUTE }));
-    expect(text).toContain('**最后活动** 3m 前');
-    expect(text).toContain('**闲置回收** 27m 后释放内存（会话不丢）');
+    expect(text).toContain('**最后活动**: 3m 前');
+    expect(text).toContain('**闲置回收**: 27m 后释放内存（会话不丢）');
   });
 
   it('关掉闲置回收（timeout=0）时不显示倒计时', async () => {
@@ -157,20 +157,20 @@ describe('/status（有会话）', () => {
 
   it('读不到工作区时不影响其它字段', async () => {
     const text = await run(makeManager({ workspace: undefined }));
-    expect(text).not.toContain('**工作区**');
-    expect(text).toContain('**模型** deepseek/deepseek-v4');
+    expect(text).not.toContain('**工作区**:');
+    expect(text).toContain('**模型**: deepseek/deepseek-v4');
   });
 });
 
 describe('/status（没有会话）', () => {
   it('说明未建立，只给工作区与模型', async () => {
     const text = await run(makeManager({ active: false }));
-    expect(text).toContain('未建立（发一条消息即创建）');
-    expect(text).toContain('**工作区** repo · `D:\\repo`');
-    expect(text).toContain('**模型** deepseek/deepseek-v4');
-    expect(text).not.toContain('**Preset**');
-    expect(text).not.toContain('**消息**');
-    expect(text).not.toContain('**最后活动**');
+    expect(text).toContain('**会话**: 未建立（发一条消息即创建）');
+    expect(text).toContain('**工作区**: repo · `D:\\repo`');
+    expect(text).toContain('**模型**: deepseek/deepseek-v4');
+    expect(text).not.toContain('**Preset**:');
+    expect(text).not.toContain('**消息**:');
+    expect(text).not.toContain('**最后活动**:');
     expect(text).not.toContain('闲置回收');
   });
 });

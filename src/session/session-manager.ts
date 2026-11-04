@@ -36,6 +36,7 @@ import type {
   PresetComposition,
   PresetEntry,
   PresetSwitchOutcome,
+  ModelSwitchOutcome,
   PermissionPresetsLike,
   PermissionPresetEntry,
   PermissionSwitchOutcome,
@@ -256,20 +257,30 @@ export class SessionManager {
 
   /**
    * 切换模型（fork + 重建会话，保留历史）
+   *
+   * 可重入：目标就是当前模型时不写偏好、不 fork。`/model` 列表里的当前项
+   * 也走同一条命令，不需要在链接层做特殊处理。
    */
-  async setModelOverride(scope: ChatScope, peerId: string, route: ModelRoute): Promise<void> {
+  async setModelOverride(scope: ChatScope, peerId: string, route: ModelRoute): Promise<ModelSwitchOutcome> {
     const key = this.sessionKey(scope, peerId);
+
+    const current = this.getEffectiveModel(scope, peerId);
+    if (current && current.provider === route.provider && current.model === route.model) {
+      this.logger.debug(`model switch skipped (already current): key=${key} → ${route.provider}/${route.model}`);
+      return { ...route, unchanged: true };
+    }
 
     this.modelResolver.setOverride(key, route);
 
     const record = this.sessions.get(key);
     if (!record) {
       this.logger.info(`model pref saved (no active session): key=${key} → ${route.provider}/${route.model}`);
-      return;
+      return { ...route };
     }
 
     await this.rebuildSession(record, { route });
     this.logger.info(`model switched via fork: key=${key} → ${route.provider}/${route.model}`);
+    return { ...route };
   }
 
   /**
@@ -292,6 +303,12 @@ export class SessionManager {
     }
     if (resolved.broken !== undefined) {
       return { ok: false, reason: 'broken', message: resolved.broken };
+    }
+
+    // 可重入：目标就是当前生效值时不再写覆盖；列表里的当前项也走同一条命令
+    if (resolved.id === this.getEffectivePresetByKey(key)) {
+      this.logger.debug(`preset switch skipped (already current): key=${key} → ${resolved.id}`);
+      return { ok: true, presetId, unchanged: true };
     }
 
     // 2. 持久化 per-peer 覆盖（新会话生效）
@@ -391,6 +408,12 @@ export class SessionManager {
     const presets = this.getPermissionPresetsService();
     if (!presets) return { ok: false, reason: 'unavailable' };
     if (!presets.names.includes(preset)) return { ok: false, reason: 'unknown-preset' };
+
+    // 可重入：目标就是当前预设时直接返回，避免无会话时为了「切换」再拉起一个会话
+    if (this.getPermissionPreset(scope, peerId) === preset) {
+      this.logger.debug(`permission switch skipped (already current): key=${key} preset=${preset}`);
+      return { ok: true, preset, unchanged: true };
+    }
 
     let record = this.sessions.get(key);
     if (!record) {

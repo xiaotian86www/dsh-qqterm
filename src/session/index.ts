@@ -15,6 +15,7 @@ export type {
   PresetComposition,
   PresetEntry,
   PresetSwitchOutcome,
+  ModelSwitchOutcome,
   PermissionPresetsLike,
   PermissionPresetEntry,
   PermissionSwitchOutcome,
