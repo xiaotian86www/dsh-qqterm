@@ -25,14 +25,14 @@ export function costCommand({ manager, config }: CommandDeps): CategorizedComman
       const { scope, peerId } = getScopePeer(cmdCtx);
 
       if (!manager.getSessionRecord(scope, peerId)) {
-        return '当前无活跃会话，先发一条消息建立会话再查用量';
+        return '⚠️ 当前无活跃会话，先发一条消息建立会话再查用量';
       }
 
       const stats = manager.getTokenUsage(scope, peerId);
       const total = stats.input + stats.output;
 
       if (total === 0) {
-        return '本会话还没有模型调用（命令本身不消耗 token），先聊一句再试';
+        return '⚠️ 本会话还没有模型调用（命令本身不消耗 token），先聊一句再试';
       }
 
       const lines: string[] = ['### 💰 Token 消耗', ''];

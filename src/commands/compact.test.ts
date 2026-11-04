@@ -38,11 +38,11 @@ describe('/compact', () => {
   });
 
   it('没有可压缩的历史', async () => {
-    await expect(run(makeManager({ ok: true, shadowed: 0, tokens: 0 }))).resolves.toBe('没有可压缩的历史');
+    await expect(run(makeManager({ ok: true, shadowed: 0, tokens: 0 }))).resolves.toBe('⚠️ 没有可压缩的历史');
   });
 
   it('失败时按原因给文案', async () => {
-    await expect(run(makeManager({ ok: false, reason: 'busy' }))).resolves.toBe('正在生成中，无法压缩');
-    await expect(run(makeManager({ ok: false, reason: 'no-session' }))).resolves.toBe('当前无活跃会话');
+    await expect(run(makeManager({ ok: false, reason: 'busy' }))).resolves.toBe('⚠️ 正在生成中，无法压缩');
+    await expect(run(makeManager({ ok: false, reason: 'no-session' }))).resolves.toBe('⚠️ 当前无活跃会话');
   });
 });

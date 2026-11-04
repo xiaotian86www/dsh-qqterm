@@ -67,7 +67,7 @@ export function sessionAdminAuth(
 }
 
 const USAGE = [
-  '**会话管理**',
+  '🗂 **会话管理**',
   '`/sessions` 当前工作区 · `/sessions all` 全部 · `/sessions archived` 归档',
   '`/sessions resume <序号|id>` 切到某个会话，接上历史继续（工作区跟着切）',
   '`/sessions archive <序号|id>[,…]` 归档（可逆，一次最多 10 个）',
@@ -177,9 +177,9 @@ function parseTargetsOrError(
   usage: string,
 ): { tokens: string[] } | { message: string } {
   const tokens = parseTargetTokens(raw);
-  if (tokens.length === 0) return { message: `缺少目标。用法: \`${usage}\`` };
+  if (tokens.length === 0) return { message: `⚠️ 缺少目标。用法: \`${usage}\`` };
   if (tokens.length > MAX_TARGETS) {
-    return { message: `一次最多处理 ${MAX_TARGETS} 个会话，分几次来吧。` };
+    return { message: `⚠️ 一次最多处理 ${MAX_TARGETS} 个会话，分几次来吧。` };
   }
   return { tokens };
 }
@@ -211,7 +211,7 @@ function statusTags(entry: WorkspaceSession): string[] {
   return entry.live && !entry.current ? ['使用中'] : [];
 }
 
-/** 一行会话的展示文本：`1. ✅ 9d2c4410 · 标题 · 3d 前` */
+/** 一行会话的展示文本：`1. 9d2c4410 · 标题 · 3d 前 ✅`（✅ 只给当前会话） */
 interface RowOptions {
   /** 行首带序号（只有 `/sessions` 的编号能被命令解析） */
   numbered?: boolean;
@@ -228,9 +228,9 @@ function renderRow(entry: WorkspaceSession, index: number, options: RowOptions =
   body.push(...statusTags(entry));
   if (options.withWorkspace && entry.workspace) body.push(entry.workspace);
   const head = options.numbered ? `${index}. ` : '';
-  // ✅ 紧跟 id，不参与 · 分隔（`1. ✅ #id · 标题`）
-  const mark = entry.current ? '✅ ' : '';
-  return `${head}${mark}${body.join(' · ')}`;
+  // 当前项标记放行尾，与 /model、/preset 的按钮标签一致
+  const tail = entry.current ? ' ✅' : '';
+  return `${head}${body.join(' · ')}${tail}`;
 }
 
 /**
@@ -361,7 +361,7 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Categ
           case 'resume':
           case 'r': {
             const arg = rest[0] ?? '';
-            if (arg.trim() === '') return '缺少目标。用法: `/sessions resume <序号|id>`';
+            if (arg.trim() === '') return '⚠️ 缺少目标。用法: `/sessions resume <序号|id>`';
 
             const loaded = await loadEntries();
             if (typeof loaded === 'string') return loaded;
@@ -377,7 +377,7 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Categ
               target = resolveSessionTarget(flattenGroups(groups), arg);
             }
             if (!target.ok) return target.error;
-            if (target.entry.current) return '这已经是当前会话，直接发消息就行';
+            if (target.entry.current) return '✅ 已是当前会话';
 
             const outcome = await manager.switchSession(
               scope,
@@ -412,8 +412,8 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Categ
             const active = loaded.filter((entry) => !entry.archived);
             if (active.length === 0) {
               return loaded.length === 0
-                ? '这个工作区还没有会话，没有可归档的对象。'
-                : '没有未归档的会话：都已在归档里，用 `/sessions archived` 查看。';
+                ? '⚠️ 这个工作区还没有会话，没有可归档的对象。'
+                : '⚠️ 没有未归档的会话：都已在归档里，用 `/sessions archived` 查看。';
             }
 
             const parsed = parseTargetsOrError(rest.join(' '), '/sessions archive <序号|id>[,…]');
@@ -433,7 +433,7 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Categ
               .map((entry) => `「${shortTitle(entry)}」本来就在归档里，跳过`);
             const picks = batch.picks.filter((entry) => !entry.archived);
             if (picks.length === 0) {
-              return [...batch.errors, ...skipped].join('\n') || '没有可归档的会话。';
+              return formatNoPicks(batch.errors, skipped, '没有可归档的会话。');
             }
 
             const results: ArchiveResult[] = [];
@@ -451,14 +451,14 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Categ
             const all = flattenGroups(groups);
             const archived = all.filter((entry) => entry.archived);
             if (archived.length === 0) {
-              return '没有已归档的会话。用 `/sessions archive <序号>` 可以归档一个会话。';
+              return '⚠️ 没有已归档的会话。用 `/sessions archive <序号>` 可以归档一个会话。';
             }
 
             const parsed = parseTargetsOrError(rest.join(' '), '/sessions unarchive <id>[,…]');
             if ('message' in parsed) return parsed.message;
             // 序号只对应 /sessions 那一页，在归档页上没有意义：直接说清楚，别猜
             if (parsed.tokens.some((token) => /^\d+$/.test(token))) {
-              return '序号只对应 `/sessions` 列表；取消归档请用列表里 `#` 开头那 8 位，例如 `/sessions unarchive #9d2c4410`。';
+              return '⚠️ 序号只对应 `/sessions` 列表；取消归档请用列表里 `#` 开头那 8 位，例如 `/sessions unarchive #9d2c4410`。';
             }
 
             const batch = resolveTargets(archived, all, parsed.tokens);
@@ -467,7 +467,7 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Categ
               .map((entry) => `「${shortTitle(entry)}」没有归档，跳过`);
             const picks = batch.picks.filter((entry) => entry.archived);
             if (picks.length === 0) {
-              return [...batch.errors, ...skipped].join('\n') || '没有可恢复的已归档会话。';
+              return formatNoPicks(batch.errors, skipped, '没有可恢复的已归档会话。');
             }
 
             const results: ArchiveResult[] = [];
@@ -481,7 +481,7 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Categ
             return USAGE;
 
           default:
-            return `未知子命令: ${sub}。\`/sessions help\` 看全部用法`;
+            return `⚠️ 未知子命令: ${sub}。\`/sessions help\` 看全部用法`;
         }
       };
 
@@ -520,7 +520,7 @@ function renderList(
 
   const total = entries.length;
   if (total === 0) {
-    const lines = [...workspaceLine];
+    const lines = ['### 🗂 会话（共 0 个）', '', ...workspaceLine];
     lines.push(archivedCount === 0
       ? '这个工作区还没有会话。发一条消息就会创建第一个会话。'
       : `这个工作区没有未归档的会话；已归档 ${archivedCount} 个: \`/sessions archived\``);
@@ -529,7 +529,7 @@ function renderList(
   }
 
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  if (page > pages) return `第 ${page} 页没有内容（共 ${pages} 页）。`;
+  if (page > pages) return `⚠️ 第 ${page} 页没有内容（共 ${pages} 页）。`;
 
   const start = (page - 1) * PAGE_SIZE;
   const shown = entries.slice(start, start + PAGE_SIZE);
@@ -560,6 +560,8 @@ function renderGroups(groups: readonly WorkspaceGroup[]): string {
   const visible = groups.filter((group) => group.sessions.length > 0);
   if (visible.length === 0) {
     return [
+      '### 🗂 全部工作区（0 个工作区）',
+      '',
       '还没有任何工作区会话。',
       '',
       '发一条消息就会在宿主默认工作区里创建第一个会话。',
@@ -608,6 +610,8 @@ function renderGroups(groups: readonly WorkspaceGroup[]): string {
 function renderArchived(entries: readonly WorkspaceSession[], page = 1): string {
   if (entries.length === 0) {
     return [
+      '### 🗄 已归档（共 0 个）',
+      '',
       '没有已归档的会话。',
       '',
       '归档 `/sessions archive <序号>`（隐藏，日志保留）',
@@ -616,7 +620,7 @@ function renderArchived(entries: readonly WorkspaceSession[], page = 1): string 
 
   const total = entries.length;
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  if (page > pages) return `第 ${page} 页没有内容（共 ${pages} 页）。`;
+  if (page > pages) return `⚠️ 第 ${page} 页没有内容（共 ${pages} 页）。`;
 
   const start = (page - 1) * PAGE_SIZE;
   const shown = entries.slice(start, start + PAGE_SIZE);
@@ -643,6 +647,23 @@ function renderArchived(entries: readonly WorkspaceSession[], page = 1): string 
 interface ArchiveResult {
   entry: WorkspaceSession;
   outcome: ArchiveSessionOutcome;
+}
+
+/**
+ * 没有可执行目标时的回包：错误项带 ⚠️，跳过项用 `· ` 单列。
+ *
+ * 第一行必须是图标开头——命令回复要和大模型正文一眼分开。
+ */
+function formatNoPicks(
+  errors: readonly string[],
+  skipped: readonly string[],
+  fallback: string,
+): string {
+  const lines = [
+    ...errors.map((error) => `⚠️ ${error}`),
+    ...skipped.map((note) => `· ${note}`),
+  ];
+  return lines.length > 0 ? lines.join('\n') : `⚠️ ${fallback}`;
 }
 
 /**

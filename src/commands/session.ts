@@ -86,20 +86,20 @@ export function compactCommand({ manager }: CommandDeps): CategorizedCommand {
       });
 
       if (outcome.ok) {
-        if (!outcome.shadowed) return '没有可压缩的历史';
+        if (!outcome.shadowed) return '⚠️ 没有可压缩的历史';
         // 不估算压缩后的占比：真实占用要等下一轮请求才更新，估出来的值会自相矛盾
         return `✅ 已压缩 ${outcome.shadowed} 条历史记录（约 ${num(outcome.tokens ?? 0)} tokens）`;
       }
 
       switch (outcome.reason) {
         case 'no-session':
-          return '当前无活跃会话';
+          return '⚠️ 当前无活跃会话';
         case 'busy':
-          return '正在生成中，无法压缩';
+          return '⚠️ 正在生成中，无法压缩';
         case 'unavailable':
-          return '压缩能力不可用（当前会话的 agent preset 未加载 compaction 服务）';
+          return '⚠️ 压缩能力不可用（当前会话的 agent preset 未加载 compaction 服务）';
         default:
-          return `压缩失败: ${outcome.message ?? '未知错误'}`;
+          return `❌ 压缩失败: ${outcome.message ?? '未知错误'}`;
       }
     },
   };

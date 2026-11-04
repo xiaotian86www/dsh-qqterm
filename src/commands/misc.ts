@@ -51,7 +51,7 @@ export function versionCommand({ manager }: CommandDeps): CategorizedCommand {
     handler: () => {
       const current = manager.getEffectiveModel('c2c', '');
       const modelInfo = current ? `${current.provider}/${current.model}` : '宿主默认';
-      return `dsh-qqbot v${PLUGIN_VERSION} · model: ${modelInfo}`;
+      return `🤖 dsh-qqbot v${PLUGIN_VERSION} · model: ${modelInfo}`;
     },
   };
 }
@@ -93,7 +93,7 @@ export function stopCommand({ manager }: CommandDeps): CategorizedCommand {
       const record = manager.getSessionRecord(scope, peerId);
       // 会话存在不等于正在生成：只有 agent 处于 running 才算有进行中的回复
       if (record === undefined || record.agent.status !== 'running') {
-        return '当前没有进行中的生成';
+        return '⚠️ 当前没有进行中的生成';
       }
 
       // cancel 会让当前轮以 turn/end (kind=interrupted) 收尾，

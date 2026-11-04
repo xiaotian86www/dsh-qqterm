@@ -159,12 +159,12 @@ describe('/sessions list', () => {
     const text = await run(manager, '');
 
     expect(text).toContain('🗂 会话（共 2 个');
-    // 序号 + 短 id + 标题：id 可见才能直接打字操作
-    expect(text).toContain('1. ✅ #cccc1111 · 当前会话');
+    // 序号 + 短 id + 标题：id 可见才能直接打字操作；当前项 ✅ 放行尾
+    expect(text).toContain('1. #cccc1111 · 当前会话');
     expect(text).toContain('2. #dddd2222 · 旧会话');
-    // 当前会话也用按钮渲染（否则缩进不一致），且链接不特殊处理：统一走 resume，
-    // 「已是当前会话」由命令自身识别
-    expect(text).toContain('<qqbot-cmd-input text="/sessions resume #cccc1111" show="1. ✅ #cccc1111');
+    // 当前会话也用按钮渲染（否则缩进不一致），链接不特殊处理：统一走 resume，
+    // 「已是当前会话」由命令自身识别；✅ 在行尾（时间之后）
+    expect(text).toMatch(/<qqbot-cmd-input text="\/sessions resume #cccc1111" show="1\. #cccc1111 · 当前会话 · [^"]* ✅"\/>/);
     // 点击后输入框出现对应操作，且填的是 8 位短 id 而不是完整 uuid
     expect(text).toContain('<qqbot-cmd-input text="/sessions resume #dddd2222" show="2. #dddd2222 · 旧会话');
     expect(text).not.toContain('show="/sessions"');
@@ -392,7 +392,7 @@ describe('/sessions resume', () => {
     const manager = makeManager({
       listWorkspaceSessions: vi.fn(async () => [entry({ current: true })]),
     });
-    expect(await run(manager, 'resume 1')).toContain('已经是当前会话');
+    expect(await run(manager, 'resume 1')).toBe('✅ 已是当前会话');
     expect(manager.switchSession).not.toHaveBeenCalled();
   });
 

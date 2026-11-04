@@ -14,7 +14,7 @@ export function statusCommand({ manager }: CommandDeps): CategorizedCommand {
     handler: (cmdCtx) => {
       const { scope, peerId } = getScopePeer(cmdCtx);
       const status = manager.getStatus(scope, peerId);
-      if (!status.active) return '当前无活跃会话';
+      if (!status.active) return '⚠️ 当前无活跃会话';
       const modelInfo = status.model ? `${status.provider}/${status.model}` : '宿主默认';
       return [
         '📊 会话状态',
