@@ -512,7 +512,7 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
         return {
           ok: false,
           reason: 'unavailable',
-          message: '宿主未挂载 workspace registry（@deepseek-ai/dsh-workspace），或该版本没有 archiveSession',
+          message: '当前 profile 没装会话归档接口（web / desktop 自带）',
         };
       }
       try {
@@ -533,7 +533,7 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
         return {
           ok: false,
           reason: 'unavailable',
-          message: '宿主未挂载 workspace registry（@deepseek-ai/dsh-workspace），或该版本没有 unarchiveSession',
+          message: '当前 profile 没装会话归档接口（web / desktop 自带）',
         };
       }
       try {
@@ -598,9 +598,9 @@ function archiveFailure(
     return { ok: false, reason: 'not-found', message: `宿主找不到会话 ${sessionId}（可能已被删除）` };
   }
   if (name === 'WorkspaceActiveSessionError') {
-    return { ok: false, reason: 'busy', message: `会话仍在运行：${message}` };
+    return { ok: false, reason: 'busy', message: `会话仍在运行: ${message}` };
   }
-  return { ok: false, reason: 'failed', message: `${verb === 'archive' ? '归档' : '取消归档'}失败：${message}` };
+  return { ok: false, reason: 'failed', message: `${verb === 'archive' ? '归档' : '取消归档'}失败: ${message}` };
 }
 
 /** ctx.get 的非抛出版本 */

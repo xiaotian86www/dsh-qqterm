@@ -125,7 +125,7 @@ describe('/ls（当前目录）', () => {
       mkdirSync(join(root, 'many', `d${String(index).padStart(2, '0')}`));
     }
     const text = await run(makeManager(), 'many');
-    expect(text).toContain('还有 2 个子目录未列出');
+    expect(text).toContain('还有 2 个子目录，');
   });
 });
 
@@ -143,12 +143,12 @@ describe('/ls <路径>', () => {
 
   it('目录不存在', async () => {
     const text = await run(makeManager(), 'nope');
-    expect(text).toContain(`目录不存在：\`${join(root, 'nope')}\``);
+    expect(text).toContain(`目录不存在: \`${join(root, 'nope')}\``);
   });
 
   it('目标是文件时报「不是目录」', async () => {
     const text = await run(makeManager(), 'gamma.txt');
-    expect(text).toContain(`不是目录：\`${join(root, 'gamma.txt')}\``);
+    expect(text).toContain(`不是目录: \`${join(root, 'gamma.txt')}\``);
   });
 
   it('绝对路径直接可用', async () => {

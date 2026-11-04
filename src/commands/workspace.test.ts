@@ -147,7 +147,7 @@ describe('/workspace <名字|路径>（切换）', () => {
       makeManager({ change: { ok: false, reason: 'missing', path: 'D:\\nope' } }),
       'D:\\nope',
     );
-    expect(text).toContain('目录不存在：`D:\\nope`');
+    expect(text).toContain('目录不存在: `D:\\nope`');
   });
 
   it('标题有歧义时列出候选并要求绝对路径', async () => {
@@ -155,7 +155,7 @@ describe('/workspace <名字|路径>（切换）', () => {
       makeManager({ change: { ok: false, reason: 'ambiguous', matches: ['repo', 'repo-old'] } }),
       'repo',
     );
-    expect(text).toContain('2 个工作区匹配：repo、repo-old');
+    expect(text).toContain('2 个工作区匹配: repo、repo-old');
     expect(text).toContain('绝对路径');
   });
 
@@ -174,6 +174,6 @@ describe('/workspace <名字|路径>（切换）', () => {
       canChooseWorkspace: vi.fn(),
       changeChatWorkspace: vi.fn(async () => { throw new Error('boom'); }),
     } as unknown as SessionManager;
-    expect(await run(manager, 'other')).toContain('工作区操作失败：boom');
+    expect(await run(manager, 'other')).toContain('工作区操作失败: boom');
   });
 });

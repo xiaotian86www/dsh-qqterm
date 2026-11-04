@@ -114,10 +114,10 @@ export function resolveSessionTarget(
   const matches = entries.filter((entry) => entry.id === arg
     || entry.id.startsWith(arg)
     || shortId(entry.id).startsWith(arg)); // 短 id 与序号无关，必须比短形式
-  if (matches.length === 0) return { ok: false, error: `没有匹配的会话：${arg}` };
+  if (matches.length === 0) return { ok: false, error: `没有匹配的会话: ${arg}` };
   if (matches.length > 1) return { ok: false, error: `id 前缀匹配到 ${matches.length} 个会话，请写长一点` };
   const entry = matches[0];
-  return entry ? { ok: true, entry } : { ok: false, error: `没有匹配的会话：${arg}` };
+  return entry ? { ok: true, entry } : { ok: false, error: `没有匹配的会话: ${arg}` };
 }
 
 /**
@@ -177,7 +177,7 @@ function parseTargetsOrError(
   usage: string,
 ): { tokens: string[] } | { message: string } {
   const tokens = parseTargetTokens(raw);
-  if (tokens.length === 0) return { message: `缺少目标。用法：\`${usage}\`` };
+  if (tokens.length === 0) return { message: `缺少目标。用法: \`${usage}\`` };
   if (tokens.length > MAX_TARGETS) {
     return { message: `一次最多处理 ${MAX_TARGETS} 个会话，分几次来吧。` };
   }
@@ -246,7 +246,7 @@ function renderLine(entry: WorkspaceSession, label: string): string {
 
 /** `/sessions` 列表底部的单行操作提示 */
 function listFooter(archivedCount: number): string {
-  const parts = ['归档 `/sessions archive <序号>`', '`/sessions all` 看全部项目'];
+  const parts = ['归档 `/sessions archive <序号>`', '`/sessions all` 看全部工作区'];
   if (archivedCount > 0) parts.push(`\`/sessions archived\` 看归档（${archivedCount}）`);
   return parts.join(' · ');
 }
@@ -265,7 +265,7 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Categ
     // 会话里可能含其它 chat 的历史标题，归档会影响所有人的列表：只允许私聊 + 白名单
     scope: 'c2c',
     authorized: sessionAdminAuth(config, logger),
-    description: '会话管理：列出 / 恢复 / 归档',
+    description: '列出、恢复、归档会话',
     usage: USAGE,
     handler: async (cmdCtx) => {
       const raw = (cmdCtx.command?.raw ?? '').trim();
@@ -287,7 +287,7 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Categ
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           logger?.warn(`/sessions 列举会话失败: ${message}`);
-          return `⚠️ 读取会话列表失败：${message}`;
+          return `⚠️ 读取会话列表失败: ${message}`;
         }
       };
 
@@ -297,7 +297,7 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Categ
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           logger?.warn(`/sessions all 列举工作区失败: ${message}`);
-          return `⚠️ 读取工作区失败：${message}`;
+          return `⚠️ 读取工作区失败: ${message}`;
         }
       };
 
@@ -361,7 +361,7 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Categ
           case 'resume':
           case 'r': {
             const arg = rest[0] ?? '';
-            if (arg.trim() === '') return '缺少目标。用法：`/sessions resume <序号|id>`';
+            if (arg.trim() === '') return '缺少目标。用法: `/sessions resume <序号|id>`';
 
             const loaded = await loadEntries();
             if (typeof loaded === 'string') return loaded;
@@ -390,8 +390,8 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Categ
               const workspace = await loadWorkspaceInfo();
               return [
                 `✅ 已恢复会话「${shortTitle(target.entry)}」`,
-                `\`${displayId(target.entry.id)}\` · 历史已接上，直接发消息继续`,
-                ...(outcome.unarchived ? ['（该会话原先已归档，恢复时已自动取消归档）'] : []),
+                `\`${displayId(target.entry.id)}\` · 历史已接上`,
+                ...(outcome.unarchived ? ['（原先已归档，已自动取消归档）'] : []),
                 ...(workspace ? [`工作区已跟着切到 **${workspace.title}** · \`${workspace.path}\``] : []),
               ].join('\n');
             }
@@ -401,7 +401,7 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Categ
               case 'in-use':
                 return '⚠️ 该会话正在另一个聊天中使用，先在那个聊天里 /new 再切过来';
               default:
-                return `⚠️ 恢复失败：${outcome.message ?? '未知错误（可能被 Web 端打开占用）'}`;
+                return `⚠️ 恢复失败: ${outcome.message ?? '未知错误（可能被 Web 端打开占用）'}`;
             }
           }
 
@@ -481,7 +481,7 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Categ
             return USAGE;
 
           default:
-            return `未知子命令：${sub}。子命令：list / all / archived / resume / archive / unarchive（\`/sessions help\`）`;
+            return `未知子命令: ${sub}。\`/sessions help\` 看全部用法`;
         }
       };
 
@@ -523,8 +523,8 @@ function renderList(
     const lines = [...workspaceLine];
     lines.push(archivedCount === 0
       ? '这个工作区还没有会话。发一条消息就会创建第一个会话。'
-      : `这个工作区没有未归档的会话；已归档 ${archivedCount} 个：\`/sessions archived\``);
-    if (elsewhere > 0) lines.push(`别的项目里还有 ${elsewhere} 个会话：\`/sessions all\``);
+      : `这个工作区没有未归档的会话；已归档 ${archivedCount} 个: \`/sessions archived\``);
+    if (elsewhere > 0) lines.push(`其它工作区里还有 ${elsewhere} 个会话: \`/sessions all\``);
     return lines.join('\n');
   }
 
@@ -545,7 +545,7 @@ function renderList(
   });
 
   const rest = total - start - shown.length;
-  if (rest > 0) lines.push('', `还有 ${rest} 个更早的会话：\`/sessions ${page + 1}\``);
+  if (rest > 0) lines.push('', `还有 ${rest} 个更早的会话: \`/sessions ${page + 1}\``);
   lines.push('', listFooter(archivedCount));
   return lines.join('\n');
 }
@@ -583,7 +583,7 @@ function renderGroups(groups: readonly WorkspaceGroup[]): string {
     );
 
     if (active.length === 0) {
-      lines.push(`${archivedCount} 个会话全部已归档：\`/sessions archived\``);
+      lines.push(`${archivedCount} 个会话全部已归档: \`/sessions archived\``);
     } else {
       active.slice(0, PAGE_SIZE).forEach((entry) => {
         lines.push(renderLine(entry, renderRow(entry, 0)));
@@ -610,7 +610,7 @@ function renderArchived(entries: readonly WorkspaceSession[], page = 1): string 
     return [
       '没有已归档的会话。',
       '',
-      '归档：`/sessions archive <序号>`（从列表隐藏，日志仍在磁盘上）',
+      '归档 `/sessions archive <序号>`（隐藏，日志保留）',
     ].join('\n');
   }
 
@@ -631,7 +631,7 @@ function renderArchived(entries: readonly WorkspaceSession[], page = 1): string 
   }
 
   const rest = total - start - shown.length;
-  if (rest > 0) lines.push('', `还有 ${rest} 个更早的：\`/sessions archived ${page + 1}\``);
+  if (rest > 0) lines.push('', `还有 ${rest} 个更早的: \`/sessions archived ${page + 1}\``);
   lines.push(
     '',
     '`/sessions unarchive <id>` 取消归档 · `/sessions resume <id>` 直接继续（会自动取消归档）',
@@ -720,12 +720,12 @@ function archiveFailureText(
   const action = verb === 'archive' ? '归档' : '取消归档';
   switch (outcome.reason) {
     case 'unavailable':
-      return `${action}失败：${outcome.message ?? '宿主未挂载会话归档接口'}。归档依赖宿主的 workspace registry（@deepseek-ai/dsh-workspace）：web / desktop profile 自带，自建的最小 profile 需要手动挂载。`;
+      return `${action}失败: ${outcome.message ?? '当前 profile 没装会话归档接口（web / desktop 自带）'}`;
     case 'not-found':
-      return `${action}失败：宿主找不到会话 \`${displayId(entry.id)}\`（可能已被删除）。`;
+      return `${action}失败: 宿主找不到会话 \`${displayId(entry.id)}\`（可能已被删除）`;
     case 'busy':
-      return `${action}失败：该会话还有工作在运行，停不下来。稍后再试。${outcome.message ? `\n${outcome.message}` : ''}`;
+      return `${action}失败: 该会话还有工作在运行，稍后再试`;
     default:
-      return `${action}失败：${outcome.message ?? '未知错误'}`;
+      return `${action}失败: ${outcome.message ?? '未知错误'}`;
   }
 }

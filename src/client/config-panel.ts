@@ -324,7 +324,7 @@ export function ConfigPanel(props?: { bindPhase?: string }): ReactNode {
 
   if (loadError !== null) {
     return createElement('p', { className: 'imqb2-hint', style: { padding: '12px 0' } },
-      `配置加载失败：${loadError}`);
+      `配置加载失败: ${loadError}`);
   }
   if (initial === null || form === null) {
     return createElement('p', { className: 'imqb2-hint', style: { padding: '12px 0' } }, '正在加载配置…');

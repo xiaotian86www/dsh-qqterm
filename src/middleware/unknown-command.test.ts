@@ -167,7 +167,8 @@ describe('buildUnknownCommandReply', () => {
     const reply = buildUnknownCommandReply(base, 'model');
     expect(reply.markdown).toContain('没有 `/modle` 这个指令');
     expect(reply.markdown).toContain('text="/model"');
-    expect(reply.markdown).toContain('/bot-help');
+    // 建议本身就是下一步：不再追加通用的 /bot-help 提示
+    expect(reply.markdown.split('\n')).toHaveLength(2);
     expect(reply.text).toContain('你想用的是不是 /model？');
     expect(reply.text).not.toContain('<qqbot-cmd-input');
   });
@@ -175,6 +176,7 @@ describe('buildUnknownCommandReply', () => {
   it('没有建议时提示去掉斜杠再发', () => {
     const reply = buildUnknownCommandReply({ raw: 'zzzzzzz', name: 'zzzzzzz', prefix: '/' }, undefined);
     expect(reply.markdown).toContain('如果只是普通文本');
+    expect(reply.markdown).toContain('/bot-help');
     expect(reply.markdown).not.toContain('qqbot-cmd-input');
   });
 

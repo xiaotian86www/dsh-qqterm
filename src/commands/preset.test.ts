@@ -112,7 +112,7 @@ describe('/preset（切换）', () => {
     const text = await run(manager, 'beta');
 
     expect(manager.setPresetOverride).toHaveBeenCalledWith('c2c', 'owner', 'beta');
-    expect(text).toBe('✅ preset 已切换: beta\n新会话生效（当前会话保持原 preset，发送 /new 后生效）。');
+    expect(text).toBe('✅ preset 已切换: beta（新会话生效）');
   });
 
   it('切到当前 preset 是可重入的，只回一行且提示会话锁定值', async () => {

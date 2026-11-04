@@ -207,7 +207,7 @@ describe('/sessions list', () => {
       }]),
     });
     const text = await run(manager, '');
-    expect(text).toContain('别的项目里还有 1 个会话');
+    expect(text).toContain('其它工作区里还有 1 个会话');
     expect(text).toContain('/sessions all');
   });
 
@@ -446,21 +446,21 @@ describe('/sessions archive', () => {
       archiveSession: vi.fn(async () => ({
         ok: false,
         reason: 'unavailable',
-        message: '宿主未提供会话归档接口（workspaceRegistry.archiveSession）',
+        message: '当前 profile 没装会话归档接口（web / desktop 自带）',
       })),
     });
     const text = await run(manager, 'archive 1');
     expect(text).toContain('归档失败');
-    expect(text).toContain('workspaceRegistry.archiveSession');
+    expect(text).toContain('归档接口');
   });
 
   it('会话仍在运行时如实报告', async () => {
     const manager = makeManager({
-      archiveSession: vi.fn(async () => ({ ok: false, reason: 'busy', message: '会话仍在运行：generating' })),
+      archiveSession: vi.fn(async () => ({ ok: false, reason: 'busy', message: '会话仍在运行: generating' })),
     });
     const text = await run(manager, 'archive 1');
-    expect(text).toContain('还有工作在运行');
-    expect(text).toContain('generating');
+    // 忙碌是自解释的：只给一句原因，不把宿主原文贴给用户
+    expect(text).toBe('⚠️ 归档失败: 该会话还有工作在运行，稍后再试');
   });
 
   it('全部归档时提示没有可归档对象', async () => {

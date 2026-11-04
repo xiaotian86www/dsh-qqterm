@@ -140,7 +140,7 @@ describe('/model（切换）', () => {
       provider: 'openrouter',
       model: 'deepseek-v4-flash',
     });
-    expect(text).toBe('✅ 模型已切换: openrouter/deepseek-v4-flash\n立即生效，对话上下文保留。');
+    expect(text).toBe('✅ 模型已切换: openrouter/deepseek-v4-flash（立即生效）');
   });
 
   it('切到当前模型是可重入的，返回「已是当前模型」', async () => {

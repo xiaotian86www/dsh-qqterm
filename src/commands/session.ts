@@ -41,7 +41,7 @@ export function newCommand({ manager, config }: CommandDeps): CategorizedCommand
       // 不带参数 = 留在当前工作区；异步释放 agent，不阻塞回复
       if (arg === '') {
         void manager.remove(scope, peerId);
-        return '已开启新会话 ✓';
+        return '✅ 已开启新会话';
       }
 
       // 带参数 = 换工作区（= 换 agent 能读写的目录）：与 /workspace 同一权限面
@@ -60,7 +60,7 @@ export function newCommand({ manager, config }: CommandDeps): CategorizedCommand
       await manager.remove(scope, peerId);
       const changed = await manager.changeChatWorkspace(scope, peerId, arg);
       if (!changed.ok) return describeChangeFailure(changed);
-      return `已开启新会话 ✓\n工作区：${changed.title} · ${changed.path}`;
+      return `✅ 已开启新会话\n工作区: ${changed.title} · ${changed.path}`;
     },
   };
 }

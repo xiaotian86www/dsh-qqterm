@@ -82,7 +82,7 @@ export function presetCommand({ manager, config, logger }: CommandDeps): Categor
         return lines.join('\n');
       }
 
-      return `✅ preset 已切换: ${args}\n新会话生效（当前会话保持原 preset，发送 /new 后生效）。`;
+      return `✅ preset 已切换: ${args}（新会话生效）`;
     },
   };
 }

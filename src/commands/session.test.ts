@@ -53,7 +53,7 @@ describe('/new 命令声明', () => {
 describe('/new（不带参数）', () => {
   it('留在当前工作区：只开新会话，不碰工作区', async () => {
     const manager = makeManager();
-    expect(await run(manager)).toBe('已开启新会话 ✓');
+    expect(await run(manager)).toBe('✅ 已开启新会话');
     expect(manager.remove).toHaveBeenCalledWith('c2c', 'user1');
     expect(manager.changeChatWorkspace).not.toHaveBeenCalled();
     expect(manager.resolveWorkspace).not.toHaveBeenCalled();
@@ -61,7 +61,7 @@ describe('/new（不带参数）', () => {
 
   it('不带参数时不受白名单限制', async () => {
     const manager = makeManager();
-    expect(await run(manager, '', 'stranger')).toBe('已开启新会话 ✓');
+    expect(await run(manager, '', 'stranger')).toBe('✅ 已开启新会话');
     expect(manager.remove).toHaveBeenCalled();
   });
 });
@@ -77,8 +77,8 @@ describe('/new <工作区>', () => {
     const removeAt = manager.remove.mock.invocationCallOrder[0] ?? 0;
     const changeAt = manager.changeChatWorkspace.mock.invocationCallOrder[0] ?? 0;
     expect(removeAt).toBeLessThan(changeAt);
-    expect(text).toContain('已开启新会话 ✓');
-    expect(text).toContain('工作区：repo · D:\\repo');
+    expect(text).toContain('✅ 已开启新会话');
+    expect(text).toContain('工作区: repo · D:\\repo');
   });
 
   it('目标解析失败时不动当前会话', async () => {
@@ -92,7 +92,7 @@ describe('/new <工作区>', () => {
 
     expect(manager.remove).not.toHaveBeenCalled();
     expect(manager.changeChatWorkspace).not.toHaveBeenCalled();
-    expect(text).toContain('目录不存在：`D:\\nope`');
+    expect(text).toContain('目录不存在: `D:\\nope`');
   });
 
   it('换目录在 remove 之后仍失败时如实报告（不回「已开启」）', async () => {
@@ -130,7 +130,7 @@ describe('/new <工作区>', () => {
 
     // 同一群里不带参数 = 普通开新会话
     const plain = { ...groupCtx, command: { raw: '' } } as unknown as SlashCommandHandlerContext;
-    expect(await command.handler(plain)).toBe('已开启新会话 ✓');
+    expect(await command.handler(plain)).toBe('✅ 已开启新会话');
     expect(manager.remove).toHaveBeenCalledWith('group', 'g1');
   });
 });

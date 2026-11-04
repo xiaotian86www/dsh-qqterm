@@ -59,7 +59,7 @@ export function lsCommand({ manager, config, logger }: CommandDeps): Categorized
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         logger?.warn(`/ls 失败: ${message}`);
-        text = `⚠️ 列目录失败：${message}`;
+        text = `⚠️ 列目录失败: ${message}`;
       }
 
       // 统一走 markdown 通道：否则 `###` 与 <qqbot-cmd-input> 会成为字面文本
@@ -141,18 +141,18 @@ async function renderListing(
 ): Promise<string> {
   const info = await manager.currentWorkspaceInfo(scope, peerId).catch(() => undefined);
   if (!info) return '⚠️ 读不到当前工作区。';
-  if (info.missing) return `⚠️ 当前工作区目录不存在：\`${info.path}\``;
+  if (info.missing) return `⚠️ 当前工作区目录不存在: \`${info.path}\``;
 
   const target = resolveLsTarget(info.path, arg);
   const listing = listDirectories(target);
   if (!listing.ok) {
     switch (listing.reason) {
       case 'not-directory':
-        return `⚠️ 不是目录：\`${target}\``;
+        return `⚠️ 不是目录: \`${target}\``;
       case 'denied':
-        return `⚠️ 没有权限读取：\`${target}\``;
+        return `⚠️ 没有权限读取: \`${target}\``;
       default:
-        return `⚠️ 目录不存在：\`${target}\``;
+        return `⚠️ 目录不存在: \`${target}\``;
     }
   }
 
@@ -162,7 +162,7 @@ async function renderListing(
   if (listing.dirs.length === 0) lines.push('（没有子目录）');
 
   if (listing.dirs.length > shown.length) {
-    lines.push('', `还有 ${listing.dirs.length - shown.length} 个子目录未列出：直接 \`/ls <路径>\` 进去`);
+    lines.push('', `还有 ${listing.dirs.length - shown.length} 个子目录，用 \`/ls <路径>\` 进去`);
   }
   return lines.join('\n');
 }

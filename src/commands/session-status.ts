@@ -111,7 +111,7 @@ export function sessionStatusCommand({ manager, config, logger }: CommandDeps): 
     name: 'status',
     category: 'agent',
     scope: 'all',
-    description: '查看会话状态：工作区 / 模型 / 上下文 / token',
+    description: '查看会话状态（含上下文与 token）',
     handler: async (cmdCtx) => {
       const { scope, peerId } = getScopePeer(cmdCtx);
 
@@ -121,7 +121,7 @@ export function sessionStatusCommand({ manager, config, logger }: CommandDeps): 
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         logger?.warn(`/status 失败: ${message}`);
-        text = `⚠️ 读取会话状态失败：${message}`;
+        text = `⚠️ 读取会话状态失败: ${message}`;
       }
 
       // 统一走 markdown 通道：否则 `###` 与 `**` 会成为字面文本

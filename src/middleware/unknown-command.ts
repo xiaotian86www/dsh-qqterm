@@ -93,23 +93,15 @@ export function buildUnknownCommandReply(
   suggestion: string | undefined,
 ): UnknownCommandReply {
   const typed = `${candidate.prefix}${candidate.raw}`;
-  const markdown: string[] = [`⚠️ 没有 \`${typed}\` 这个指令。`];
-  const text: string[] = [`⚠️ 没有 ${typed} 这个指令。`];
+  const markdown = [`⚠️ 没有 \`${typed}\` 这个指令${candidate.prefix === '/' ? '' : '（前缀要半角 `/`）'}。`];
+  const text = [`⚠️ 没有 ${typed} 这个指令${candidate.prefix === '/' ? '' : '（前缀要半角 /）'}。`];
 
-  if (candidate.prefix !== '/') {
-    markdown.push('QQ 指令前缀是半角 `/`，中文输入法下请切到英文标点。');
-    text.push('QQ 指令前缀是半角 /，中文输入法下请切到英文标点。');
-  }
   if (suggestion !== undefined) {
     markdown.push(`你想用的是不是 <qqbot-cmd-input text="/${suggestion}" show="/${suggestion}"/>？`);
     text.push(`你想用的是不是 /${suggestion}？`);
-  }
-
-  markdown.push('发送 `/bot-help` 查看全部指令。');
-  text.push('发送 /bot-help 查看全部指令。');
-  if (suggestion === undefined) {
-    markdown.push('如果只是普通文本，请去掉开头的 `/` 再发一次。');
-    text.push('如果只是普通文本，请去掉开头的 / 再发一次。');
+  } else {
+    markdown.push('如果只是普通文本，去掉开头的 `/` 再发；全部指令见 `/bot-help`。');
+    text.push('如果只是普通文本，去掉开头的 / 再发；全部指令见 /bot-help。');
   }
 
   return { markdown: markdown.join('\n'), text: text.join('\n') };
