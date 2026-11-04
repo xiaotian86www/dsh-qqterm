@@ -374,18 +374,20 @@ describe('/sessions resume', () => {
       expect.objectContaining({ scope: 'c2c', targetId: 'user1', msgId: 'm1' }),
     );
     expect(text).toContain('已恢复会话');
-    // 短 id 去掉 session- 前缀，避免只显示出一个 "session-"
     expect(text).toContain('`#11111111`');
     expect(text).not.toContain('`session-`');
+    // 只回一行：告诉切到了哪个会话，不追加历史/工作区说明
+    expect(text.split('\n')).toHaveLength(1);
+    expect(text).not.toContain('工作区');
   });
 
-  it('恢复已归档会话时提示顺带取消了归档', async () => {
+  it('恢复已归档会话也只回一行', async () => {
     const manager = makeManager({
       listWorkspaceSessions: vi.fn(async () => [entry({ archived: true })]),
       switchSession: vi.fn(async () => ({ ok: true, unarchived: true })),
     });
     const text = await run(manager, `resume ${entry().id}`);
-    expect(text).toContain('已自动取消归档');
+    expect(text).toBe('✅ 已恢复会话「修复登录 bug」 · `#11111111`');
   });
 
   it('已是当前会话时直接提示', async () => {

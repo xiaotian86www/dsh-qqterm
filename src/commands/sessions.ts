@@ -387,13 +387,7 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Categ
               { scope, targetId: peerId, msgId: cmdCtx.message.messageId },
             );
             if (outcome.ok) {
-              const workspace = await loadWorkspaceInfo();
-              return [
-                `✅ 已恢复会话「${shortTitle(target.entry)}」`,
-                `\`${displayId(target.entry.id)}\` · 历史已接上`,
-                ...(outcome.unarchived ? ['（原先已归档，已自动取消归档）'] : []),
-                ...(workspace ? [`工作区已跟着切到 **${workspace.title}** · \`${workspace.path}\``] : []),
-              ].join('\n');
+              return `✅ 已恢复会话「${shortTitle(target.entry)}」 · \`${displayId(target.entry.id)}\``;
             }
             switch (outcome.reason) {
               case 'not-found':
