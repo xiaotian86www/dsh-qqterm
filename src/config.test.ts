@@ -5,7 +5,7 @@ describe('ConfigSchema 默认值（内层外层默认必须对齐：#94-1 不变
   it('完全省略 access → c2cMode open（子 schema 默认生效）', () => {
     const cfg = ConfigSchema({});
     expect(cfg.access.c2cMode).toBe('open');
-    expect(cfg.access.groupMode).toBe('open');
+    expect(cfg.access.c2cAllow).toEqual([]);
   });
 
   it('access: {} → 子字段默认填充 open', () => {

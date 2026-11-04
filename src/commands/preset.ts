@@ -11,7 +11,7 @@ export function presetCommand({ manager, config, logger }: CommandDeps): Categor
   return {
     name: 'preset',
     category: 'agent',
-    // 管理类指令：私聊/群聊均可用，但仅限白名单用户（复用审批的名单语义）
+    // 管理类指令：私聊可用，但仅限白名单用户（复用审批的名单语义）
     scope: 'all',
     authorized: commandAllowlistAuth(config, logger),
     description: '查看或切换 agent preset（用法: /preset [id]）',

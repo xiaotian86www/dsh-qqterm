@@ -79,7 +79,6 @@ export interface QuestionChannelSenderLike {
 }
 
 export interface QuestionChannelConfigLike {
-  requireMention: boolean;
   askTimeoutMs: number;
 }
 
@@ -212,10 +211,9 @@ export class QuestionChannel {
 
   /** 按钮点击作答：解码 button_data 选项下标，推进状态机 */
   public handleInteraction(event: InteractionEvent): boolean {
-    const peerId = event.group_openid ?? event.user_openid;
+    const peerId = event.user_openid;
     if (!peerId) return false;
-    const scope: ChatScope = event.group_openid ? 'group' : 'c2c';
-    const record = this.manager.getSessionRecord(scope, peerId);
+    const record = this.manager.getSessionRecord('c2c', peerId);
     if (!record) return false;
     const entry = this.pending.get(record.sessionKey);
     if (!entry) return false;
@@ -302,12 +300,11 @@ export class QuestionChannel {
 
   /** 发送单个问题：优先带按钮，按钮发送失败降级纯文本 */
   private async sendQuestion(record: QuestionSessionRecordLike, question: UserQuestion): Promise<void> {
-    const hint = record.scope === 'group' && this.config.requireMention === true;
     const keyboard = buildKeyboard(question);
     try {
       if (keyboard) {
         try {
-          await this.sender.sendMarkdown(record.replyTarget, formatQuestion(question, hint, true), { keyboard });
+          await this.sender.sendMarkdown(record.replyTarget, formatQuestion(question, true), { keyboard });
           return;
         } catch (err) {
           // 同上：宿主 logger 在 headless profile 不可见，stderr 才是唯一线索
@@ -315,7 +312,7 @@ export class QuestionChannel {
           this.logger.warn(`im-qqbot: keyboard send failed, fallback to text: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
-      await this.sender.sendMarkdown(record.replyTarget, formatQuestion(question, hint, false));
+      await this.sender.sendMarkdown(record.replyTarget, formatQuestion(question, false));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this.logger.error(`im-qqbot: question send failed key=${record.sessionKey}: ${msg}`);

@@ -133,7 +133,7 @@ export function rejectUnknownCommands(options: UnknownCommandGuardOptions): Midd
 
   return async (ctx, next) => {
     const content = (ctx.message.content ?? '').trim();
-    if (content === '' || !isAddressedToBot(ctx)) {
+    if (content === '') {
       await next();
       return;
     }
@@ -180,23 +180,6 @@ async function sendReply(ctx: MiddlewareContext, reply: UnknownCommandReply): Pr
     ctx.log.error(`[im-qqbot] unknown-command text reply failed: ${errorMessage(err)}`);
     return false;
   }
-}
-
-/**
- * 群聊里没 @bot 的消息不算指令（与 slashCommand 的门槛保持一致），
- * 否则 requireMention=false 的群里随便一条「/」开头的聊天都会被机器人搭话。
- */
-function isAddressedToBot(ctx: MiddlewareContext): boolean {
-  const message = ctx.message as {
-    kind?: string;
-    rawEventType?: string;
-    mentions?: Array<{ is_you?: boolean }>;
-  };
-  if (message.kind !== 'group') return true;
-  return (
-    message.rawEventType === 'GROUP_AT_MESSAGE_CREATE' ||
-    message.mentions?.some((mention) => mention.is_you === true) === true
-  );
 }
 
 /** 编辑距离（滚动两行，长名字也只占 O(n) 内存） */

@@ -29,7 +29,7 @@ export function helpCommand(
         const out: string[] = [];
         for (const cmd of cmds) {
           const name = Array.isArray(cmd.name) ? cmd.name[0] : cmd.name;
-          const scopeTag = cmd.scope === 'c2c' ? ' 💬私聊' : cmd.scope === 'group' ? ' 👥群聊' : '';
+          const scopeTag = cmd.scope === 'c2c' ? ' 💬私聊' : '';
           out.push(`<qqbot-cmd-input text="/${name}" show="/${name}"/>${scopeTag} ${cmd.description ?? ''}`);
         }
         return out;

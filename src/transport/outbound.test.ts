@@ -21,7 +21,6 @@ function createBot(session: StreamSessionLike): QQBotSender {
 }
 
 const c2cTarget: ReplyTarget = { scope: 'c2c', targetId: 'user1', msgId: 'msg1' };
-const groupTarget: ReplyTarget = { scope: 'group', targetId: 'group1', msgId: 'msg1' };
 
 function createRecord(target: ReplyTarget, sessionId = 'sess-qq'): SessionRecord {
   return {
@@ -141,21 +140,21 @@ describe('OutboundRouter.routeStreamFrame', () => {
     expect(bot.sendMarkdown).not.toHaveBeenCalled();
   });
 
-  it('群聊不流式：帧累积后由 assistant/message 静态发送', async () => {
-    const { outbound, bot } = setup({ record: createRecord(groupTarget) });
+  it('没有 msgId 时不流式：帧累积后由 assistant/message 静态发送', async () => {
+    const { outbound, bot } = setup({ record: createRecord({ scope: 'c2c', targetId: 'user1' }) });
 
     outbound.routeStreamFrame('sess-qq', start('a1'));
-    outbound.routeStreamFrame('sess-qq', delta('a1', 'group reply'));
+    outbound.routeStreamFrame('sess-qq', delta('a1', 'static reply'));
     await vi.advanceTimersByTimeAsync(200);
 
     outbound.routeSessionEvent({ header: { id: 'sess-qq' } }, {
       type: 'assistant/message',
-      data: { message: { content: [{ type: 'text', text: 'group reply' }] } },
+      data: { message: { content: [{ type: 'text', text: 'static reply' }] } },
     });
     await vi.advanceTimersByTimeAsync(0);
 
     expect(bot.openStream).not.toHaveBeenCalled();
-    expect(bot.sendMarkdown).toHaveBeenCalledWith(groupTarget, 'group reply');
+    expect(bot.sendMarkdown).toHaveBeenCalledWith({ scope: 'c2c', targetId: 'user1' }, 'static reply');
   });
 
   it('assistant/message 到达时收尾流式：complete 且不重复静态发送', async () => {

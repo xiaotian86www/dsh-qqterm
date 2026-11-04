@@ -1,8 +1,8 @@
 /**
  * SessionManager — 管理聊天会话 → dsh Agent 的映射和生命周期
  *
- * 聊天会话只有一个，key 固定为 `qqbot:${appId}:chat`：任何 QQ 聊天窗口（私聊 /
- * 群聊）续写、看到的都是同一个聊天会话。后台会话（宿主里的 session）仍是多份，
+ * 聊天会话只有一个，key 固定为 `qqbot:${appId}:chat`：任何 QQ 私聊窗口续写、
+ * 看到的都是同一个聊天会话。后台会话（宿主里的 session）仍是多份，
  * `/sessions` 列出并切换、`/new` 新开，切换对所有窗口立即生效。
  *
  * sessionKey → sessionId 的映射存于 prefs（`model-prefs.json`），新会话 id 由
@@ -150,17 +150,17 @@ export class SessionManager {
     this.logger.info(`host adapter capabilities: ${this.host.capabilities.join(', ')}`);
     this.modelResolver = new ModelResolver(ctx, config, logger);
 
-    this.registerScopePromptInjection();
+    this.registerDirectPromptInjection();
   }
 
   /**
-   * 通过 system-prompt/assemble waterfall 注入群聊/私聊额外 system prompt。
+   * 通过 system-prompt/assemble waterfall 注入私聊额外 system prompt。
    *
-   * 该事件在每次 turn 构建 request 时触发；此处按会话 scope（群聊/私聊）
-   * 追加对应的额外 prompt section。会话尚未建立（首次 assemble）或未配置
-   * 额外 prompt 时原样返回，不做改动。
+   * 该事件在每次 turn 构建 request 时触发；此处把 `directPrompt` 作为额外
+   * prompt section 追加。会话尚未建立（首次 assemble）或未配置额外 prompt
+   * 时原样返回，不做改动。
    */
-  private registerScopePromptInjection(): void {
+  private registerDirectPromptInjection(): void {
     const assemble = async (
       _assembly: unknown,
       context: AssembleContext,
@@ -172,7 +172,7 @@ export class SessionManager {
       const record = this.findByAgent(context.agent);
       if (!record) return assembled;
 
-      const prompt = record.scope === 'group' ? this.config.groupPrompt : this.config.directPrompt;
+      const prompt = this.config.directPrompt;
       if (!prompt) return assembled;
 
       return {
@@ -632,7 +632,7 @@ export class SessionManager {
 
   // ── Session 生命周期管理 ──
 
-  /** 聊天会话只有一个：任何窗口（私聊/群聊）都指向同一个 key */
+  /** 聊天会话只有一个：任何私聊窗口都指向同一个 key */
   private sessionKey(): string {
     return `qqbot:${this.config.appId}:chat`;
   }
@@ -700,7 +700,7 @@ export class SessionManager {
   /**
    * 收到一条消息后刷新会话记录上的「当前聊天」信息。
    *
-   * 唯一的会话记录被所有窗口复用，这几项必须跟着最后一条消息走，否则群聊/私聊
+   * 唯一的会话记录被所有窗口复用，这几项必须跟着最后一条消息走，否则
    * prompt、提问作答与回复目标会停在第一个说话的窗口上。
    */
   private touch(

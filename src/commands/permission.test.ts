@@ -22,7 +22,7 @@ vi.mock('../shared/send-helper.ts', () => ({
 const config = ConfigSchema({
   appId: 'app',
   appSecret: 'secret',
-  access: { c2cMode: 'open', c2cAllow: ['owner'], groupMode: 'open', groupAllow: [] },
+  access: { c2cMode: 'open', c2cAllow: ['owner'] },
 } as ImQQBotConfig);
 const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
 
@@ -67,7 +67,7 @@ beforeEach(() => {
 });
 
 describe('/permission 命令声明与鉴权', () => {
-  it('私聊/群聊都可用，但鉴权是严格白名单（不看 c2cMode）', () => {
+  it('私聊可用，但鉴权是严格白名单（不看 c2cMode）', () => {
     const command = permissionCommand({ manager: makeManager(), config, logger });
     expect(command.name).toBe('permission');
     expect(command.scope).toBe('all');
@@ -82,7 +82,7 @@ describe('/permission 命令声明与鉴权', () => {
     const empty = ConfigSchema({
       appId: 'app',
       appSecret: 'secret',
-      access: { c2cMode: 'open', c2cAllow: [], groupMode: 'open', groupAllow: [] },
+      access: { c2cMode: 'open', c2cAllow: [] },
     } as ImQQBotConfig);
     const command = permissionCommand({ manager: makeManager(), config: empty, logger });
     const authorized = command.authorized as (ctx: { message: { senderId?: string } }) => boolean | string;

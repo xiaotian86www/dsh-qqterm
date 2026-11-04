@@ -1,17 +1,15 @@
 /**
  * 入站处理器 — 经 SDK 中间件链处理后的消息 → dsh Agent followup
  *
- * 内容组装逻辑：
+ * 插件只接收 C2C 私聊消息。内容组装逻辑：
  * - Layer 1: userContent（文本 + 语音转录）
  * - Layer 2: quotePart（引用消息块）
- * - Layer 3: userMessage（带发送者标签）
+ * - Layer 3: userMessage（引用块 + 正文）
  * - Layer 4: dynamicCtx（媒体元数据）
- * - Layer 5: agentBody（history + base 拼合）
  */
 import type { ContentBlock } from '@deepseek-ai/dsh-llm';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import type { SessionManager } from '../session/index.ts';
-import type { ImQQBotConfig } from '../config.ts';
 import type { ChatScope, Logger, QuotedAttachment, RawAttachment, ReplyTarget } from '../types.ts';
 import {
   classifyContentType,
@@ -19,20 +17,17 @@ import {
   type DownloadedFile,
   type MediaKind,
 } from './attachment.ts';
-import { clearGroupHistory } from '../features/history-store.ts';
 import type { MiddlewareContext } from '@tencent-connect/qqbot-nodejs';
 
 // ── 类型定义 ──
 
 interface ProcessedMessage {
   rawEventType: string;
-  kind: 'c2c' | 'group';
   senderId: string;
   senderName?: string;
   content: string;
   messageId: string;
   timestamp: string;
-  groupOpenid?: string;
   msgType?: number;
   attachments?: RawAttachment[];
   [key: string]: unknown;
@@ -44,23 +39,8 @@ interface ResolvedQuote {
   attachments?: QuotedAttachment[];
 }
 
-interface HistoryEntry {
-  senderId: string;
-  senderName?: string;
-  content: string;
-  timestamp: number;
-  messageId: string;
-}
-
-interface MentionState {
-  wasMentioned?: boolean;
-}
-
 interface MiddlewareState {
   quote?: ResolvedQuote;
-  history?: HistoryEntry[];
-  envelope?: string;
-  mention?: MentionState;
   processedAttachments?: ProcessedAttachment[];
   downloadedFiles?: DownloadedFile[];
   downloadedQuoteFiles?: DownloadedFile[];
@@ -88,15 +68,14 @@ interface ProcessedAttachment {
 export async function handleInbound(
   ctx: MiddlewareContext,
   manager: SessionManager,
-  config: ImQQBotConfig,
   logger: Logger,
 ): Promise<void> {
   const msg = ctx.message as unknown as ProcessedMessage;
   const mwState = ctx.state as MiddlewareState;
   const { bot } = ctx;
 
-  const scope: ChatScope = msg.kind === 'group' ? 'group' : 'c2c';
-  const peerId = scope === 'group' ? (msg.groupOpenid ?? msg.senderId) : msg.senderId;
+  const scope: ChatScope = 'c2c';
+  const peerId = msg.senderId;
 
   const replyTarget: ReplyTarget = {
     scope,
@@ -105,7 +84,7 @@ export async function handleInbound(
   };
 
   // ── 组装 agentBody（下载结果经 mwState.downloadedFiles 提供） ──
-  const agentBody = assembleAgentBody(msg, mwState, scope, logger);
+  const agentBody = assembleAgentBody(msg, mwState, logger);
 
   if (!agentBody) return;
 
@@ -140,11 +119,6 @@ export async function handleInbound(
   record.agent.followup(message);
   logger.info(`→ followup sent: key=${scope}:${peerId}`);
 
-  // 群消息回复后清空历史缓存（避免下次 @ 时重复组包）
-  if (scope === 'group') {
-    clearGroupHistory(config.appId, msg.groupOpenid ?? msg.senderId);
-  }
-
   // 阻塞等待本轮 turn 收敛，避免后续消息在 turn 运行期间被 followup 打断
   try {
     await record.agent.whenIdle();
@@ -154,7 +128,7 @@ export async function handleInbound(
 }
 
 // ══════════════════════════════════════════════════════════════
-// Body Assembly（5 层组装）
+// Body Assembly（c2c + quote + attachments）
 // ══════════════════════════════════════════════════════════════
 
 /**
@@ -163,40 +137,29 @@ export async function handleInbound(
 function assembleAgentBody(
   msg: ProcessedMessage,
   state: MiddlewareState,
-  scope: ChatScope,
   logger: Logger,
 ): string | null {
-  const isGroup = scope === 'group';
-  const wasMentioned = state.mention?.wasMentioned ?? false;
-
   const userContent = buildUserContent(msg, state, logger);
 
-  if (isEmptyMessage(userContent, msg.attachments, isGroup, wasMentioned)) return null;
+  if (isEmptyMessage(userContent, msg.attachments)) return null;
 
   const quotePart = buildQuotePart(state.quote);
-  const userMessage = buildUserMessage(userContent, quotePart, msg.senderId, msg.senderName, isGroup, wasMentioned);
+  const userMessage = `${quotePart}${userContent}`;
 
   const dynamicCtx = buildDynamicCtx(msg, state);
 
-  const base = dynamicCtx ? `${dynamicCtx}${userMessage}` : userMessage;
-  const agentBody = buildAgentBody(base, state.history, isGroup, wasMentioned);
-
-  return agentBody;
+  return dynamicCtx ? `${dynamicCtx}${userMessage}` : userMessage;
 }
 
 /**
- * 判断消息是否为空：无文本/语音/附件，且非群聊 @。
- * 群聊被 @ 视为有效触发信号，即使内容为空也保留给 agent。
+ * 判断消息是否为空：无文本/语音/附件。
  */
 function isEmptyMessage(
   userContent: string,
   attachments: RawAttachment[] | undefined,
-  isGroup: boolean,
-  wasMentioned: boolean,
 ): boolean {
   if (userContent) return false;
   if (attachments && attachments.length > 0) return false;
-  if (isGroup && wasMentioned) return false;
   return true;
 }
 
@@ -237,27 +200,6 @@ function buildQuotePart(quote?: ResolvedQuote): string {
   const quoteText = quote.text || quote.entry?.content || 'Original content unavailable';
 
   return `[Quoted message begins]\n${quoteText}\n[Quoted message ends]\n[Current message]\n`;
-}
-
-/**
- * Layer 3: 带发送者标签的用户消息
- */
-function buildUserMessage(
-  userContent: string,
-  quotePart: string,
-  senderId: string,
-  senderName: string | undefined,
-  isGroup: boolean,
-  wasMentioned: boolean,
-): string {
-  if (!isGroup) {
-    return `${quotePart}${userContent}`;
-  }
-
-  const mentionTag = wasMentioned ? ' (@you)' : '';
-  const displayName = senderName ?? shortSenderId(senderId);
-  const senderTag = `[${displayName} (${senderId})]`;
-  return `${quotePart}${senderTag} ${userContent}${mentionTag}`;
 }
 
 /**
@@ -339,34 +281,6 @@ function renderMediaLine(
   }
 }
 
-/**
- * Layer 5: 最终 agentBody 拼合
- */
-function buildAgentBody(
-  base: string,
-  history: HistoryEntry[] | undefined,
-  isGroup: boolean,
-  wasMentioned: boolean,
-): string {
-  if (!isGroup || !wasMentioned || !history || history.length === 0) {
-    return base;
-  }
-
-  const historyLines = history.map(h => {
-    const name = h.senderName ?? shortSenderId(h.senderId);
-    return `[${name} (${h.senderId})] ${h.content}`;
-  });
-
-  return [
-    '[Chat history begins]',
-    ...historyLines,
-    '',
-    '[Chat history ends]',
-    '[Current message]',
-    base,
-  ].join('\n');
-}
-
 // ══════════════════════════════════════════════════════════════
 // 辅助函数
 // ══════════════════════════════════════════════════════════════
@@ -441,12 +355,4 @@ function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes}B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
-}
-
-/** 发送者短标识长度（openid 前 N 位，无昵称时兜底） */
-const SENDER_SHORT_ID_LEN = 8;
-
-/** 无昵称时用 openid 前 N 位作为匿名标识 */
-function shortSenderId(senderId: string): string {
-  return senderId.slice(0, SENDER_SHORT_ID_LEN);
 }

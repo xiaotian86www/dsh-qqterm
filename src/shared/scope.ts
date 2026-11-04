@@ -7,12 +7,9 @@ import type { SlashCommandHandlerContext } from '@tencent-connect/qqbot-nodejs';
 
 /**
  * 从命令上下文提取 scope + peerId
+ *
+ * 插件只处理后 C2C 私聊消息，peerId 恒为发送者 user openid。
  */
-export function getScopePeer(cmdCtx: SlashCommandHandlerContext): { scope: 'c2c' | 'group'; peerId: string } {
-  const msg = cmdCtx.message;
-  const scope = msg.kind === 'group' ? 'group' : 'c2c';
-  const peerId = scope === 'group'
-    ? ((msg as unknown as Record<string, unknown>).groupOpenid as string ?? msg.senderId)
-    : msg.senderId;
-  return { scope, peerId };
+export function getScopePeer(cmdCtx: SlashCommandHandlerContext): { scope: 'c2c'; peerId: string } {
+  return { scope: 'c2c', peerId: cmdCtx.message.senderId };
 }

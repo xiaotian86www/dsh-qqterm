@@ -399,7 +399,7 @@ function BoundView({ appId, recheck }: { appId: string; recheck: () => void }): 
       createElement(QqBotIcon, { size: 28 }),
       createElement('div', { className: 'imqb-status-meta' },
         createElement('p', { className: 'imqb-status-title' }, '已绑定'),
-        createElement('p', { className: 'imqb-status-sub imqb-mono' }, `AppID ${appId} · 私聊与群聊已接入`),
+        createElement('p', { className: 'imqb-status-sub imqb-mono' }, `AppID ${appId} · 私聊已接入`),
       ),
     ),
     createElement('div', { className: 'imqb-status-actions' },

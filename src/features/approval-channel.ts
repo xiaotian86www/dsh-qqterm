@@ -172,10 +172,9 @@ export class ApprovalChannel {
 
   /** 按钮点击决策：解码 button_data，校验点击者授权，settle pending 审批 */
   public handleInteraction(event: InteractionEvent): boolean {
-    const peerId = event.group_openid ?? event.user_openid;
+    const peerId = event.user_openid;
     if (!peerId) return false;
-    const scope: ChatScope = event.group_openid ? 'group' : 'c2c';
-    const record = this.manager.getSessionRecord(scope, peerId);
+    const record = this.manager.getSessionRecord('c2c', peerId);
     if (!record) return false;
     const entry = this.pending.get(record.sessionKey);
     if (!entry) return false;
@@ -192,7 +191,7 @@ export class ApprovalChannel {
     }
 
     // 白名单模式下审批只认名单内用户；点击者身份缺失同样拒绝（fail-closed，#94-3）
-    const clicker = event.group_member_openid ?? event.user_openid;
+    const clicker = event.user_openid;
     if (this.config.access.c2cMode === 'allowlist'
       && (!clicker || !this.config.access.c2cAllow.includes(clicker))) {
       this.logger.warn(`im-qqbot: approval button rejected (clicker not allowlisted): user=${clicker ?? '(missing)'} key=${record.sessionKey}`);

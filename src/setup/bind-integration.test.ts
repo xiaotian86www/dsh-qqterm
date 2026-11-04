@@ -35,7 +35,7 @@ const SHARED_PATCH = [
   '    enabled: false',
   '- id: im-qqbot',
   '  config:',
-  '    requireMention: true',
+  '    directPrompt: 旧提示词',
   '- id: llm-deepseek',
   '  config:',
   '    baseURL: https://example.com/v1',
@@ -132,9 +132,9 @@ describe('绑定链路 × 真实 persist 落盘（#53 回归）', () => {
 
       // 2. 配置保存（默认处理器 → updateProfileConfig 真写盘）
       const configRes = fakeRes();
-      await invoke(routes.get(BIND_CONFIG_PATH), fakeReq('POST', '{"requireMention":false}'), configRes);
+      await invoke(routes.get(BIND_CONFIG_PATH), fakeReq('POST', '{"streaming":false}'), configRes);
       expect(configRes.statusCode).toBe(200);
-      expect(readFileSync(patchPath, 'utf8')).toContain('requireMention: false');
+      expect(readFileSync(patchPath, 'utf8')).toContain('streaming: false');
       expect(readFileSync(patchPath, 'utf8')).toContain('appId: test-app');
       expectSharedPreserved(patchPath);
 
@@ -178,22 +178,20 @@ describe('绑定链路 × 真实 persist 落盘（#53 回归）', () => {
     const routes = registerRealRoutes(() => null);
     const res = fakeRes();
     await invoke(routes.get(BIND_CONFIG_PATH), fakeReq('POST', JSON.stringify({
-      requireMention: false,
       streaming: false,
       showToolResults: true,
       debug: true,
       provider: 'pi-ai',
       model: 'deepseek-chat',
-      groupPrompt: '群聊提示词',
       directPrompt: '私聊提示词',
-      access: { c2cMode: 'allowlist', c2cAllow: ['u1'], groupMode: 'open', groupAllow: [] },
+      access: { c2cMode: 'allowlist', c2cAllow: ['u1'] },
     })), res);
 
     expect(res.statusCode).toBe(200);
     const after = readFileSync(patchPath, 'utf8');
     for (const expected of [
-      'requireMention: false', 'streaming: false', 'showToolResults: true', 'debug: true',
-      "provider: pi-ai", 'groupPrompt: 群聊提示词', 'directPrompt: 私聊提示词',
+      'streaming: false', 'showToolResults: true', 'debug: true',
+      "provider: pi-ai", 'directPrompt: 私聊提示词',
       'c2cMode: allowlist', 'c2cAllow:', '- u1',
     ]) {
       expect(after).toContain(expected);
@@ -204,10 +202,10 @@ describe('绑定链路 × 真实 persist 落盘（#53 回归）', () => {
   it.each([
     ['非法 JSON body', 'not-json{'],
     ['非对象 body', '"string"'],
-    ['凭据字段', '{"appId":"hack","requireMention":false}'],
+    ['凭据字段', '{"appId":"hack","streaming":false}'],
     ['只读 cwd 字段', '{"cwd":"/tmp"}'],
     ['未知字段', '{"timeoutMs":100}'],
-    ['类型错误（requireMention 传字符串）', '{"requireMention":"yes"}'],
+    ['类型错误（streaming 传字符串）', '{"streaming":"yes"}'],
   ])('配置保存拒绝：%s → 400 且文件不变', async (_name, body) => {
     dir = mkdtempSync(join(tmpdir(), 'im-qqbot-bind-rej-'));
     patchPath = join(dir, 'cordis.patch.yml');
@@ -228,7 +226,7 @@ describe('绑定链路 × 真实 persist 落盘（#53 回归）', () => {
     profileDirState.dir = undefined;
     const routes = registerRealRoutes(() => null);
     const res = fakeRes();
-    await invoke(routes.get(BIND_CONFIG_PATH), fakeReq('POST', '{"requireMention":false}'), res);
+    await invoke(routes.get(BIND_CONFIG_PATH), fakeReq('POST', '{"streaming":false}'), res);
     expect(res.statusCode).toBe(500);
     dir = mkdtempSync(join(tmpdir(), 'im-qqbot-bind-nodir-')); // 供 afterEach 清理
   });
@@ -241,7 +239,7 @@ describe('绑定链路 × 真实 persist 落盘（#53 回归）', () => {
 
     const routes = registerRealRoutes(() => null);
     const first = fakeRes();
-    await invoke(routes.get(BIND_CONFIG_PATH), fakeReq('POST', '{"requireMention":false}'), first);
+    await invoke(routes.get(BIND_CONFIG_PATH), fakeReq('POST', '{"streaming":false}'), first);
     expect(first.statusCode).toBe(200);
 
     // 拉开 mtime 后重放同值提交
@@ -250,7 +248,7 @@ describe('绑定链路 × 真实 persist 落盘（#53 回归）', () => {
     utimesSync(patchPath, past, past);
 
     const second = fakeRes();
-    await invoke(routes.get(BIND_CONFIG_PATH), fakeReq('POST', '{"requireMention":false}'), second);
+    await invoke(routes.get(BIND_CONFIG_PATH), fakeReq('POST', '{"streaming":false}'), second);
     expect(second.statusCode).toBe(200);
     expect(statSync(patchPath).mtimeMs).toBe(past.getTime()); // 无变化 → 无写 → mtime 不动
   });
@@ -262,13 +260,13 @@ describe('绑定链路 × 真实 persist 落盘（#53 回归）', () => {
     profileDirState.dir = dir;
 
     const routes = registerRealRoutes(() => null);
-    const longPrompt = '你是一个专业的 QQ 群助手。'.repeat(400); // ~8KB UTF-8
+    const longPrompt = '你是一个专业的 QQ 私聊助手。'.repeat(400); // ~8KB UTF-8
     const res = fakeRes();
-    await invoke(routes.get(BIND_CONFIG_PATH), fakeReq('POST', JSON.stringify({ groupPrompt: longPrompt })), res);
+    await invoke(routes.get(BIND_CONFIG_PATH), fakeReq('POST', JSON.stringify({ directPrompt: longPrompt })), res);
 
     expect(res.statusCode).toBe(200);
     const after = readFileSync(patchPath, 'utf8');
-    expect(after).toContain('你是一个专业的 QQ 群助手。');
+    expect(after).toContain('你是一个专业的 QQ 私聊助手。');
     expectSharedPreserved(patchPath);
   });
 
@@ -298,7 +296,7 @@ describe('绑定链路 × 真实 persist 落盘（#53 回归）', () => {
     const routes = registerRealRoutes(() => null);
     const res = fakeRes();
     await invoke(routes.get(BIND_CONFIG_PATH), fakeReq('POST', JSON.stringify({
-      access: { c2cMode: 'allowlist', c2cAllow: Array.from({ length: 5000 }, (_v, i) => `openid-${i}`), groupMode: 'open', groupAllow: [] },
+      access: { c2cMode: 'allowlist', c2cAllow: Array.from({ length: 5000 }, (_v, i) => `openid-${i}`) },
     })), res);
 
     expect(res.statusCode).toBe(200);

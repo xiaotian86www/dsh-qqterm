@@ -115,22 +115,4 @@ describe('/new <工作区>', () => {
     expect(manager.changeChatWorkspace).not.toHaveBeenCalled();
     expect(text).toContain('只在私聊 + 白名单');
   });
-
-  it('群聊里不能改工作区（与 /workspace 一致），但直接 /new 仍然可以', async () => {
-    const manager = makeManager();
-    const command = newCommand({ manager: manager as unknown as SessionManager, config, logger });
-    const groupCtx = {
-      message: { senderId: 'user1', kind: 'group', groupOpenid: 'g1', messageId: 'm1' },
-      command: { raw: 'repo' },
-    } as unknown as SlashCommandHandlerContext;
-
-    const text = await command.handler(groupCtx);
-    expect(text).toContain('只在私聊 + 白名单');
-    expect(manager.remove).not.toHaveBeenCalled();
-
-    // 同一群里不带参数 = 普通开新会话
-    const plain = { ...groupCtx, command: { raw: '' } } as unknown as SlashCommandHandlerContext;
-    expect(await command.handler(plain)).toBe('✅ 已开启新会话');
-    expect(manager.remove).toHaveBeenCalledWith();
-  });
 });

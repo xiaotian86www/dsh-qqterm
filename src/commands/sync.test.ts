@@ -41,7 +41,7 @@ describe('/bot-sync', () => {
   it('面板与菜单都成功时两行结果', async () => {
     await expect(run()).resolves.toBe([
       '✅ 已同步 QQ 侧配置',
-      '指令面板: 私聊 2 项 · 群聊 2 项',
+      '指令面板: 私聊 2 项',
       '自定义菜单: 4 项',
     ].join('\n'));
   });
@@ -57,7 +57,7 @@ describe('/bot-sync', () => {
     const text = await run(api);
     expect(text).toBe([
       '⚠️ QQ 侧配置部分同步失败',
-      '✅ 指令面板: 私聊 2 项 · 群聊 2 项',
+      '✅ 指令面板: 私聊 2 项',
       '❌ 自定义菜单: 40030020 内容存在安全风险',
     ].join('\n'));
     expect(logger.warn).toHaveBeenCalled();

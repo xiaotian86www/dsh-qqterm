@@ -711,7 +711,7 @@ function formatNoPicks(
  * 渲染归档 / 取消归档结果。
  *
  * 单目标时保留逐条详情；多目标时给一份清单（每行一个 ✅/⚠️），跳过项与解析
- * 失败项单列，避免一条命令几十行把群聊刷屏。
+ * 失败项单列，避免一条命令几十行把聊天刷屏。
  */
 function renderArchiveResults(
   verb: 'archive' | 'unarchive',

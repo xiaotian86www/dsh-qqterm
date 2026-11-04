@@ -46,10 +46,10 @@ describe('msgid-cache', () => {
     ]);
   });
 
-  it('expires group messages after 5 minutes', () => {
+  it('expires cached ids after 30 minutes', () => {
     vi.useFakeTimers();
-    cacheMsgId('group', 'g-cache-1', 'mg1');
-    vi.advanceTimersByTime(5 * 60 * 1000 + 1);
-    expect(getCachedReplyIds('group', 'g-cache-1')).toEqual([]);
+    cacheMsgId('c2c', 'u-cache-ttl', 'mt1');
+    vi.advanceTimersByTime(30 * 60 * 1000 + 1);
+    expect(getCachedReplyIds('c2c', 'u-cache-ttl')).toEqual([]);
   });
 });

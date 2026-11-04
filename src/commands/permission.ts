@@ -37,7 +37,7 @@ export function permissionCommand({ manager, config, logger }: CommandDeps): Cat
   return {
     name: 'permission',
     category: 'agent',
-    // 管理类指令：私聊/群聊都可用，但必须过白名单（见文件头）
+    // 管理类指令：私聊可用，但必须过白名单（见文件头）
     scope: 'all',
     authorized: permissionCommandAuth(config, logger),
     description: '查看或切换权限预设',

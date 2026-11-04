@@ -668,7 +668,7 @@ describe('sessionAdminAuth', () => {
   const withAllow = ConfigSchema({
     appId: 'app',
     appSecret: 'secret',
-    access: { c2cMode: 'open', c2cAllow: ['user1'], groupMode: 'open', groupAllow: [] },
+    access: { c2cMode: 'open', c2cAllow: ['user1'] },
   } as ImQQBotConfig);
 
   it('名单内用户放行（open 模式也一样）', () => {

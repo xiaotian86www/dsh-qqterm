@@ -2,7 +2,7 @@
 
 <img width="120" src="https://img.shields.io/badge/🤖-QQ_Bot-blue?style=for-the-badge" alt="QQ Bot" />
 
-**基于 [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) (dsh) 的 QQ Bot 插件，将 DeepSeek AI 助手接入 QQ 私聊与群聊。**
+**基于 [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) (dsh) 的 QQ Bot 插件，将 DeepSeek AI 助手接入 QQ 私聊。**
 
 [![npm version](https://img.shields.io/npm/v/@tencent-connect/dsh-qqbot)](https://www.npmjs.com/package/@tencent-connect/dsh-qqbot)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
@@ -98,14 +98,11 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqbot/cordis.dev.yml
 | `provider` | string | `deepseek-official` | LLM 提供商名称 |
 | `model` | string | `deepseek-chat` | 模型名称 |
 | `preset` | string | - | Agent preset id |
-| `requireMention` | boolean | `true` | 群聊是否需要 @bot 才触发 |
-| `groupPrompt` | string | - | 群聊额外 system prompt |
 | `directPrompt` | string | - | 私聊额外 system prompt |
 | `textChunkLimit` | number | `4500` | 单条消息最大字符数 |
-| `streaming` | boolean | `true` | 是否启用流式输出（群聊始终不启用） |
+| `streaming` | boolean | `true` | 是否启用流式输出 |
 | `processingTimeoutMs` | number | `1800000` | 处理超时(ms)，超时中断当前 LLM 调用 |
 | `maxQueue` | number | `20` | 并发队列最大长度 |
-| `historyLimit` | number | `10` | 群历史缓冲条数 |
 | `askTimeoutMs` | number | `300000` | 待答问题超时(ms)，默认 5 分钟（ask_user_question） |
 | `showToolResults` | boolean | `false` | 是否展示工具调用成功结果（错误始终展示） |
 | `debug` | boolean | `false` | 调试模式 |
@@ -114,11 +111,11 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqbot/cordis.dev.yml
 
 插件区分两个概念：**聊天会话**是 QQ 这一侧当前的对话现场，**后台会话**是宿主里的 session 日志。
 
-- 聊天会话全 bot 只有一个：任何聊天窗口（私聊或群聊）续写、看到的都是同一段上下文。
+- 聊天会话全 bot 只有一个：任何私聊窗口续写、看到的都是同一段上下文。
 - 后台会话仍有多份：`/sessions` 列出并切换，`/new` 新开一个，切换对所有窗口立即生效。
 - 会话不按闲置时间回收：长任务跑再久也不会被中断。
 
-多个窗口同时说话时，回复发给最后一条消息所在的窗口。
+多个私聊同时说话时，回复发给最后一条消息所在的私聊。
 
 ### 访问控制（access）
 
@@ -126,8 +123,6 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqbot/cordis.dev.yml
 |------|------|--------|------|
 | `access.c2cMode` | `open`/`allowlist`/`disabled` | `open` | 私聊访问模式 |
 | `access.c2cAllow` | string[] | `[]` | 私聊白名单（user openid） |
-| `access.groupMode` | `open`/`allowlist`/`disabled` | `open` | 群聊访问模式 |
-| `access.groupAllow` | string[] | `[]` | 群聊白名单（group openid） |
 
 ### 富媒体理解（media）
 
@@ -161,7 +156,7 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqbot/cordis.dev.yml
 |------|------|--------|------|
 | `panel.autoSync` | boolean | `true` | 机器人就绪后自动把当前指令同步到指令面板 |
 
-指令面板就是手机 QQ 里输入 `/` 后弹出的指令列表。开启 `panel.autoSync` 后，每次机器人就绪都会把插件内置命令（含说明）推到私聊、群聊两个全局面板；没有面板时创建，已有本插件建的面板（`remark` 为 `im-qqbot:commands`）时原地更新。改完命令想立即重推，发 `/bot-sync`（仅白名单可用）。
+指令面板就是手机 QQ 里输入 `/` 后弹出的指令列表。开启 `panel.autoSync` 后，每次机器人就绪都会把插件内置命令（含说明）推到私聊全局面板；没有面板时创建，已有本插件建的面板（`remark` 为 `im-qqbot:commands`）时原地更新。改完命令想立即重推，发 `/bot-sync`（仅白名单可用）。
 
 ### 自定义菜单（menu）
 

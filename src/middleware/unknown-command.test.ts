@@ -46,9 +46,6 @@ interface Harness {
 }
 
 interface HarnessOptions {
-  kind?: 'c2c' | 'group';
-  rawEventType?: string;
-  mentions?: Array<{ is_you?: boolean }>;
   markdownFails?: boolean;
   textFails?: boolean;
 }
@@ -77,10 +74,8 @@ function makeHarness(content: string, options: HarnessOptions = {}): Harness {
     message: {
       content,
       senderId: 'u1',
-      kind: options.kind ?? 'c2c',
+      kind: 'c2c',
       messageId: 'm1',
-      rawEventType: options.rawEventType,
-      mentions: options.mentions,
     },
     replyTarget: { scope: 'c2c', targetId: 'u1', msgId: 'm1' },
     state: {},
@@ -223,23 +218,6 @@ describe('rejectUnknownCommands（中间件行为）', () => {
       expect(h.next, content).toHaveBeenCalledTimes(1);
       expect(h.isStopped(), content).toBe(false);
     }
-  });
-
-  it('群聊未 @bot 的消息不拦截', async () => {
-    const h = await run('/modle', { kind: 'group' });
-    expect(h.next).toHaveBeenCalledTimes(1);
-    expect(h.isStopped()).toBe(false);
-  });
-
-  it('群聊 @bot 的拼错指令照样拦截', async () => {
-    const h = await run('/modle', { kind: 'group', rawEventType: 'GROUP_AT_MESSAGE_CREATE' });
-    expect(h.next).not.toHaveBeenCalled();
-    expect(h.isStopped()).toBe(true);
-  });
-
-  it('群聊 mentions 里 is_you 也视为 @bot', async () => {
-    const h = await run('/modle', { kind: 'group', mentions: [{ is_you: true }] });
-    expect(h.isStopped()).toBe(true);
   });
 
   it('markdown 发不出去时退纯文本，仍然拦截', async () => {

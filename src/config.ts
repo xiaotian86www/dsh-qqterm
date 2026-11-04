@@ -8,10 +8,6 @@ export interface AccessControlConfig {
   c2cMode: 'open' | 'allowlist' | 'disabled';
   /** C2C 白名单（user openid） */
   c2cAllow: string[];
-  /** 群聊访问模式 */
-  groupMode: 'open' | 'allowlist' | 'disabled';
-  /** 群聊白名单（group openid） */
-  groupAllow: string[];
 }
 
 export interface MediaConfig {
@@ -75,15 +71,11 @@ export interface ImQQBotConfig {
   model?: string;
   /** Agent preset id */
   preset?: string;
-  /** 是否启用群消息 @mention 门控 */
-  requireMention: boolean;
-  /** 群聊额外 system prompt */
-  groupPrompt?: string;
   /** 私聊额外 system prompt */
   directPrompt?: string;
   /** 单条消息最大长度（QQ 限制约 5000 字符） */
   textChunkLimit: number;
-  /** 是否启用流式输出（群聊始终不启用） */
+  /** 是否启用流式输出 */
   streaming: boolean;
   /** 并发队列最大长度 */
   maxQueue: number;
@@ -91,8 +83,6 @@ export interface ImQQBotConfig {
   processingTimeoutMs: number;
   /** 待答问题超时(ms)，超时自动拒绝并提示（ask_user_question） */
   askTimeoutMs: number;
-  /** 群历史缓冲条数 */
-  historyLimit: number;
   /** 访问控制 */
   access: AccessControlConfig;
   /** 是否展示工具调用成功结果（工具错误始终展示） */
@@ -115,8 +105,6 @@ export interface ImQQBotConfig {
 export const AccessControlSchema: Schema<AccessControlConfig> = Schema.object({
   c2cMode: Schema.union(['open', 'allowlist', 'disabled']).default('open').description('C2C访问模式（默认开放）'),
   c2cAllow: Schema.array(Schema.string()).default([]).description('C2C白名单（QQ OpenID）'),
-  groupMode: Schema.union(['open', 'allowlist', 'disabled']).default('open').description('群聊访问模式（默认开放：群自带进群门槛 + @bot 触发）'),
-  groupAllow: Schema.array(Schema.string()).default([]).description('群聊白名单（群 OpenID）'),
 });
 
 export const ConfigSchema: Schema<ImQQBotConfig> = Schema.object({
@@ -125,20 +113,15 @@ export const ConfigSchema: Schema<ImQQBotConfig> = Schema.object({
   provider: Schema.string().description('LLM provider name'),
   model: Schema.string().description('Model name'),
   preset: Schema.string().description('Agent preset id'),
-  requireMention: Schema.boolean().default(true).description('群聊是否需要@bot触发'),
-  groupPrompt: Schema.string().description('群聊额外system prompt'),
   directPrompt: Schema.string().description('私聊额外system prompt'),
   textChunkLimit: Schema.number().default(4500).description('单条消息最大字符数'),
-  streaming: Schema.boolean().default(true).description('是否启用流式输出（群聊始终不启用）'),
+  streaming: Schema.boolean().default(true).description('是否启用流式输出'),
   maxQueue: Schema.number().default(20).description('并发队列最大长度'),
   processingTimeoutMs: Schema.number().default(30 * 60 * 1000).description('处理超时(ms)，超时中断当前 LLM 调用'),
   askTimeoutMs: Schema.number().default(5 * 60 * 1000).description('待答问题超时(ms)，超时自动拒绝并提示'),
-  historyLimit: Schema.number().default(10).description('群历史缓冲条数'),
   access: AccessControlSchema.default({
     c2cMode: 'open',
     c2cAllow: [],
-    groupMode: 'open',
-    groupAllow: [],
   }).description('访问控制'),
   showToolResults: Schema.boolean().default(false).description('是否展示工具调用成功结果（错误始终展示）'),
   debug: Schema.boolean().default(false),

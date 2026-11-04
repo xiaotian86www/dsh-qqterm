@@ -9,7 +9,7 @@ export function modelCommand({ manager, config, logger }: CommandDeps): Categori
   return {
     name: 'model',
     category: 'agent',
-    // 管理类指令：私聊/群聊均可用，但仅限白名单用户（与 /preset 同构）
+    // 管理类指令：私聊可用，但仅限白名单用户（与 /preset 同构）
     scope: 'all',
     authorized: commandAllowlistAuth(config, logger),
     description: '查看或切换模型（用法: /model [provider/model]）',

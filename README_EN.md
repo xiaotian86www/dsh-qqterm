@@ -2,7 +2,7 @@
 
 <img width="120" src="https://img.shields.io/badge/🤖-QQ_Bot-blue?style=for-the-badge" alt="QQ Bot" />
 
-**A QQ Bot plugin for [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) (dsh), connecting DeepSeek AI assistants to QQ private and group chats.**
+**A QQ Bot plugin for [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) (dsh), connecting DeepSeek AI assistants to QQ private chats.**
 
 [![npm version](https://img.shields.io/npm/v/@tencent-connect/dsh-qqbot)](https://www.npmjs.com/package/@tencent-connect/dsh-qqbot)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
@@ -98,14 +98,11 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqbot/cordis.dev.yml
 | `provider` | string | `deepseek-official` | LLM provider name |
 | `model` | string | `deepseek-chat` | Model name |
 | `preset` | string | - | Agent preset id |
-| `requireMention` | boolean | `true` | Whether group messages require @bot to trigger |
-| `groupPrompt` | string | - | Extra system prompt for group chats |
 | `directPrompt` | string | - | Extra system prompt for direct chats |
 | `textChunkLimit` | number | `4500` | Max chars per message |
-| `streaming` | boolean | `true` | Enable streaming output (always disabled in groups) |
+| `streaming` | boolean | `true` | Enable streaming output |
 | `processingTimeoutMs` | number | `1800000` | Processing timeout (ms), aborts the current LLM call |
 | `maxQueue` | number | `20` | Max concurrent queue length |
-| `historyLimit` | number | `10` | Group history buffer size |
 | `askTimeoutMs` | number | `300000` | Question timeout (ms), default 5 min (ask_user_question) |
 | `showToolResults` | boolean | `false` | Show successful tool-call results (errors always shown) |
 | `debug` | boolean | `false` | Debug mode |
@@ -115,11 +112,11 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqbot/cordis.dev.yml
 The plugin separates two things: the **chat session** is the conversation the QQ side is in,
 and **background sessions** are the host's session logs.
 
-- There is exactly one chat session: every chat window (private or group) reads and continues the same context.
+- There is exactly one chat session: every private chat window reads and continues the same context.
 - Background sessions stay multiple: `/sessions` lists and switches them, `/new` starts one, and a switch takes effect in every window immediately.
 - Sessions are never reclaimed by time: with a single chat session, unloading and resuming the same log buys nothing and only interrupts long-running tasks.
 
-On upgrade, the first window to speak adopts the old per-chat session plus its model, preset and workspace preferences; the other old sessions remain reachable through `/sessions`. When several windows talk at once, the reply goes to the window of the latest message.
+On upgrade, the first window to speak adopts the old per-chat session plus its model, preset and workspace preferences; the other old sessions remain reachable through `/sessions`. When several private chats talk at once, the reply goes to the chat of the latest message.
 
 ### Access control (access)
 
@@ -127,8 +124,6 @@ On upgrade, the first window to speak adopts the old per-chat session plus its m
 |------|------|--------|------|
 | `access.c2cMode` | `open`/`allowlist`/`disabled` | `open` | Direct-chat access mode |
 | `access.c2cAllow` | string[] | `[]` | Direct-chat allowlist (user openid) |
-| `access.groupMode` | `open`/`allowlist`/`disabled` | `open` | Group access mode |
-| `access.groupAllow` | string[] | `[]` | Group allowlist (group openid) |
 
 ### Rich media (media)
 

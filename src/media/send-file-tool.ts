@@ -1,5 +1,5 @@
 /**
- * 内置 qqbot_send_file 工具 — 将本地文件发送给 QQ 用户或群。
+ * 内置 qqbot_send_file 工具 — 将本地文件发送给 QQ 用户。
  *
  *   - 发送目标默认自动定位（exec.agent → SessionManager.findByAgent → replyTarget），
  *     无需模型手动传 openid；显式 target 参数作为覆盖。
@@ -19,7 +19,7 @@ import { isPathAllowed, resolveAgentCwd, sendMediaFile, type MediaSenderLike } f
 export const SEND_FILE_TOOL_NAME = 'qqbot_send_file';
 
 const DESCRIPTION =
-  'Send a local file (image, video, voice, or generic file) to the QQ user or group '
+  'Send a local file (image, video, voice, or generic file) to the QQ user '
   + 'of the current conversation. Pass the absolute path of a file that already exists on disk. '
   + 'Use this when the user asks you to deliver a generated file (chart, report, exported data, '
   + 'screenshot, etc.) or to send an existing media/file back to them.';
@@ -38,13 +38,13 @@ interface SendFileArgs {
   target?: string;
 }
 
-/** 解析显式 target（"c2c:openid" / "group:openid"），非法返回 undefined */
+/** 解析显式 target（"c2c:openid"），非法返回 undefined */
 function parseTarget(input: string): ReplyTarget | undefined {
   const idx = input.indexOf(':');
   if (idx <= 0) return undefined;
   const scope = input.slice(0, idx);
   const targetId = input.slice(idx + 1);
-  if (!targetId || (scope !== 'c2c' && scope !== 'group')) return undefined;
+  if (!targetId || scope !== 'c2c') return undefined;
   return { scope, targetId };
 }
 
@@ -74,7 +74,7 @@ export function registerSendFileTool(
         },
         target: {
           type: 'string',
-          description: 'Optional send target as "c2c:openid" or "group:openid". Omit to send to the current conversation.',
+          description: 'Optional send target as "c2c:openid". Omit to send to the current conversation.',
         },
       },
       required: ['file_path'],
@@ -109,7 +109,7 @@ export function registerSendFileTool(
       if (target !== undefined && target !== '') {
         replyTarget = parseTarget(target);
         if (replyTarget === undefined) {
-          throw new Error(`qqbot_send_file: target 格式错误，需要 c2c:openid 或 group:openid，收到: ${target}`);
+          throw new Error(`qqbot_send_file: target 格式错误，需要 c2c:openid，收到: ${target}`);
         }
       } else if (exec.agent !== undefined) {
         replyTarget = manager.findByAgent(exec.agent as DshAgent)?.replyTarget;

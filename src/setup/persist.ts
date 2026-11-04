@@ -201,7 +201,7 @@ function setPlainValue(config: YAMLMap, key: string, value: string): void {
   config.set(key, value);
 }
 
-/** 用扫码者 openid 覆盖 c2cAllow 并切到白名单模式（重绑即换人）；群配置不动 */
+/** 用扫码者 openid 覆盖 c2cAllow 并切到白名单模式（重绑即换人） */
 function overwriteC2cAllowlist(config: YAMLMap, openid: string): void {
   const access = config.get('access', true);
   if (!isMap(access)) {
@@ -284,7 +284,7 @@ export function persistCredentialsToProfile(
 /**
  * 从 dsh profile 的 cordis.patch.yml 中移除已保存的凭据（解绑）。
  *
- * 保留 im-qqbot 条目的其余 config（requireMention 等用户配置）与其他所有
+ * 保留 im-qqbot 条目的其余 config（provider / access 等用户配置）与其他所有
  * 条目。条目或字段不存在时仍强制写回一次——宿主 HMR 靠文件 mtime 触发
  * 重载，不写则 bound fiber 永不卸载，解绑后状态会停留在 bound。
  */

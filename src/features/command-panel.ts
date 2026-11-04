@@ -2,7 +2,7 @@
  * 指令面板同步 — 把插件当前注册的斜杠命令写进 QQ 指令面板
  *
  * 面板是机器人级配置（`/v2/panels`），没有按会话写入的语义：
- *   - c2c / group 各维护一个 target_type=all 的面板
+ *   - 只为私聊维护一个 target_type=all 的面板
  *   - 用 panel.remark 标记归属，重复同步原地更新，不会重复创建
  *
  * 平台限制：每机器人最多 20 个面板、每面板最多 20 项；
@@ -23,8 +23,8 @@ export const PANEL_NAME_MAX = 14;
 /** 元素描述宽度上限（汉字按 2 计） */
 export const PANEL_DESC_MAX = 30;
 
-/** 需要同步的场景：私聊 + 群聊（频道/频道私信不在本插件范围） */
-export const PANEL_SCOPES = ['c2c', 'group'] as const;
+/** 需要同步的场景：只保留私聊（频道/频道私信不在本插件范围） */
+export const PANEL_SCOPES = ['c2c'] as const;
 
 export type PanelScope = (typeof PANEL_SCOPES)[number];
 
@@ -112,15 +112,14 @@ function shortPanelDesc(text: string): string {
   return clipPanelText(short || text, PANEL_DESC_MAX);
 }
 
-/** 按场景筛选命令，拼成面板元素（c2c / group 各一份） */
+/** 按私聊可见性筛选命令，拼成面板元素 */
 export function buildPanelItems(
   commands: readonly CategorizedCommand[],
-  scope: PanelScope,
 ): PanelItem[] {
   const items: PanelItem[] = [];
   for (const cmd of commands) {
-    if (cmd.scope === 'c2c' && scope !== 'c2c') continue;
-    if (cmd.scope === 'group' && scope !== 'group') continue;
+    // SDK 的 scope 还可能有其它场景值，非私聊可见的一律不同步
+    if (cmd.scope !== undefined && cmd.scope !== 'c2c' && cmd.scope !== 'all') continue;
 
     const name = Array.isArray(cmd.name) ? cmd.name[0] : cmd.name;
     if (!name) continue;
@@ -143,7 +142,7 @@ async function findManagedPanel(api: OpenApiLike, scope: PanelScope): Promise<st
 }
 
 /**
- * 把命令同步到 c2c / group 两个全局面板
+ * 把命令同步到私聊全局面板
  *
  * 已有面板就覆盖元素（PUT，不影响关联对象），没有才创建（POST）。
  * 出错直接抛给调用方：启动时记 warn，`/bot-panel` 回给用户。
@@ -156,7 +155,7 @@ export async function syncCommandPanels(
   const results: PanelSyncResult[] = [];
 
   for (const scope of PANEL_SCOPES) {
-    const items = buildPanelItems(commands, scope);
+    const items = buildPanelItems(commands);
     if (items.length === 0) continue;
 
     const panel = { items, remark: PANEL_REMARK };
@@ -182,8 +181,8 @@ export async function syncCommandPanels(
   return results;
 }
 
-/** 同步结果的一句话摘要：私聊 16 项 · 群聊 16 项 */
+/** 同步结果的一句话摘要：私聊 16 项 */
 export function formatPanelSummary(results: readonly PanelSyncResult[]): string {
-  const label: Record<PanelScope, string> = { c2c: '私聊', group: '群聊' };
+  const label: Record<PanelScope, string> = { c2c: '私聊' };
   return results.map((r) => `${label[r.scope]} ${r.count} 项`).join(' · ');
 }

@@ -463,7 +463,7 @@ describe('聊天会话（全 bot 一个）', () => {
     const manager = createManager(registry);
 
     const first = await manager.getOrCreate('c2c', PEER, PEER, REPLY);
-    const second = await manager.getOrCreate('group', 'group1', PEER_B, REPLY_B);
+    const second = await manager.getOrCreate('c2c', PEER_B, PEER_B, REPLY_B);
 
     expect(second).toBe(first);
     expect(second.sessionId).toBe(first.sessionId);

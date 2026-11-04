@@ -59,8 +59,7 @@ export function versionCommand({ manager }: CommandDeps): CategorizedCommand {
 /**
  * /bot-me — 查看发送者身份标识
  *
- * 私聊返回 user openid、群聊返回群成员 openid 与群 openid
- * （分别对应 access.c2cAllow / groupAllow 的名单 key）。
+ * 返回 user openid（对应 access.c2cAllow 的名单 key）。
  */
 export function meCommand({ config }: CommandDeps): CategorizedCommand {
   return {
@@ -70,11 +69,7 @@ export function meCommand({ config }: CommandDeps): CategorizedCommand {
     description: '查看你的 OpenID',
     handler: async (cmdCtx) => {
       const senderId = cmdCtx.message.senderId ?? 'unknown';
-      const lines = [`🆔 你的 OpenID: **${senderId}**`];
-      if (cmdCtx.message.groupOpenid) {
-        lines.push(`👥 本群 OpenID: **${cmdCtx.message.groupOpenid}**`);
-      }
-      await sendMarkdownChunked(cmdCtx, lines.join('\n'), config.textChunkLimit);
+      await sendMarkdownChunked(cmdCtx, `🆔 你的 OpenID: **${senderId}**`, config.textChunkLimit);
       return { kind: 'noop' as const };
     },
   };

@@ -23,8 +23,7 @@ interface CachedEntry {
 }
 
 const MAX_PER_TARGET = 10;
-const TTL_GROUP = 5 * 60 * 1000; // 群消息被动回复窗口 5 分钟
-const TTL_C2C = 30 * 60 * 1000; // 私聊 30 分钟
+const TTL_C2C = 30 * 60 * 1000; // 私聊被动回复窗口 30 分钟
 const MAX_TARGETS = 200;
 const EVENT_PREFIX = 'INTERACTION_CREATE:';
 
@@ -69,10 +68,9 @@ export function getCachedReplyIds(scope: ChatScope, targetId: string): CachedRep
   const list = cache.get(cacheKey(scope, targetId));
   if (!list || list.length === 0) return [];
   const now = Date.now();
-  const ttl = scope === 'group' ? TTL_GROUP : TTL_C2C;
   const result: CachedReplyId[] = [];
   for (let i = list.length - 1; i >= 0; i -= 1) {
-    if (now - list[i]!.timestamp < ttl) {
+    if (now - list[i]!.timestamp < TTL_C2C) {
       result.push(list[i]!.target);
     }
   }

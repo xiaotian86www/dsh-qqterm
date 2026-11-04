@@ -2,8 +2,8 @@
  * dsh-im-qqbot 插件内部类型定义
  */
 
-/** 会话作用域 */
-export type ChatScope = 'c2c' | 'group';
+/** 会话作用域（只支持 C2C 私聊） */
+export type ChatScope = 'c2c';
 
 /** QQ 回复目标 */
 export interface ReplyTarget {

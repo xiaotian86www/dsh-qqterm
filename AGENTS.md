@@ -18,7 +18,7 @@
 | `src/index.ts` | Cordis 插件入口：`name` / `inject` / `Config` / `apply` |
 | `src/gateway/` | 网关组装：中间件、事件、出站、生命周期 |
 | `src/setup/` | 扫码绑定状态机、凭据持久化、端内绑定页路由 |
-| `src/features/` | 问答（ask_user_question）、审批、历史缓冲、按钮协议 |
+| `src/features/` | 问答（ask_user_question）、审批、指令面板、按钮协议 |
 | `src/session/` | 聊天会话寻址、后台会话切换（`/sessions`、`/new`） |
 | `src/transport/` | 入站、出站、分片、附件、回复目标 |
 | `src/commands/` | `/bot-*`、`/model`、`/preset`、`/sessions` 等指令 |
@@ -54,7 +54,7 @@
 
 ### 3.4 交互与消息
 
-- 按钮键盘只在 C2C 稳定可用，群聊可能被 QQ 拒绝；发送失败必须保留文本回退（现有实现会降级并记 warn）。改问答/审批时 C2C 与群聊都要验证。
+- 插件只处理 C2C 私聊：群消息在 accessPolicy 层被拦掉，代码里不再有群聊分支。按钮键盘只在 C2C 可用，发送失败必须保留文本回退（现有实现会降级并记 warn）。改问答/审批时在 C2C 验证按钮回退。
 - `ask_user_question` / `approval` 走宿主 waterfall 通道，不要再退回 `userQuestions.ask` 这类服务探测式实现。
 - 聊天会话 key 固定为 `qqbot:${appId}:chat`：全 bot 只有一个聊天会话，任何 QQ 窗口共享它；后台会话（宿主 session）仍是多份，由 `/sessions` 与 `/new` 管理。没有映射即视为全新会话，会话 id 由 `mintSessionId()` 铸造。
 - Markdown 输出按 `textChunkLimit` 分片，代码块/表格感知切分在 `src/transport/chunker.ts`，不要绕过。
@@ -110,8 +110,8 @@
 | 计费 | 💰 | `/cost` |
 | 审批 | 🔐 | 审批卡片 |
 | 工具调用 | 🔧 | 工具结果 |
-| 身份 | 🆔 / 👥 | `/bot-me` |
-| 作用域标签 | 💬 私聊 / 👥 群聊 | `/bot-help` |
+| 身份 | 🆔 | `/bot-me` |
+| 作用域标签 | 💬 私聊 | `/bot-help` |
 | 引导 | 👇 / 💡 | 问答 / 审批卡片底部 |
 | 中止 | ⛔ | `/stop` |
 | 附件 | 📎 | 交付物发送 |
@@ -331,7 +331,7 @@ rg -n '注意|务必|强烈建议|建议您|也可以|另外' src/commands src/f
 ## 8. 安全与隐私底线
 
 - **绝不提交真实 appId/appSecret、用户 OpenID、会话日志**。凭据只放 profile 的 `cordis.patch.yml` 或 `QQBOT_APPID` / `QQBOT_SECRET` 环境变量；示例一律占位符。
-- 访问控制默认值不得放宽：私聊默认白名单、空名单拒绝；群聊默认开放但需 @bot；审批/提问按钮必须校验点击者在白名单内。
+- 访问控制默认值不得放宽：私聊默认白名单、空名单拒绝；群消息一律拒绝（不再支持群聊）；审批/提问按钮必须校验点击者在白名单内。
 - 文件发送走路径白名单，按真实路径（realpath）判定，禁止绕过符号链接检查。
 - 媒体/缓存落在 `~/.dsh-qqbot/`，不要写进仓库。
 - `.env`、`.dsh-sessions/`、`docs/` 已在 .gitignore 中，不要为了提交方便移除这些忽略。
@@ -342,7 +342,7 @@ rg -n '注意|务必|强烈建议|建议您|也可以|另外' src/commands src/f
 - [ ] `pnpm test` 全绿；新逻辑有对应 `*.test.ts`
 - [ ] 未新增 `@deepseek-ai/*` 运行期依赖；`inject` 与实际依赖一致
 - [ ] `apply()` 没有阻塞式 await；异步错误都有 catch
-- [ ] 客户端改动已 typecheck，并在 C2C + 群聊各验证一次按钮回退
+- [ ] 客户端改动已 typecheck，并在 C2C 验证一次按钮回退
 - [ ] 新增 / 修改的用户可见文案符合 §4（状态符号唯一、冒号与空格、`show` 内无 markdown）
 - [ ] 没有提交 secrets、快照 tgz、备份目录等临时产物
 - [ ] 版本号符合规则（正式版 / `-dev.N` 快照）

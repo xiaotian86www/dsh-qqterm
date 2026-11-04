@@ -21,20 +21,16 @@ import { BIND_CONFIG_PATH } from '../shared/bind-protocol.ts';
 interface AccessControlWire {
   c2cMode: 'open' | 'allowlist' | 'disabled';
   c2cAllow: string[];
-  groupMode: 'open' | 'allowlist' | 'disabled';
-  groupAllow: string[];
 }
 
 /** GET 回显的生效配置（appSecret 已剔除） */
 type ConfigWire = {
-  requireMention?: boolean;
   streaming?: boolean;
   showToolResults?: boolean;
   debug?: boolean;
   provider?: string;
   model?: string;
   preset?: string;
-  groupPrompt?: string;
   directPrompt?: string;
   access?: AccessControlWire;
 };
@@ -291,13 +287,13 @@ export function ConfigPanel(props?: { bindPhase?: string }): ReactNode {
     }
     if (Object.keys(changed).length === 0) return;
 
-    // 白名单编辑期间保留原始换行/空行（textarea 可正常回车），提交时才规范化
+    // 白名单编辑期间保留原始换行/空行（textarea 可正常回车），提交时才规范化。
+    // 只提交两字段：旧版本残留在 profile 里的群聊字段就此不再被写回。
     if (changed.access !== undefined) {
       const a = changed.access as AccessControlWire;
       changed.access = {
-        ...a,
+        c2cMode: a.c2cMode,
         c2cAllow: a.c2cAllow.map((s) => s.trim()).filter(Boolean),
-        groupAllow: a.groupAllow.map((s) => s.trim()).filter(Boolean),
       };
     }
 
@@ -331,39 +327,23 @@ export function ConfigPanel(props?: { bindPhase?: string }): ReactNode {
   }
 
   const dirty = (Object.keys(form) as Array<keyof ConfigWire>).some((key) => !shallowEqual(form[key], initial[key]));
-  const access: AccessControlWire = form.access ?? { c2cMode: 'open', c2cAllow: [], groupMode: 'open', groupAllow: [] };
+  const access: AccessControlWire = form.access ?? { c2cMode: 'open', c2cAllow: [] };
 
   return createElement('form', { className: 'imqb2-form', onSubmit: submit },
     createElement('div', { className: 'imqb2-group-title' }, '服务范围'),
     createElement(SegmentedRow, {
       label: '私聊', value: access.c2cMode, options: MODE_OPTIONS,
-      onChange: (v) => { patch('access', { ...access, c2cMode: v }); },
+      onChange: (v) => { patch('access', { c2cMode: v, c2cAllow: access.c2cAllow }); },
     }),
     access.c2cMode === 'allowlist'
       ? createElement(AreaRow, {
           label: '私聊白名单', help: '请输入用户 openid，多个请换行输入', rows: 3,
           value: access.c2cAllow.join('\n'),
-          onChange: (v) => { patch('access', { ...access, c2cAllow: v.split('\n').map((s) => s.trim()) }); },
-        })
-      : null,
-    createElement(SegmentedRow, {
-      label: '群聊', value: access.groupMode, options: MODE_OPTIONS,
-      onChange: (v) => { patch('access', { ...access, groupMode: v }); },
-    }),
-    access.groupMode === 'allowlist'
-      ? createElement(AreaRow, {
-          label: '群聊白名单', help: '请输入群 openid，多个请换行输入', rows: 3,
-          value: access.groupAllow.join('\n'),
-          onChange: (v) => { patch('access', { ...access, groupAllow: v.split('\n').map((s) => s.trim()) }); },
+          onChange: (v) => { patch('access', { c2cMode: access.c2cMode, c2cAllow: v.split('\n').map((s) => s.trim()) }); },
         })
       : null,
 
     createElement('div', { className: 'imqb2-group-title' }, '基础设置'),
-    createElement(SwitchRow, {
-      label: '群聊仅回复 @机器人的消息', checked: form.requireMention ?? true,
-      help: '开启后，机器人仅可回复 @机器人的群聊消息',
-      onChange: (v) => { patch('requireMention', v); },
-    }),
     createElement(SwitchRow, {
       label: '流式输出', checked: form.streaming ?? true,
       help: '回复内容分段实时推送到聊天',
@@ -390,10 +370,6 @@ export function ConfigPanel(props?: { bindPhase?: string }): ReactNode {
     }),
 
     createElement('div', { className: 'imqb2-group-title' }, '个性化提示词'),
-    createElement(AreaRow, {
-      label: '群聊额外 system prompt', value: form.groupPrompt ?? '',
-      onChange: (v) => { patch('groupPrompt', v); },
-    }),
     createElement(AreaRow, {
       label: '私聊额外 system prompt', value: form.directPrompt ?? '',
       onChange: (v) => { patch('directPrompt', v); },
