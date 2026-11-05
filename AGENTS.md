@@ -321,9 +321,12 @@ rg -n '注意|务必|强烈建议|建议您|也可以|另外' src/commands src/f
 - 主 profile 换本地包：
 
   ```bash
-  pnpm build && pnpm pack
-  dsh plugin --profile web add file:<绝对路径>/tencent-connect-dsh-qqbot-<版本>.tgz
+  pnpm build && pnpm pack --pack-destination .pack
+  # 重命名为 .pack/tencent-connect-dsh-qqbot-<版本>-YYYYMMDD-HHmm.tgz
+  dsh plugin --profile web add file:<绝对路径>/.pack/tencent-connect-dsh-qqbot-<版本>-<时间戳>.tgz
   ```
+
+  本地快照 tgz 命名规则：`.pack/tencent-connect-dsh-qqbot-<版本>-YYYYMMDD-HHmm.tgz`（例：`.pack/tencent-connect-dsh-qqbot-0.5.5-dev.1-20261105-1029.tgz`）。`pnpm pack` 默认输出不带时间戳，打完按此规则重命名；同一版本重打保留旧包，不覆盖。
 
   装完必须重启 dsh（`dsh plugin add` 只装包，不会通知运行中的宿主）；客户端改动还要刷新页面。`node_modules` 里是实体副本，之后仓库改动不会自动进入 profile。
 - 回滚：`dsh plugin --profile web add @tencent-connect/dsh-qqbot@<官方版本>`，或恢复安装前备份的 `package.json` / `pnpm-lock.yaml`。
