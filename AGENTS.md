@@ -325,9 +325,9 @@ rg -n '注意|务必|强烈建议|建议您|也可以|另外' src/commands src/f
   dsh plugin --profile web add file:<绝对路径>/tencent-connect-dsh-qqbot-<版本>.tgz
   ```
 
-  装完必须重启 dsh；客户端改动还要刷新页面。`node_modules` 里是实体副本，之后仓库改动不会自动进入 profile。
+  装完必须重启 dsh（`dsh plugin add` 只装包，不会通知运行中的宿主）；客户端改动还要刷新页面。`node_modules` 里是实体副本，之后仓库改动不会自动进入 profile。
 - 回滚：`dsh plugin --profile web add @tencent-connect/dsh-qqbot@<官方版本>`，或恢复安装前备份的 `package.json` / `pnpm-lock.yaml`。
-- profile 的 pnpm 版本要与创建时一致（如 web 由 pnpm 10.34.9 / store v10 创建）；用不匹配的大版本可能触发 store v10→v11 重装。
+- profile 的 pnpm 版本要与它当前 `node_modules` 的 store 一致，而不是固定跟“创建时”的版本走：看 `~/.dsh/profiles/<name>/node_modules/.modules.yaml` 的 `packageManager` / `storeDir`（本机 web 当前为 `pnpm@12.4.2` / `store/v11`）。`dsh plugin` 调用 PATH 里的 `pnpm`，版本不匹配会报 `ERR_PNPM_UNEXPECTED_STORE`；此时换用与 `packageManager` 一致的 pnpm，不要用 `pnpm install` 迁移整个 profile 的 store。
 - 本地快照 tgz 是 profile 的依赖目标，不要删除或移动；重新打包会产生新路径。
 
 ## 8. 安全与隐私底线
