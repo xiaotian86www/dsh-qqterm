@@ -1,5 +1,5 @@
 /**
- * /new 命令：开新会话，可顺带指定工作区
+ * /new 与 /reset：开新会话；/new 可顺带指定工作区，/reset 会先停掉当前会话
  *
  * manager 用替身，只验证「参数 → 调用顺序 → 文案」。关键是顺序：**先解析目标
  * 再动会话**，路径写错不能把当前会话弄丢。
@@ -9,7 +9,8 @@ import type { SlashCommandHandlerContext } from '@tencent-connect/qqbot-nodejs';
 import { ConfigSchema, type ImQQBotConfig } from '../config.ts';
 import type { SessionManager } from '../session/index.ts';
 import type { Logger } from '../types.ts';
-import { newCommand } from './session.ts';
+import type { CommandDeps } from './types.ts';
+import { newCommand, resetCommand } from './session.ts';
 
 const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
 
@@ -29,10 +30,10 @@ function makeManager() {
 
 type ManagerStub = ReturnType<typeof makeManager>;
 
-function makeCtx(raw: string, senderId = 'user1'): SlashCommandHandlerContext {
+function makeCtx(raw: string, senderId = 'user1', name = 'new'): SlashCommandHandlerContext {
   return {
     message: { senderId, kind: 'c2c', messageId: 'm1' },
-    command: { raw },
+    command: { name, raw },
   } as unknown as SlashCommandHandlerContext;
 }
 
@@ -42,11 +43,76 @@ async function run(manager: ManagerStub, raw = '', senderId = 'user1'): Promise<
   return typeof result === 'string' ? result : '';
 }
 
+function makeResetManager(stopped = true, allStopped = 0) {
+  return {
+    resetCurrentSession: vi.fn(async () => stopped),
+    resetAllSessions: vi.fn(async () => allStopped),
+  };
+}
+
+type ResetManagerStub = ReturnType<typeof makeResetManager>;
+
+async function runReset(manager: ResetManagerStub, raw = '', name = 'reset'): Promise<string> {
+  const command = resetCommand({ manager } as unknown as CommandDeps);
+  const result = await command.handler(makeCtx(raw, 'user1', name));
+  return typeof result === 'string' ? result : '';
+}
+
 describe('/new 命令声明', () => {
-  it('三个别名都指向同一个命令，且不限作用域', () => {
+  it('只有 new 一个名字，且不限作用域', () => {
     const command = newCommand({ manager: makeManager() as unknown as SessionManager, config, logger });
-    expect(command.name).toEqual(['new', 'reset', 'clear']);
+    expect(command.name).toBe('new');
     expect(command.scope).toBe('all');
+  });
+});
+
+describe('/reset /clear 命令声明', () => {
+  it('reset 是主名，clear 是别名，且不限作用域', () => {
+    const command = resetCommand({ manager: makeResetManager() as unknown as SessionManager });
+    expect(command.name).toEqual(['reset', 'clear']);
+    expect(command.scope).toBe('all');
+  });
+});
+
+describe('/reset /clear', () => {
+  it('停掉当前会话并开启新会话', async () => {
+    const manager = makeResetManager(true);
+
+    expect(await runReset(manager)).toBe('✅ 已停止当前会话，并开启新会话');
+    expect(manager.resetCurrentSession).toHaveBeenCalledWith();
+  });
+
+  it('没有当前会话时只报已开启', async () => {
+    const manager = makeResetManager(false);
+
+    expect(await runReset(manager, '', 'clear')).toBe('✅ 已开启新会话');
+    expect(manager.resetCurrentSession).toHaveBeenCalledWith();
+  });
+
+  it('带工作区参数时拒绝，并提示改用 /new', async () => {
+    const manager = makeResetManager();
+
+    const text = await runReset(manager, 'repo', 'clear');
+
+    expect(text).toBe('⚠️ /clear 不支持指定工作区\n换工作区用 /new <工作区|路径>。');
+    expect(manager.resetCurrentSession).not.toHaveBeenCalled();
+    expect(manager.resetAllSessions).not.toHaveBeenCalled();
+  });
+
+  it('/reset all 停掉所有会话，并用数量回执', async () => {
+    const manager = makeResetManager(true, 3);
+
+    expect(await runReset(manager, 'all')).toBe('✅ 已停止 3 个会话，并开启新会话');
+    expect(manager.resetAllSessions).toHaveBeenCalledWith();
+    expect(manager.resetCurrentSession).not.toHaveBeenCalled();
+  });
+
+  it('/clear all 没有可停的会话时只报已开启', async () => {
+    const manager = makeResetManager(true, 0);
+
+    expect(await runReset(manager, 'all', 'clear')).toBe('✅ 已开启新会话');
+    expect(manager.resetAllSessions).toHaveBeenCalledWith();
+    expect(manager.resetCurrentSession).not.toHaveBeenCalled();
   });
 });
 

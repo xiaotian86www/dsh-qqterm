@@ -18,7 +18,7 @@ import type { QQBotSender } from '../transport/outbound-buffer.ts';
 import { QuestionChannel } from '../features/question-channel.ts';
 import { ApprovalChannel, type ApprovalChannelContext } from '../features/approval-channel.ts';
 import { decodeButtonData } from '../features/button-utils.ts';
-import { buildUserAgent } from '../shared/index.ts';
+import { buildUserAgent, shortSessionId } from '../shared/index.ts';
 import type { ImQQBotConfig } from '../config.ts';
 import type { Logger } from '../types.ts';
 import { setupMiddlewares } from './middleware-setup.ts';
@@ -120,11 +120,17 @@ export async function bootstrapGateway(
     config,
     logger,
     (record) => manager.directoryForAgent(record.agent),
+    (record) => (manager.isCurrentSession(record.sessionId)
+      ? ''
+      : `[#${shortSessionId(record.sessionId)}] `),
   );
 
   const outbound = createOutboundHandler(manager, sender, config, logger, toolsRegistry, deliverablesDeliverer);
-  (ctx as unknown as { on(event: string, handler: (...args: unknown[]) => void): void })
-    .on('session/event', outbound.routeSessionEvent as (...args: unknown[]) => void);
+  // session/event 按 agent 作用域派发；带 global 才能收到所有已获取会话的事件，
+  // 不只当前会话（多会话输出都要回 QQ）。
+  (ctx as unknown as {
+    on(event: string, handler: (...args: unknown[]) => void, options?: { global?: boolean }): void;
+  }).on('session/event', outbound.routeSessionEvent as (...args: unknown[]) => void, { global: true });
 
   // ── 出站流式：agent/assistant-stream → 流式帧路由 ──
   // 实时流式走瞬态 agent/assistant-stream（chunk 不进 session log）。

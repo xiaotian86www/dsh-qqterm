@@ -17,6 +17,7 @@
  */
 import type { InlineKeyboard, InteractionEvent } from '@tencent-connect/qqbot-nodejs';
 import type { ChatScope, Logger, ReplyTarget } from '../types.ts';
+import { shortSessionId } from '../shared/utils.ts';
 import { parseAnswer } from './answer-parser.ts';
 import { buildKeyboard, formatQuestion } from './question-renderer.ts';
 import { decodeButtonData } from './button-utils.ts';
@@ -65,6 +66,10 @@ export interface QuestionChannelContext {
 
 export interface QuestionSessionRecordLike {
   sessionKey: string;
+  /** 宿主的 session id；缺省时退回 sessionKey（单测/旧记录兼容） */
+  sessionId?: string;
+  /** 该会话属于哪个 QQ 用户（按钮点击者校验用） */
+  peerId?: string;
   scope: ChatScope;
   replyTarget: ReplyTarget;
 }
@@ -72,6 +77,8 @@ export interface QuestionSessionRecordLike {
 export interface QuestionChannelManagerLike {
   findBySessionId(sessionId: string): QuestionSessionRecordLike | undefined;
   getSessionRecord(scope: ChatScope, peerId: string): QuestionSessionRecordLike | undefined;
+  /** 目标是不是当前聊天接的会话；缺省按 true（非多会话部署） */
+  isCurrentSession?(sessionId: string): boolean;
 }
 
 export interface QuestionChannelSenderLike {
@@ -95,6 +102,11 @@ class QuestionChannelError extends Error {
     this.code = code;
     this.name = 'QuestionChannelError';
   }
+}
+
+/** 记录所属的会话 id（优先宿主 sessionId，旧记录退回 chatKey） */
+function sessionIdOf(record: QuestionSessionRecordLike): string {
+  return record.sessionId ?? record.sessionKey;
 }
 
 /**
@@ -126,7 +138,10 @@ interface PendingEntry {
 }
 
 export class QuestionChannel {
+  /** 待答问题：sessionId → 状态机（不再按 chatKey，切走 current 不会撞 key） */
   private readonly pending = new Map<string, PendingEntry>();
+  /** `/to #id` 空文本进入的「下一条消息作为回答」模式：peerId → sessionId */
+  private readonly answerTargets = new Map<string, string>();
   private readonly manager: QuestionChannelManagerLike;
   private readonly sender: QuestionChannelSenderLike;
   private readonly config: QuestionChannelConfigLike;
@@ -143,6 +158,8 @@ export class QuestionChannel {
     this.config = config;
     this.logger = logger;
   }
+
+  /** 记录所属的会话 id（优先宿主 id） */
 
   /**
    * 注册 `user-questions/request` waterfall answerer。
@@ -181,71 +198,164 @@ export class QuestionChannel {
       entry.reject(new QuestionChannelError('QQ question channel was unloaded before the user answered', ASK_ABORTED));
     }
     this.pending.clear();
+    this.answerTargets.clear();
   }
 
   /** 会话回收时清理其待答问题，避免 pending 悬挂导致 Promise 与闭包泄漏 */
-  public cancelPending(sessionKey: string): void {
-    const entry = this.pending.get(sessionKey);
+  public cancelPending(sessionId: string): void {
+    const entry = this.pending.get(sessionId);
+    this.clearAnswerTargets(sessionId);
     if (!entry) return;
-    this.pending.delete(sessionKey);
+    this.pending.delete(sessionId);
     this.clearTimer(entry);
     this.removeAbort(entry);
     entry.reject(new QuestionChannelError('ask_user_question was cancelled before the user answered', ASK_ABORTED));
   }
 
-  /** 入站文本作答：该会话若有待答问题且本条消息有文本，解析为答案并推进 */
-  public tryAnswer(scope: ChatScope, peerId: string, text: string): boolean {
-    const record = this.manager.getSessionRecord(scope, peerId);
-    if (!record) return false;
-    const key = record.sessionKey;
-    const entry = this.pending.get(key);
-    if (!entry) return false;
-    if (!text) return false; // 纯图片/表情等：继续等待，消息走常规流程
+  /** 该会话是否有待答问题（`/to` 判断走答案通道还是普通 prompt） */
+  public hasPending(sessionId: string): boolean {
+    return this.pending.has(sessionId);
+  }
 
+  /** `/to #id` 空文本：下一条该 peer 的普通文本作为这个会话的答案 */
+  public beginAnswerMode(peerId: string, sessionId: string): void {
+    this.answerTargets.set(peerId, sessionId);
+    this.logger.info(`im-qqbot: answer mode armed peer=${peerId} sessionId=${sessionId}`);
+  }
+
+  /** 显式答复指定会话（`/to #id <答案>`），不依赖 current */
+  public answer(sessionId: string, text: string): boolean {
+    const entry = this.pending.get(sessionId);
+    if (!entry || !text) return false;
     const current = entry.request.questions[entry.index];
     if (!current) return false;
-    const answer = parseAnswer(current, text);
-    this.advance(entry, key, answer);
+    this.advance(entry, sessionId, parseAnswer(current, text));
     return true;
   }
 
-  /** 按钮点击作答：解码 button_data 选项下标，推进状态机 */
+  /**
+   * 入站文本作答：显式 answer target > current 的 pending > 非 current 待答提示。
+   *
+   * 第三步只消费并提示、不转发给 current 模型：一条没有路由信息的文本不能
+   * 猜着送给另一个会话（设计 §6.3）。
+   */
+  public tryAnswer(
+    scope: ChatScope,
+    peerId: string,
+    text: string,
+    replyTarget?: ReplyTarget,
+  ): boolean {
+    const explicit = this.answerTargets.get(peerId);
+    if (explicit) {
+      const entry = this.pending.get(explicit);
+      if (!entry) {
+        // 整组已经结束（答完/超时/取消）：退出模式，这条消息走常规流程
+        this.answerTargets.delete(peerId);
+      } else if (!text) {
+        return false;
+      } else {
+        const current = entry.request.questions[entry.index];
+        if (!current) {
+          this.answerTargets.delete(peerId);
+          return false;
+        }
+        this.advance(entry, explicit, parseAnswer(current, text));
+        return true;
+      }
+    }
+
+    const record = this.manager.getSessionRecord(scope, peerId);
+    const currentId = record ? sessionIdOf(record) : undefined;
+    if (currentId) {
+      const entry = this.pending.get(currentId);
+      if (entry && text) {
+        const current = entry.request.questions[entry.index];
+        if (!current) return false;
+        this.advance(entry, currentId, parseAnswer(current, text));
+        return true;
+      }
+    }
+
+    // 当前会话没在等答案，但有别的已获取会话在等：提示路由，不转发给 current。
+    // 只提示属于这个 QQ 用户的会话，别人的待答问题不阻塞当前用户。
+    const others = [...this.pending.entries()].filter(([id, entry]) => id !== currentId
+      && (entry.record.peerId === undefined || entry.record.peerId === peerId));
+    if (others.length === 0 || !text) return false;
+    this.sendRouteHint(others.map(([id]) => id), replyTarget ?? record?.replyTarget);
+    return true;
+  }
+
+  /** 按钮点击作答：按 button_data 的 `s` 找会话，旧卡片/旧题按钮忽略 */
   public handleInteraction(event: InteractionEvent): boolean {
     const peerId = event.user_openid;
     if (!peerId) return false;
-    const record = this.manager.getSessionRecord('c2c', peerId);
-    if (!record) return false;
-    const entry = this.pending.get(record.sessionKey);
-    if (!entry) return false;
 
     const data = event.data?.resolved?.button_data;
     if (!data) return false;
     const button = decodeButtonData(data);
     if (!button || button.t !== 'question') return false;
+
+    // 新按钮带 sessionId；旧卡片没有 s 时退回 current，兼容升级前发出的卡片
+    const sessionId = button.s;
+    if (sessionId !== undefined) {
+      const entry = this.pending.get(sessionId);
+      if (!entry) return false;
+      if (entry.record.peerId !== undefined && entry.record.peerId !== peerId) return false;
+      return this.consumeButton(entry, sessionId, button.q, button.i);
+    }
+
+    const record = this.manager.getSessionRecord('c2c', peerId);
+    if (!record) return false;
+    const entry = this.pending.get(sessionIdOf(record));
+    if (!entry) return false;
+    return this.consumeButton(entry, sessionIdOf(record), button.q, button.i);
+  }
+
+  /** 校验按钮归属题并推进状态机 */
+  private consumeButton(entry: PendingEntry, sessionId: string, questionId: string, idx: number): boolean {
     const current = entry.request.questions[entry.index];
     if (!current) return false;
-    // 校验按钮归属题：旧题按钮在新题推进后被点击（误点/延迟事件），
-    // 其 q 不等于当前题 id，直接忽略，避免错位映射到当前题选项。
-    if (button.q !== current.id) return false;
-    const idx = button.i;
+    // 旧题按钮在新题推进后被点击（误点/延迟事件），其 q 不等于当前题 id，直接忽略
+    if (questionId !== current.id) return false;
     const opts = current.options ?? [];
     if (idx < 0 || idx >= opts.length) return false;
-
-    this.advance(entry, record.sessionKey, { id: current.id, selected: [opts[idx]!.label] });
+    this.advance(entry, sessionId, { id: current.id, selected: [opts[idx]!.label] });
     return true;
+  }
+
+  /** 非 current 会话在等答案、但用户直接发了纯文本：提示用按钮或 /to，不转发 */
+  private sendRouteHint(sessionIds: readonly string[], target: ReplyTarget | undefined): void {
+    if (target === undefined) return;
+    const text = sessionIds.length === 1
+      ? [
+        `⚠️ 这条属于 \`#${shortSessionId(sessionIds[0]!)}\`，没有转发给当前会话`,
+        `用问题里的按钮或 \`/to #${shortSessionId(sessionIds[0]!)}\` 回答。`,
+      ].join('\n')
+      : [
+        `⚠️ 有 ${sessionIds.length} 个会话在等回答，没有转发给当前会话`,
+        '用各自问题里的按钮或 `/to <会话>` 回答。',
+      ].join('\n');
+    void this.sender.sendMarkdown(target, text).catch(() => {});
+  }
+
+  /** 清理指向某会话的 answer target（整组结束/取消时） */
+  private clearAnswerTargets(sessionId: string): void {
+    for (const [peerId, target] of this.answerTargets) {
+      if (target === sessionId) this.answerTargets.delete(peerId);
+    }
   }
 
   /** 走 QQ 通道：发送首题 + 挂起 Promise，等待逐题作答 */
   private async askViaQQ(record: QuestionSessionRecordLike, request: UserQuestionRequest): Promise<UserQuestionResult> {
-    const key = record.sessionKey;
+    const sessionId = sessionIdOf(record);
     // 会话回收/取消可能在发送前发生：signal 已 abort 则直接失败，避免悬挂
     if (request.signal?.aborted) {
       throw new QuestionChannelError('ask_user_question was aborted before delivery', ASK_ABORTED);
     }
     // 同会话已有待答问题（理论上不会发生：回合阻塞在第一个问题上）→ 拒绝旧的
-    const prev = this.pending.get(key);
+    const prev = this.pending.get(sessionId);
     if (prev) {
-      this.pending.delete(key);
+      this.pending.delete(sessionId);
       this.clearTimer(prev);
       this.removeAbort(prev);
       prev.reject(new QuestionChannelError('superseded by a new question', ASK_ABORTED));
@@ -260,30 +370,31 @@ export class QuestionChannel {
       const entry: PendingEntry = { record, request, resolve, reject, index: 0, collected: [] };
       if (request.signal) {
         const onAbort = (): void => {
-          if (this.pending.get(key) !== entry) return;
-          this.pending.delete(key);
+          if (this.pending.get(sessionId) !== entry) return;
+          this.pending.delete(sessionId);
           this.clearTimer(entry);
           reject(new QuestionChannelError('ask_user_question was aborted before the user answered', ASK_ABORTED));
         };
         entry.onAbort = onAbort;
         request.signal.addEventListener('abort', onAbort, { once: true });
       }
-      entry.timer = setTimeout(() => this.onTimeout(key), this.config.askTimeoutMs);
-      this.pending.set(key, entry);
-      this.logger.info(`im-qqbot: question sent to QQ, waiting for answer key=${key}`);
+      entry.timer = setTimeout(() => this.onTimeout(sessionId), this.config.askTimeoutMs);
+      this.pending.set(sessionId, entry);
+      this.logger.info(`im-qqbot: question sent to QQ, waiting for answer sessionId=${sessionId}`);
     });
   }
 
   /** 推进状态机：收集答案 → 有下一题则发送，否则 resolve 全部答案 */
-  private advance(entry: PendingEntry, key: string, answer: UserQuestionAnswer): void {
+  private advance(entry: PendingEntry, sessionId: string, answer: UserQuestionAnswer): void {
     entry.collected.push(answer);
     entry.index += 1;
 
     if (entry.index < entry.request.questions.length) {
       const next = entry.request.questions[entry.index]!;
-      this.resetTimer(entry, key);
+      this.resetTimer(entry, sessionId);
       void this.sendQuestion(entry.record, next).catch((err) => {
-        this.pending.delete(key);
+        this.pending.delete(sessionId);
+        this.clearAnswerTargets(sessionId);
         this.clearTimer(entry);
         this.removeAbort(entry);
         entry.reject(err instanceof Error ? err : new Error(String(err)));
@@ -291,20 +402,24 @@ export class QuestionChannel {
       return;
     }
 
-    this.pending.delete(key);
+    this.pending.delete(sessionId);
+    this.clearAnswerTargets(sessionId);
     this.clearTimer(entry);
     this.removeAbort(entry);
-    this.logger.info(`im-qqbot: question answered via QQ key=${key}`);
+    this.logger.info(`im-qqbot: question answered via QQ sessionId=${sessionId}`);
     entry.resolve({ answers: entry.collected });
   }
 
   /** 发送单个问题：优先带按钮，按钮发送失败降级纯文本 */
   private async sendQuestion(record: QuestionSessionRecordLike, question: UserQuestion): Promise<void> {
-    const keyboard = buildKeyboard(question);
+    const sessionId = sessionIdOf(record);
+    const isCurrent = this.manager.isCurrentSession?.(sessionId) ?? true;
+    const context = { sessionId, isCurrent };
+    const keyboard = buildKeyboard(question, sessionId);
     try {
       if (keyboard) {
         try {
-          await this.sender.sendMarkdown(record.replyTarget, formatQuestion(question, true), { keyboard });
+          await this.sender.sendMarkdown(record.replyTarget, formatQuestion(question, true, context), { keyboard });
           return;
         } catch (err) {
           // 同上：宿主 logger 在 headless profile 不可见，stderr 才是唯一线索
@@ -312,27 +427,28 @@ export class QuestionChannel {
           this.logger.warn(`im-qqbot: keyboard send failed, fallback to text: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
-      await this.sender.sendMarkdown(record.replyTarget, formatQuestion(question, false));
+      await this.sender.sendMarkdown(record.replyTarget, formatQuestion(question, false, context));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      this.logger.error(`im-qqbot: question send failed key=${record.sessionKey}: ${msg}`);
+      this.logger.error(`im-qqbot: question send failed sessionId=${sessionId}: ${msg}`);
       throw new QuestionDeliveryError(`failed to deliver question to QQ: ${msg}`);
     }
   }
 
-  private onTimeout(key: string): void {
-    const entry = this.pending.get(key);
+  private onTimeout(sessionId: string): void {
+    const entry = this.pending.get(sessionId);
     if (!entry) return;
-    this.pending.delete(key);
+    this.pending.delete(sessionId);
+    this.clearAnswerTargets(sessionId);
     this.removeAbort(entry);
     entry.timer = undefined;
     void this.sender.sendMarkdown(entry.record.replyTarget, '⚠️ 提问已超时，未收到回答。').catch(() => {});
     entry.reject(new QuestionChannelError('ask_user_question timed out before the user answered', ASK_ABORTED));
   }
 
-  private resetTimer(entry: PendingEntry, key: string): void {
+  private resetTimer(entry: PendingEntry, sessionId: string): void {
     if (entry.timer) clearTimeout(entry.timer);
-    entry.timer = setTimeout(() => this.onTimeout(key), this.config.askTimeoutMs);
+    entry.timer = setTimeout(() => this.onTimeout(sessionId), this.config.askTimeoutMs);
   }
 
   private clearTimer(entry: PendingEntry): void {

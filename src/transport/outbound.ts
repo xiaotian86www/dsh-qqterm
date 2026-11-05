@@ -5,6 +5,7 @@
  * 事件解析归一化在 events.ts，路由按事件类型分发到私有方法。
  */
 import type { SessionManager, SessionRecord } from '../session/index.ts';
+import { shortSessionId } from '../shared/utils.ts';
 import type { ImQQBotConfig } from '../config.ts';
 import type { Logger } from '../types.ts';
 import { chunkMarkdownText } from './chunker.ts';
@@ -73,6 +74,8 @@ class OutboundRouter {
    * turn/end 时需等待其完成再投递交付文件，保证回复文本先于文件到达用户）。
    */
   private readonly pendingText = new Map<string, Promise<void>>();
+  /** 每会话发送链：同一会话的分片连续发送，不与别的会话交错 */
+  private readonly sendChains = new Map<string, Promise<void>>();
   private readonly manager: SessionManager;
   private readonly bot: QQBotSender;
   private readonly config: ImQQBotConfig;
@@ -165,22 +168,34 @@ class OutboundRouter {
   private appendChunk(sessionId: string, record: SessionRecord, text: string): void {
     let buffer = this.buffers.get(sessionId);
     if (buffer === undefined) {
-      buffer = new OutboundBuffer(record, this.bot, this.config.textChunkLimit, this.logger, this.shouldStream(record));
+      // 流式只给 current；非当前会话走静态消息，并给每一片加 `[#短id]`
+      const current = this.manager.isCurrentSession(sessionId);
+      const prefix = current ? '' : `[#${shortSessionId(sessionId)}] `;
+      buffer = new OutboundBuffer(
+        record,
+        this.bot,
+        this.config.textChunkLimit,
+        this.logger,
+        this.shouldStream(record),
+        prefix,
+      );
       this.buffers.set(sessionId, buffer);
     }
     buffer.append(text);
   }
 
-  /** 是否启用流式：配置开启 + 有 msgId（被动回复才能流式） */
+  /** 是否启用流式：配置开启 + 有 msgId（被动回复才能流式）+ 当前会话 */
   private shouldStream(record: SessionRecord): boolean {
-    return this.config.streaming && !!record.replyTarget.msgId;
+    return this.config.streaming
+      && !!record.replyTarget.msgId
+      && this.manager.isCurrentSession(record.sessionId);
   }
 
   /** 完整 assistant 消息：有流式 buffer 则 flush，否则直接发送文本块 */
   private onMessage(sessionId: string, record: SessionRecord, event: MessageEvent): void {
     const buffer = this.buffers.get(sessionId);
     if (buffer !== undefined && buffer.text.trim()) {
-      this.trackText(sessionId, buffer.flush());
+      this.trackText(sessionId, this.enqueue(sessionId, () => buffer.flush()));
       this.buffers.delete(sessionId);
       return;
     }
@@ -251,7 +266,7 @@ class OutboundRouter {
     let flushTask: Promise<void> = Promise.resolve();
     if (buffer !== undefined) {
       if (buffer.text.trim()) {
-        flushTask = buffer.flush();
+        flushTask = this.enqueue(sessionId, () => buffer.flush());
       } else {
         buffer.cancel();
       }
@@ -266,24 +281,47 @@ class OutboundRouter {
     this.pendingText.delete(sessionId);
 
     const failure = extractTurnError(event.reason);
-    void (async () => {
+    void this.enqueue(sessionId, async () => {
       await Promise.all([flushTask, pending]);
       if (failure !== undefined && !SILENT_TURN_ERROR_CODES.has(failure.code)) {
-        await this.send(record, `⚠️ 本轮异常结束\n\`${failure.code}\`: ${failure.message}`, 'sendTurnEndError');
+        await this.sendNow(record, `⚠️ 本轮异常结束\n\`${failure.code}\`: ${failure.message}`, 'sendTurnEndError');
       }
       if (files.length > 0 && this.deliverer !== undefined) {
         await this.deliverer.deliver(record, files);
       }
       this.logger.debug(`im-qqbot: turn/end sessionId=${sessionId}`);
-    })();
+    });
   }
 
-  /** 统一发送：切分 + 逐 chunk 发送 + 错误记录 */
-  private async send(record: SessionRecord, text: string, tag: string): Promise<void> {
+  /**
+   * 每会话发送链：同一会话的分片连续发送，不与别的会话交错。
+   * 任务内部不要再调用 `send()`（会再次入队并等待自己），用 `sendNow()`。
+   */
+  private enqueue(sessionId: string, task: () => Promise<void>): Promise<void> {
+    const previous = this.sendChains.get(sessionId) ?? Promise.resolve();
+    const next = previous.then(task).catch((err: unknown) => {
+      this.logger.error(`im-qqbot: send chain failed: ${err instanceof Error ? err.message : String(err)}`);
+    });
+    this.sendChains.set(sessionId, next);
+    void next.then(() => {
+      if (this.sendChains.get(sessionId) === next) this.sendChains.delete(sessionId);
+    });
+    return next;
+  }
+
+  /** 统一发送：入队 → 切分 + 逐 chunk 发送 + 错误记录 */
+  private send(record: SessionRecord, text: string, tag: string): Promise<void> {
+    return this.enqueue(record.sessionId, () => this.sendNow(record, text, tag));
+  }
+
+  /** 在当前发送链内发送：非当前会话的每一片都带 `[#短id]` 前缀 */
+  private async sendNow(record: SessionRecord, text: string, tag: string): Promise<void> {
+    const current = this.manager.isCurrentSession(record.sessionId);
+    const prefix = current ? '' : `[#${shortSessionId(record.sessionId)}] `;
     const chunks = chunkMarkdownText(text, this.config.textChunkLimit);
     for (const chunk of chunks) {
       try {
-        await this.bot.sendMarkdown(record.replyTarget, chunk);
+        await this.bot.sendMarkdown(record.replyTarget, `${prefix}${chunk}`);
       } catch (err) {
         this.logger.error(`im-qqbot: ${tag} failed: ${err instanceof Error ? err.message : String(err)}`);
       }

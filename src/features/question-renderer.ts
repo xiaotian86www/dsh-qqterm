@@ -5,18 +5,26 @@
  */
 import type { InlineKeyboard } from '@tencent-connect/qqbot-nodejs';
 import type { UserQuestion } from './question-channel.ts';
+import { shortSessionId } from '../shared/utils.ts';
 import { BUTTONS_PER_ROW, buttonLabel, encodeButtonData } from './button-utils.ts';
+
+/** 渲染上下文：非当前会话要加 `[#id]` 标记和（无按钮时）回答链接 */
+export interface QuestionRenderContext {
+  sessionId?: string;
+  isCurrent?: boolean;
+}
 
 /**
  * 为「单选、带选项」的问题构建内联键盘；不适用时返回 undefined。
  *
  * 多行多列布局：每行 BUTTONS_PER_ROW 个按钮，减少选项多时的刷屏。
  *
- * button_data 编码 `{"t":"question","q":<问题id>,"i":<选项下标>}`，由分发器解码。
- * `t` 顶层判别字段供 interaction 统一路由；`q` 关联「当前正在问的题」：逐题
- * 推进时旧题按钮在新题发出后被点击，其 q 不等于当前题 id，可被识别并忽略。
+ * button_data 编码 `{"t":"question","s":<会话id>,"q":<问题id>,"i":<选项下标>}`，
+ * 由分发器解码。`s` 让非当前会话的按钮也能找回自己的 pending，不依赖 current。
+ * `q` 关联「当前正在问的题」：逐题推进时旧题按钮在新题发出后被点击，其 q
+ * 不等于当前题 id，可被识别并忽略。
  */
-export function buildKeyboard(question: UserQuestion): InlineKeyboard | undefined {
+export function buildKeyboard(question: UserQuestion, sessionId?: string): InlineKeyboard | undefined {
   const opts = question.options ?? [];
   if (opts.length === 0 || question.multiSelect) return undefined;
 
@@ -36,7 +44,12 @@ export function buildKeyboard(question: UserQuestion): InlineKeyboard | undefine
             type: 1,
             permission: { type: 2 },
             click_limit: 1,
-            data: encodeButtonData({ t: 'question', q: question.id, i: idx }),
+            data: encodeButtonData({
+              t: 'question',
+              ...(sessionId !== undefined ? { s: sessionId } : {}),
+              q: question.id,
+              i: idx,
+            }),
           },
           // 互斥交给状态机：首答即结算，后续点击因 pending 已清或问题 id
           // 不匹配而被忽略，不需要键盘层面的分组约束。
@@ -51,15 +64,22 @@ export function buildKeyboard(question: UserQuestion): InlineKeyboard | undefine
 export function formatQuestion(
   question: UserQuestion,
   withButtons: boolean,
+  context: QuestionRenderContext = {},
 ): string {
   const lines: string[] = [];
-  if (question.header) lines.push(`**${question.header}**`);
+  const nonCurrent = context.sessionId !== undefined && context.isCurrent === false;
+  const tag = nonCurrent && context.sessionId !== undefined
+    ? `[#${shortSessionId(context.sessionId)}] `
+    : '';
+
+  if (question.header) lines.push(`${tag}**${question.header}**`);
 
   const opts = question.options ?? [];
   const multi = question.multiSelect === true;
 
   // 问题行：多选标记前置，用户第一眼就知道作答方式
-  lines.push(multi ? `${question.question}（可多选）` : question.question);
+  const body = multi ? `${question.question}（可多选）` : question.question;
+  lines.push(question.header ? body : `${tag}${body}`);
 
   // 选项列表：保留完整 label + description（按钮 label 截断时 description 靠正文展示）
   opts.forEach((o, i) => {
@@ -67,7 +87,15 @@ export function formatQuestion(
   });
 
   // 底部引导：用引用块（>）与正文区分
-  if (opts.length > 0) {
+  if (nonCurrent) {
+    lines.push('');
+    if (withButtons) {
+      lines.push('> 👇 点击下方按钮选择');
+    } else if (context.sessionId !== undefined) {
+      const short = shortSessionId(context.sessionId);
+      lines.push(`> 💡 回答这个会话 <qqbot-cmd-input text="/to #${short} " show="回答 #${short}"/>`);
+    }
+  } else if (opts.length > 0) {
     lines.push('');
     if (withButtons) {
       lines.push('> 👇 点击下方按钮选择，或回复编号');

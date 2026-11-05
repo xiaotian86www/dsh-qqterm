@@ -2,9 +2,10 @@
  * 会话管理命令：/sessions（别名 /session）
  *
  * 子命令：
- *   /sessions                     列出未归档的会话（与 Web 侧栏同一来源）
- *   /sessions <页码>              同一列表的下一页（超过一页时才用）
- *   /sessions all                 按工作区分组列出全部会话
+ *   /sessions                     列出 QQ 已持有的会话（跨工作区，带状态 / 当前项）
+ *   /sessions <页码>              持有列表的下一页（超过一页时才用）
+ *   /sessions workspace           列出当前工作区里未归档的会话（只标 📌，不标当前）
+ *   /sessions all                 按工作区分组列出全部会话（只标 📌，不标当前）
  *   /sessions archived [页码]     列出已归档的会话（每条都可点击取消归档）
  *   /sessions resume <序号|id>     把当前聊天切到指定会话，接上历史继续
  *   /sessions archive              列出可归档的会话，每条都可点击归档
@@ -12,8 +13,8 @@
  *   /sessions unarchive <目标[,目标…]> 取消归档，让它重新可用
  *
  * **句柄规则（唯一要记住的一条）**：每行都显示 8 位短 id，任何视图都能用它操作；
- * 序号只对应 `/sessions` 这一页的行号。`/sessions all` 按工作区分组、组内从 1
- * 编号，和命令解析的顺序对不上，所以那里**不显示序号**，只显示短 id。
+ * 序号只对应 `/sessions` 的持有列表。`workspace` / `all` / `archived` / 归档候选
+ * 都不编号，只用短 id。
  *
  * 「目标」是序号或 id 前缀（至少 4 位，8 位短 id 正好）；多个目标用英文逗号
  * 分隔，一次最多 10 个，逐个执行、逐个报告，单个失败不影响其它。
@@ -31,7 +32,7 @@
  */
 import type { CommandDeps, CategorizedCommand } from './types.ts';
 import type { ImQQBotConfig } from '../config.ts';
-import { getScopePeer, formatRelativeTime, sendMarkdownChunked } from '../shared/index.ts';
+import { getScopePeer, formatRelativeTime, sendMarkdownChunked, shortSessionId } from '../shared/index.ts';
 import type { Logger } from '../types.ts';
 import type { ArchiveSessionOutcome, WorkspaceGroup, WorkspaceSession } from '../session/index.ts';
 
@@ -43,6 +44,31 @@ const TITLE_MAX = 28;
 
 /** 一次最多处理多少个目标：够用，又不至于一条命令刷出几十行 */
 const MAX_TARGETS = 10;
+
+/** 行内展示文本的净化：换行会打散列表，markdown / 属性字符会破坏渲染 */
+function cleanInline(raw: string): string {
+  return raw
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/[`*_~<>"']/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** 超长文本截断（标题、用户输入的错误回显共用） */
+function clip(raw: string, max = TITLE_MAX): string {
+  return raw.length > max ? `${raw.slice(0, max)}…` : raw;
+}
+
+/** 用户输入只用于展示：净化 + 截断，空值给 — */
+function safeArg(raw: string): string {
+  const cleaned = cleanInline(raw);
+  return cleaned === '' ? '—' : clip(cleaned);
+}
+
+/** XML 属性值转义（`&` 在 QQ 的指令标签里必须先转义） */
+function attrValue(raw: string): string {
+  return raw.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+}
 
 /**
  * 会话管理鉴权。
@@ -62,18 +88,22 @@ export function sessionAdminAuth(
     if (senderId !== undefined && allow.includes(senderId)) return true;
     logger?.warn(`im-qqbot: /sessions denied: sender=${senderId ?? '(missing)'} allowlist=${allow.length}`);
     return allow.length === 0
-      ? '⚠️ 会话管理需要先配置白名单：把你的 OpenID（/bot-me 可查）加入 access.c2cAllow'
-      : '⚠️ 会话管理仅限白名单用户（access.c2cAllow）';
+      ? '⚠️ 会话管理需要先配置白名单\n用 /bot-me 查 OpenID，加入 access.c2cAllow'
+      : '⚠️ 会话管理仅限白名单用户\n用 /bot-me 查 OpenID，加入 access.c2cAllow';
   };
 }
 
 const USAGE = [
-  '🗂 **会话管理**',
-  '`/sessions` 当前工作区 · `/sessions all` 全部 · `/sessions archived` 归档',
-  '`/sessions resume <序号|id>` 切到某个会话，接上历史继续（工作区跟着切）',
-  '`/sessions archive [序号|id,…]` 归档（可逆，一次最多 10 个）；不带目标时列出候选',
-  '`/sessions unarchive <id>[,…]` 取消归档',
-  'id 是列表里的 8 位；序号只对 `/sessions` 这一页有效',
+  '### 🗂 会话管理',
+  '',
+  '`/sessions` 持有会话 · `/sessions workspace` 当前工作区 · `/sessions all` 全部工作区',
+  '以上三个视图都可以加 `<页码>` 翻页',
+  '`/sessions resume <序号|id>` 切到某个会话，接上历史（工作区跟着切）',
+  '`/sessions archive [序号|id,…]` 归档，可逆，一次最多 10 个',
+  '`/sessions archive` 列出候选（`page <页码>` 翻页）',
+  '`/sessions archived [页码]` 归档列表 · `/sessions unarchive <id>[,…]` 取消归档',
+  '',
+  '序号只对 `/sessions` 的持有列表有效，其它视图用 8 位短 id',
 ].join('\n');
 
 /** 目标解析结果 */
@@ -95,6 +125,7 @@ export function resolveSessionTarget(
   raw: string,
 ): SessionTargetResult {
   const arg = raw.trim().replace(/^#/, '');
+  const printable = safeArg(raw.trim());
   if (arg === '') return { ok: false, error: '缺少目标（序号或 id）' };
 
   if (/^\d+$/.test(arg)) {
@@ -105,20 +136,20 @@ export function resolveSessionTarget(
     }
     // 短数字是越界的序号；4 位以上按 id 继续往下解析
     if (arg.length < 4) {
-      return { ok: false, error: `序号 ${arg} 超出范围（当前共 ${entries.length} 个会话）` };
+      return { ok: false, error: `序号 ${printable} 超出范围（当前共 ${entries.length} 个会话）` };
     }
   }
 
-  if (arg.length < 4) return { ok: false, error: 'id 至少 4 位；列表里的 8 位短 id 可以直接用' };
+  if (arg.length < 4) return { ok: false, error: 'id 至少 4 位，列表里的 8 位短 id 直接可用' };
 
   // 完整 id、带 session- 前缀的 id、列表里展示的短 id 都认
   const matches = entries.filter((entry) => entry.id === arg
     || entry.id.startsWith(arg)
     || shortId(entry.id).startsWith(arg)); // 短 id 与序号无关，必须比短形式
-  if (matches.length === 0) return { ok: false, error: `没有匹配的会话: ${arg}` };
-  if (matches.length > 1) return { ok: false, error: `id 前缀匹配到 ${matches.length} 个会话，请写长一点` };
+  if (matches.length === 0) return { ok: false, error: `没有匹配的会话: ${printable}` };
+  if (matches.length > 1) return { ok: false, error: `id 前缀匹配到 ${matches.length} 个会话，多写几位再试` };
   const entry = matches[0];
-  return entry ? { ok: true, entry } : { ok: false, error: `没有匹配的会话: ${arg}` };
+  return entry ? { ok: true, entry } : { ok: false, error: `没有匹配的会话: ${printable}` };
 }
 
 /**
@@ -143,7 +174,7 @@ interface TargetBatch {
 /**
  * 逐个解析目标；某个 token 解析失败只记错误，不影响其它 token。
  *
- * 序号只在 `view`（`/sessions` 那一页的数据）里解析，id 前缀在 `all`（全量，
+ * 序号只在 `view`（`/sessions` 的持有列表）里解析，id 前缀在 `all`（全量，
  * 含别的项目与已归档）里解析——这样列表上看到哪个短 id 都能直接操作。
  */
 function resolveTargets(
@@ -178,16 +209,16 @@ function parseTargetsOrError(
   usage: string,
 ): { tokens: string[] } | { message: string } {
   const tokens = parseTargetTokens(raw);
-  if (tokens.length === 0) return { message: `⚠️ 缺少目标。用法: \`${usage}\`` };
+  if (tokens.length === 0) return { message: `⚠️ 缺少目标 · 用法: \`${usage}\`` };
   if (tokens.length > MAX_TARGETS) {
-    return { message: `⚠️ 一次最多处理 ${MAX_TARGETS} 个会话` };
+    return { message: `⚠️ 一次最多处理 ${MAX_TARGETS} 个会话，分两次执行` };
   }
   return { tokens };
 }
 
 /** 展示用短 id：去掉统一的 `session-` 前缀，避免只显示出一个前缀 */
 export function shortId(id: string): string {
-  return id.replace(/^session-/, '').slice(0, 8);
+  return shortSessionId(id);
 }
 
 /**
@@ -202,35 +233,65 @@ function displayId(id: string): string {
 
 /** 标题压缩成单行短文本（换行会打散列表，引号会破坏命令标签属性） */
 function shortTitle(entry: WorkspaceSession): string {
-  const raw = (entry.title ?? '').replace(/[\r\n]+/g, ' ').replace(/[`*_~<>"']/g, '').trim();
+  const raw = cleanInline(entry.title ?? '');
   if (raw === '') return '未命名会话';
-  return raw.length > TITLE_MAX ? `${raw.slice(0, TITLE_MAX)}…` : raw;
+  return clip(raw);
 }
 
-/** 列表行里展示的附加状态 */
-function statusTags(entry: WorkspaceSession): string[] {
-  return entry.live && !entry.current ? ['使用中'] : [];
+/**
+ * 工作区标题行。
+ *
+ * 目录不存在时单独一行：状态图标只能放行首，不能跟在路径后面。
+ */
+function workspaceHeader(
+  title: string,
+  path: string,
+  missing: boolean,
+): string[] {
+  const name = clip(cleanInline(title)) || '未命名工作区';
+  const lines = [path === '' ? `**${name}**` : `**${name}** · \`${path}\``];
+  if (missing) lines.push('⚠️ 目录不存在');
+  return lines;
 }
 
-/** 一行会话的展示文本：`1. 9d2c4410 · 标题 · 3d 前 ✅`（✅ 只给当前会话） */
+/**
+ * 持有列表里的会话状态。
+ *
+ * 其它视图不展示状态，只标 `📌`；状态词只出现在 `/sessions` 默认视图。
+ */
+function statusOf(entry: WorkspaceSession): string {
+  if (entry.held) return entry.running ? '生成中' : '空闲';
+  return '待恢复';
+}
+
+/** 一行会话的展示文本：`1. #9d2c4410 · 标题 · 生成中 · 3d 前 ✅` */
 interface RowOptions {
-  /** 行首带序号（只有 `/sessions` 的编号能被命令解析） */
+  /** 行首带序号（只有 `/sessions` 持有列表的编号能被命令解析） */
   numbered?: boolean;
-  /** 行尾带上所属工作区（归档页用） */
+  /** 行尾带上所属工作区（归档页 / 跨工作区持有列表用） */
   withWorkspace?: boolean;
+  /** 展示生成状态（只在持有列表里开） */
+  showStatus?: boolean;
+  /** 给持有会话加 `📌` 标记（工作区 / 全部 / 归档候选） */
+  showHeld?: boolean;
+  /** 展示当前项 `✅`（只在持有列表里开） */
+  showCurrent?: boolean;
 }
 
 function renderRow(entry: WorkspaceSession, index: number, options: RowOptions = {}): string {
   const body: string[] = [];
   body.push(displayId(entry.id));
   body.push(shortTitle(entry));
+  if (options.showStatus) body.push(statusOf(entry));
   const time = formatRelativeTime(entry.createdAt);
   if (time !== '—') body.push(time);
-  body.push(...statusTags(entry));
-  if (options.withWorkspace && entry.workspace) body.push(entry.workspace);
+  const workspace = clip(cleanInline(entry.workspace ?? ''));
+  if (options.withWorkspace && workspace !== '') body.push(workspace);
+  // 持有标记固定放行尾；工作区后缀先写，避免 📌 被挤到中间
+  if (options.showHeld && entry.held) body.push('📌');
   const head = options.numbered ? `${index}. ` : '';
   // 当前项标记放行尾，与 /model、/preset 的按钮标签一致
-  const tail = entry.current ? ' ✅' : '';
+  const tail = options.showCurrent && entry.current ? ' ✅' : '';
   return `${head}${body.join(' · ')}${tail}`;
 }
 
@@ -251,10 +312,11 @@ function renderLine(entry: WorkspaceSession, label: string): string {
  * 只用于**真能执行**的命令；`show` 是纯文本标签（不能再带 markdown）。
  */
 function commandLink(command: string, show: string): string {
-  return `<qqbot-cmd-input text="${command}" show="${show}"/>`;
+  const label = cleanInline(show) || command;
+  return `<qqbot-cmd-input text="${attrValue(command)}" show="${attrValue(label)}"/>`;
 }
 
-/** `/sessions` 列表底部的单行操作入口：每项都是可点击命令 */
+/** 工作区列表底部的单行操作入口：每项都是可点击命令 */
 function listFooter(archivedCount: number): string {
   const parts = [
     commandLink('/sessions archive', '归档'),
@@ -264,10 +326,32 @@ function listFooter(archivedCount: number): string {
   return parts.join(' · ');
 }
 
-/** 分页导航：只给存在的方向，标签固定「上一页 / 下一页」 */
-function pageLinks(page: number, pages: number, command: (page: number) => string): string[] {
+/**
+ * 持有列表底部：回工作区视图 / 全部视图；当前指针不在列表里时补一个恢复入口，
+ * 避免「待恢复」只提示不给动作。
+ */
+function heldFooter(recoverId?: string): string {
+  const parts = [
+    commandLink('/sessions archive', '归档'),
+    commandLink('/sessions workspace', '工作区会话'),
+    commandLink('/sessions all', '查看全部'),
+  ];
+  if (recoverId !== undefined) {
+    parts.push(commandLink(`/sessions resume ${displayId(recoverId)}`, '恢复当前'));
+  }
+  return parts.join(' · ');
+}
+
+/** 分页导航：多页时给出 上一页 · 第 x/y 页 · 下一页，缺哪边省略哪边 */
+function pageLinks(
+  page: number,
+  pages: number,
+  command: (page: number) => string,
+): string[] {
+  if (pages <= 1) return [];
   const links: string[] = [];
   if (page > 1) links.push(commandLink(command(page - 1), '上一页'));
+  links.push(`第 ${page}/${pages} 页`);
   if (page < pages) links.push(commandLink(command(page + 1), '下一页'));
   return links;
 }
@@ -286,7 +370,7 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Categ
     // 会话里可能含其它 chat 的历史标题，归档会影响所有人的列表：只允许私聊 + 白名单
     scope: 'c2c',
     authorized: sessionAdminAuth(config, logger),
-    description: '列出、恢复、归档会话',
+    description: '列出持有会话、恢复、归档',
     usage: USAGE,
     handler: async (cmdCtx) => {
       const raw = (cmdCtx.command?.raw ?? '').trim();
@@ -295,12 +379,29 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Categ
       const rest = words.slice(1);
       const { scope, peerId } = getScopePeer(cmdCtx);
 
-      // `/sessions 2` = 第二页；数字子命令不当成未知命令
+      // `/sessions 2` = 持有列表第二页；`workspace 2` / `all 2` / `archived 2` 同理
       let page = 1;
       if (/^\d+$/.test(sub)) {
         page = Number(sub);
         sub = '';
+      } else if (
+        (sub === 'workspace' || sub === 'ws' || sub === 'archived'
+          || sub === 'all' || sub === 'groups' || sub === 'workspaces' || sub === 'list')
+        && rest[0] !== undefined && /^\d+$/.test(rest[0])
+      ) {
+        page = Number(rest[0]);
+        rest.shift();
       }
+
+      const loadHeld = async (): Promise<WorkspaceSession[] | string> => {
+        try {
+          return await manager.listHeldSessions(scope, peerId);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          logger?.warn(`/sessions 列举持有会话失败: ${message}`);
+          return `⚠️ 读取持有会话失败: ${message}`;
+        }
+      };
 
       const loadEntries = async (): Promise<WorkspaceSession[] | string> => {
         try {
@@ -350,15 +451,27 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Categ
         switch (sub) {
           case '':
           case 'list': {
+            const loaded = await loadHeld();
+            if (typeof loaded === 'string') return loaded;
+            const workspace = await loadWorkspaceInfo();
+            return renderHeldList(loaded, workspace, manager.currentSessionId(), page);
+          }
+
+          case 'workspace':
+          case 'ws': {
             const loaded = await loadEntries();
             if (typeof loaded === 'string') return loaded;
             const active = loaded.filter((entry) => !entry.archived);
             const workspace = await loadWorkspaceInfo();
-            // 工作区空着时才知道「别的项目里还有没有会话」，为空才多查一次
+            // 本工作区没有未归档会话时，才知道「别的项目里还有没有会话」
             let elsewhere = 0;
-            if (loaded.length === 0) {
+            if (active.length === 0) {
               const groups = await loadGroups();
-              if (typeof groups !== 'string') elsewhere = flattenGroups(groups).length;
+              if (typeof groups !== 'string') {
+                elsewhere = flattenGroups(groups).filter((entry) => (
+                  !entry.archived && entry.workspace !== workspace?.title
+                )).length;
+              }
             }
             return renderList(active, loaded.length - active.length, workspace, page, elsewhere);
           }
@@ -368,15 +481,14 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Categ
           case 'workspaces': {
             const groups = await loadGroups();
             if (typeof groups === 'string') return groups;
-            return renderGroups(groups);
+            return renderGroups(groups, page);
           }
 
           case 'archived': {
             const groups = await loadGroups();
             if (typeof groups === 'string') return groups;
             const archived = flattenGroups(groups).filter((entry) => entry.archived);
-            const pageArg = rest[0] !== undefined && /^\d+$/.test(rest[0]) ? Number(rest[0]) : 1;
-            return renderArchived(archived, pageArg);
+            return renderArchived(archived, page);
           }
 
           case 'resume':
@@ -384,20 +496,26 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Categ
             const arg = rest[0] ?? '';
             if (arg.trim() === '') return `⚠️ 缺少目标 · ${commandLink('/sessions', '选择会话')}`;
 
-            const loaded = await loadEntries();
-            if (typeof loaded === 'string') return loaded;
-            const active = loaded.filter((entry) => !entry.archived);
-
-            // 纯序号不需要跨工作区清单：省一次全量列举和一轮标题日志读取
+            // 纯序号只对应 /sessions 的持有列表；id 先查持有集合，再查全量清单
             let target: SessionTargetResult;
             if (/^\d+$/.test(arg.trim())) {
-              target = resolveSessionTarget(active, arg);
+              const held = await loadHeld();
+              if (typeof held === 'string') return held;
+              target = resolveSessionTarget(held, arg);
             } else {
-              const groups = await loadGroups();
-              if (typeof groups === 'string') return groups;
-              target = resolveSessionTarget(flattenGroups(groups), arg);
+              const held = await loadHeld();
+              const fromHeld = typeof held === 'string' ? undefined : resolveSessionTarget(held, arg);
+              if (fromHeld?.ok) {
+                target = fromHeld;
+              } else {
+                const groups = await loadGroups();
+                if (typeof groups === 'string') return groups;
+                target = resolveSessionTarget(flattenGroups(groups), arg);
+              }
             }
-            if (!target.ok) return target.error;
+            if (!target.ok) {
+              return `⚠️ ${target.error} · ${commandLink('/sessions', '查看会话')}`;
+            }
             if (target.entry.current) return '✅ 已是当前会话';
 
             const outcome = await manager.switchSession(
@@ -408,50 +526,97 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Categ
               { scope, targetId: peerId, msgId: cmdCtx.message.messageId },
             );
             if (outcome.ok) {
-              return `✅ 已恢复会话「${shortTitle(target.entry)}」 · \`${displayId(target.entry.id)}\``;
+              const unarchived = outcome.unarchived ? '（已取消归档）' : '';
+              return `✅ 已恢复会话「${shortTitle(target.entry)}」 · \`${displayId(target.entry.id)}\`${unarchived}`;
             }
             switch (outcome.reason) {
               case 'not-found':
-                return `⚠️ 磁盘上没有这个会话（可能已被删除） · ${commandLink('/sessions', '查看会话')}`;
-              case 'in-use':
-                return '⚠️ 该会话正在另一个聊天中使用，先在那边 /new';
+                return `⚠️ 这个会话已不存在（可能被删除） · ${commandLink('/sessions', '查看会话')}`;
+              case 'locked':
+                return '⚠️ 这个会话正在别的客户端运行，先在那里关闭再恢复';
               default:
-                return `⚠️ 恢复失败: ${outcome.message ?? '未知错误（可能被 Web 端打开占用）'}`;
+                return `⚠️ 恢复失败: ${outcome.message ?? '未知错误'} · ${commandLink('/sessions', '查看会话')}`;
             }
           }
 
           case 'archive':
           case 'a': {
+            // 候选页用 `page <页码>`，避免和 `archive <序号|id>` 的数字目标撞车
+            let pickerPage = 1;
+            if (rest[0] === 'page') {
+              const rawPage = rest[1];
+              if (rawPage === undefined || !/^\d+$/.test(rawPage)) {
+                return `⚠️ 页码必须是数字 · ${commandLink('/sessions archive', '查看候选')}`;
+              }
+              pickerPage = Number(rawPage);
+              rest.splice(0, 2);
+              if (rest.length > 0) {
+                return `⚠️ 页码后面不要再跟目标 · ${commandLink('/sessions archive', '查看候选')}`;
+              }
+            }
             const loaded = await loadEntries();
             if (typeof loaded === 'string') return loaded;
             const active = loaded.filter((entry) => !entry.archived);
-            if (active.length === 0) {
-              return loaded.length === 0
-                ? '⚠️ 这个工作区还没有会话'
-                : `⚠️ 没有未归档的会话 · ${commandLink('/sessions archived', '查看已归档')}`;
-            }
 
-            // 不带目标 = 页脚「归档」链接的落地页：给可点击候选，不猜要归档哪一个
-            if (rest.length === 0) return renderArchivePicker(active);
+            // 不带目标 = 页脚「归档」链接的落地页：当前工作区优先，再补其它工作区的持有会话
+            if (rest.length === 0) {
+              const loadedHeld = await loadHeld();
+              if (typeof loadedHeld === 'string') return loadedHeld;
+              const workspace = await loadWorkspaceInfo();
+              const local = [...active];
+              const localIds = new Set(local.map((entry) => entry.id));
+              // 宿主列表暂时没返回的本工作区持有会话也补进来
+              for (const entry of loadedHeld) {
+                if (workspace !== undefined && entry.workspace === workspace.title
+                  && !localIds.has(entry.id)) {
+                  local.push(entry);
+                  localIds.add(entry.id);
+                }
+              }
+              const candidates = [...local, ...loadedHeld.filter((entry) => !localIds.has(entry.id))];
+              if (candidates.length === 0) {
+                return loaded.length === 0
+                  ? '⚠️ 这个工作区还没有会话 · 发一条消息就会新建一个'
+                  : `⚠️ 没有未归档的会话 · ${commandLink('/sessions archived', '查看已归档')}`;
+              }
+              return renderArchivePicker(candidates, workspace, pickerPage);
+            }
 
             const parsed = parseTargetsOrError(rest.join(' '), '/sessions archive <序号|id>[,…]');
             if ('message' in parsed) return parsed.message;
 
-            // 只有写 id 时才需要跨工作区全量清单（id 可能来自 /sessions all）
+            // 序号只对应持有列表；id 需要跨工作区全量清单（可能来自 /sessions all）
             let all: WorkspaceSession[] = [];
             if (parsed.tokens.some((token) => !/^\d+$/.test(token))) {
               const groups = await loadGroups();
               if (typeof groups === 'string') return groups;
               all = flattenGroups(groups);
+              // 宿主列表暂时没返回的持有会话也要能用 id 归档
+              const loadedHeld = await loadHeld();
+              if (typeof loadedHeld !== 'string') {
+                const heldIds = new Set(loadedHeld.map((entry) => entry.id));
+                all = [...loadedHeld, ...all.filter((entry) => !heldIds.has(entry.id))];
+              }
+            }
+            let held: WorkspaceSession[] = [];
+            if (parsed.tokens.some((token) => /^\d+$/.test(token))) {
+              const loadedHeld = await loadHeld();
+              if (typeof loadedHeld === 'string') return loadedHeld;
+              held = loadedHeld;
             }
 
-            const batch = resolveTargets(active, all, parsed.tokens);
+            const batch = resolveTargets(held, all, parsed.tokens);
             const skipped = batch.picks
               .filter((entry) => entry.archived)
               .map((entry) => `「${shortTitle(entry)}」本来就在归档里，跳过`);
             const picks = batch.picks.filter((entry) => !entry.archived);
             if (picks.length === 0) {
-              return formatNoPicks(batch.errors, skipped, '没有可归档的会话。');
+              return formatNoPicks(
+                batch.errors,
+                skipped,
+                '没有可归档的会话',
+                commandLink('/sessions', '查看会话'),
+              );
             }
 
             const results: ArchiveResult[] = [];
@@ -478,9 +643,12 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Categ
 
             const parsed = parseTargetsOrError(rest.join(' '), '/sessions unarchive <id>[,…]');
             if ('message' in parsed) return parsed.message;
-            // 序号只对应 /sessions 那一页，在归档页上没有意义：直接说清楚，别猜
+            // 序号只对应 /sessions 的持有列表，在归档页上没有意义：直接说清楚，别猜
             if (parsed.tokens.some((token) => /^\d+$/.test(token))) {
-              return `⚠️ 序号只对应 \`/sessions\` 列表；取消归档用 8 位 id · ${commandLink('/sessions archived', '查看已归档')}`;
+              return [
+                '⚠️ 序号只对应 `/sessions` 的持有列表',
+                `取消归档用 8 位短 id · ${commandLink('/sessions archived', '查看已归档')}`,
+              ].join('\n');
             }
 
             const batch = resolveTargets(archived, all, parsed.tokens);
@@ -489,7 +657,12 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Categ
               .map((entry) => `「${shortTitle(entry)}」没有归档，跳过`);
             const picks = batch.picks.filter((entry) => entry.archived);
             if (picks.length === 0) {
-              return formatNoPicks(batch.errors, skipped, '没有可恢复的已归档会话。');
+              return formatNoPicks(
+                batch.errors,
+                skipped,
+                '没有可恢复的已归档会话',
+                commandLink('/sessions archived', '查看已归档'),
+              );
             }
 
             const results: ArchiveResult[] = [];
@@ -503,7 +676,7 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Categ
             return USAGE;
 
           default:
-            return `⚠️ 未知子命令: ${sub} · ${commandLink('/sessions help', '查看用法')}`;
+            return `⚠️ 未知子命令: ${safeArg(sub)} · ${commandLink('/sessions help', '查看用法')}`;
         }
       };
 
@@ -515,10 +688,83 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Categ
 }
 
 /**
- * 渲染未归档列表（`/sessions`，可分页）。
+ * 渲染持有列表（`/sessions`，可分页）。
  *
- * 每行都带 8 位短 id：这是唯一能直接打字的句柄；序号只是这一页的行号，
- * 供 `archive` / `resume` 使用。当前会话也走 resume，命令会识别并直接提示。
+ * 这里才是「QQ 正在使用哪些会话」：展示生成状态与当前项，跨工作区。
+ * 序号只在这个视图里有效，`resume` / `archive` 的数字目标也按这份列表解析。
+ *
+ * @param entries 已持有会话（当前优先，再按获取时间倒序）
+ * @param workspace 当前工作区（用于省略同行的工作区后缀）
+ * @param currentId 当前指针；不在持有列表里时单独补一行
+ * @param page 页码（1 起）
+ */
+function renderHeldList(
+  entries: readonly WorkspaceSession[],
+  workspace: WorkspaceSummary | undefined,
+  currentId: string | undefined,
+  page: number,
+): string {
+  const total = entries.length;
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  if (page < 1 || page > pages) {
+    return `⚠️ 第 ${page} 页没有内容（共 ${pages} 页） · ${commandLink('/sessions 1', '回到第 1 页')}`;
+  }
+
+  const start = (page - 1) * PAGE_SIZE;
+  const shown = total === 0 ? [] : entries.slice(start, start + PAGE_SIZE);
+  const currentEntry = entries.find((entry) => entry.current);
+  const currentLineId = currentId !== undefined && !shown.some((entry) => entry.current)
+    ? currentId
+    : undefined;
+  // 只有当前指针不在持有集合里才需要「恢复」；只是翻到别的页不用
+  const missingCurrentId = currentLineId !== undefined && currentEntry === undefined
+    ? currentLineId
+    : undefined;
+  const fields: string[] = [];
+  // 当前项不在这一页时单独补一行：翻到第 2 页也能看到当前是哪个
+  if (currentLineId !== undefined) {
+    const status = currentEntry === undefined ? '待恢复' : statusOf(currentEntry);
+    fields.push(`**当前**: ${displayId(currentLineId)} · ${status}`);
+  }
+  if (workspace) {
+    fields.push(...workspaceHeader(workspace.title, workspace.path, workspace.missing));
+  }
+
+  const lines: string[] = [
+    `### 🗂 持有会话（${total} 个）`,
+    '',
+    ...fields,
+    ...(fields.length > 0 ? [''] : []),
+  ];
+
+  if (total === 0) {
+    lines.push('还没有持有会话');
+    lines.push('', heldFooter(missingCurrentId));
+    return lines.join('\n');
+  }
+
+  shown.forEach((entry, offset) => {
+    const withWorkspace = workspace === undefined
+      || (entry.workspace !== undefined && entry.workspace !== workspace.title);
+    lines.push(renderLine(entry, renderRow(entry, start + offset + 1, {
+      numbered: true,
+      withWorkspace,
+      showStatus: true,
+      showCurrent: true,
+    })));
+  });
+
+  const nav = pageLinks(page, pages, (next) => `/sessions ${next}`);
+  if (nav.length > 0) lines.push('', nav.join(' · '));
+  lines.push('', heldFooter(missingCurrentId));
+  return lines.join('\n');
+}
+
+/**
+ * 渲染当前工作区列表（`/sessions workspace`，可分页）。
+ *
+ * 其它视图只标 `📌`，不标当前项；序号只属于 `/sessions` 的持有列表，
+ * 所以这里不编号，操作统一用短 id。
  *
  * @param entries 未归档会话（已按创建时间倒序）
  * @param archivedCount 已归档数量，只用于底部提示
@@ -534,41 +780,44 @@ function renderList(
   elsewhere: number,
 ): string {
   const workspaceLine = workspace
-    ? [
-      `**${workspace.title}** · \`${workspace.path}\`${workspace.missing ? ' ⚠️ 目录不存在' : ''}`,
-      '',
-    ]
+    ? [...workspaceHeader(workspace.title, workspace.path, workspace.missing), '']
     : [];
 
   const total = entries.length;
   if (total === 0) {
-    const lines = ['### 🗂 会话（共 0 个）', '', ...workspaceLine];
-    lines.push(archivedCount === 0
-      ? '这个工作区还没有会话'
-      : `这个工作区没有未归档的会话；已归档 ${archivedCount} 个: ${commandLink('/sessions archived', '查看归档')}`);
-    if (elsewhere > 0) lines.push(`其它工作区里还有 ${elsewhere} 个会话: ${commandLink('/sessions all', '查看全部')}`);
+    const lines = ['### 🗂 工作区会话（0 个未归档）', '', ...workspaceLine];
+    if (archivedCount === 0) {
+      lines.push(elsewhere === 0
+        ? '这个工作区还没有会话 · 发一条消息就会新建一个'
+        : '这个工作区还没有会话');
+    } else {
+      lines.push(`这个工作区没有未归档的会话 · 已归档 ${archivedCount} 个`);
+      lines.push(commandLink('/sessions archived', '查看已归档'));
+    }
+    if (elsewhere > 0) {
+      lines.push(`其它工作区还有 ${elsewhere} 个会话 · ${commandLink('/sessions all', '查看全部')}`);
+    }
     return lines.join('\n');
   }
 
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   if (page < 1 || page > pages) {
-    return `⚠️ 第 ${page} 页没有内容（共 ${pages} 页） · ${commandLink('/sessions 1', '回到第 1 页')}`;
+    return `⚠️ 第 ${page} 页没有内容（共 ${pages} 页） · ${commandLink('/sessions workspace 1', '回到第 1 页')}`;
   }
 
   const start = (page - 1) * PAGE_SIZE;
   const shown = entries.slice(start, start + PAGE_SIZE);
   const lines: string[] = [
-    `### 🗂 会话（共 ${total} 个，按创建时间倒序）${pages > 1 ? ` · 第 ${page}/${pages} 页` : ''}`,
+    `### 🗂 工作区会话（${total} 个未归档，按创建时间倒序）`,
     '',
     ...workspaceLine,
   ];
 
-  shown.forEach((entry, offset) => {
-    const index = start + offset + 1;
-    lines.push(renderLine(entry, renderRow(entry, index, { numbered: true })));
+  shown.forEach((entry) => {
+    lines.push(renderLine(entry, renderRow(entry, 0, { showHeld: true })));
   });
 
-  const nav = pageLinks(page, pages, (next) => `/sessions ${next}`);
+  const nav = pageLinks(page, pages, (next) => `/sessions workspace ${next}`);
   if (nav.length > 0) lines.push('', nav.join(' · '));
   lines.push('', listFooter(archivedCount));
   return lines.join('\n');
@@ -578,76 +827,124 @@ function renderList(
  * 渲染「选择要归档的会话」（`/sessions archive` 不带目标时的落地页）。
  *
  * 页脚里的「归档」只能填进不带目标的命令，所以这里再给一层可点击候选：
- * 点一条就把 `/sessions archive <id>` 填进输入框。只列最近 10 条，与
- * `/sessions` 第一页同序；更早的会话用 `/sessions all` 里的短 id 直接归档。
+ * 点一条就把 `/sessions archive <id>` 填进输入框。先列持有会话，再补当前
+ * 工作区里的与会话；最多 10 条，不编号（序号属于持有列表）。
+ *
+ * 候选可能来自别的项目，行尾补工作区标题，避免同名会话分不清。
+ * 超过一页时用 `archive page <页码>` 翻页，下一页仍是同一份候选清单。
  */
-function renderArchivePicker(entries: readonly WorkspaceSession[]): string {
-  const shown = entries.slice(0, PAGE_SIZE);
-  const lines: string[] = [`### 🗄 归档会话（共 ${entries.length} 个）`, ''];
-  shown.forEach((entry, offset) => {
-    const label = renderRow(entry, offset + 1, { numbered: true });
+function renderArchivePicker(
+  entries: readonly WorkspaceSession[],
+  workspace: WorkspaceSummary | undefined,
+  page = 1,
+): string {
+  const total = entries.length;
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  if (page < 1 || page > pages) {
+    return `⚠️ 第 ${page} 页没有内容（共 ${pages} 页） · ${commandLink('/sessions archive page 1', '回到第 1 页')}`;
+  }
+
+  const start = (page - 1) * PAGE_SIZE;
+  const shown = entries.slice(start, start + PAGE_SIZE);
+  const lines: string[] = [
+    `### 🗄 归档候选（${total} 个）`,
+    '',
+  ];
+  shown.forEach((entry) => {
+    const withWorkspace = workspace === undefined
+      || (entry.workspace !== undefined && entry.workspace !== workspace.title);
+    const label = renderRow(entry, 0, { showHeld: true, withWorkspace });
     lines.push(commandLink(`/sessions archive ${displayId(entry.id)}`, label));
   });
-  const rest = entries.length - shown.length;
-  if (rest > 0) {
-    lines.push('', `还有 ${rest} 个更早的会话 · ${commandLink('/sessions all', '查看全部')}`);
-  }
+  const nav = pageLinks(page, pages, (next) => `/sessions archive page ${next}`);
+  if (nav.length > 0) lines.push('', nav.join(' · '));
+  lines.push('', commandLink('/sessions', '返回持有列表'));
   return lines.join('\n');
 }
 
 /**
- * 渲染全部工作区的分组列表（`/sessions all`）。
+ * 渲染全部工作区的分组列表（`/sessions all`，按会话分页）。
  *
- * 组内序号从 1 开始、与命令的解析顺序无关，所以这里**不显示序号**，只显示
- * 8 位短 id：看到哪个都能直接 `/sessions resume <id>`。
+ * 组内序号与命令的解析顺序对不上，所以这里**不显示序号**，只显示 8 位短 id；
+ * 持有会话加 `📌` 标记，但不标当前项（当前只在 `/sessions` 里标）。
+ *
+ * 一页 10 条会话，跨工作区连续编号；翻页后仍会重复当前页首条所属工作区的
+ * 标题。会话全部归档的工作区放在最后一页，避免每页重复。
+ *
+ * @param groups 宿主工作区分组
+ * @param page 页码（1 起）
  */
-function renderGroups(groups: readonly WorkspaceGroup[]): string {
+function renderGroups(groups: readonly WorkspaceGroup[], page = 1): string {
   const visible = groups.filter((group) => group.sessions.length > 0);
   if (visible.length === 0) {
     return [
       '### 🗂 全部工作区（0 个工作区）',
       '',
-      '还没有任何工作区会话',
+      '还没有任何工作区会话 · 发一条消息就会新建一个',
+      '',
+      commandLink('/sessions', '返回持有列表'),
     ].join('\n');
   }
 
-  const total = visible.reduce(
-    (sum, group) => sum + group.sessions.filter((entry) => !entry.archived).length,
-    0,
-  );
-  const lines: string[] = [`### 🗂 全部工作区（${visible.length} 个工作区 · 共 ${total} 个会话）`, ''];
-
+  const rows: { group: WorkspaceGroup; entry: WorkspaceSession }[] = [];
   for (const group of visible) {
-    const active = group.sessions.filter((entry) => !entry.archived);
-    const archivedCount = group.sessions.length - active.length;
-    lines.push(
-      group.path === ''
-        ? `**${group.title}**`
-        : `**${group.title}** · \`${group.path}\`${group.missing ? ' ⚠️ 目录不存在' : ''}`,
-      '',
-    );
-
-    if (active.length === 0) {
-      lines.push(`${archivedCount} 个会话全部已归档 · ${commandLink('/sessions archived', '查看已归档')}`);
-    } else {
-      active.slice(0, PAGE_SIZE).forEach((entry) => {
-        lines.push(renderLine(entry, renderRow(entry, 0)));
-      });
-      if (active.length > PAGE_SIZE) {
-        lines.push(`还有 ${active.length - PAGE_SIZE} 个更早的会话未显示`);
-      }
-      if (archivedCount > 0) lines.push(`（另有 ${archivedCount} 个已归档）`);
+    for (const entry of group.sessions) {
+      if (!entry.archived) rows.push({ group, entry });
     }
-    lines.push('');
   }
 
+  const total = rows.length;
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  if (page < 1 || page > pages) {
+    return `⚠️ 第 ${page} 页没有内容（共 ${pages} 页） · ${commandLink('/sessions all 1', '回到第 1 页')}`;
+  }
+
+  const start = (page - 1) * PAGE_SIZE;
+  const shown = rows.slice(start, start + PAGE_SIZE);
+  const lines: string[] = [
+    `### 🗂 全部工作区（${visible.length} 个工作区 · ${total} 个未归档会话）`,
+    '',
+  ];
+
+  let lastGroupId: string | undefined;
+  for (const { group, entry } of shown) {
+    if (group.id !== lastGroupId) {
+      if (lastGroupId !== undefined) lines.push('');
+      lines.push(...workspaceHeader(group.title, group.path, group.missing), '');
+      lastGroupId = group.id;
+    }
+    lines.push(renderLine(entry, renderRow(entry, 0, { showHeld: true })));
+  }
+
+  const allArchived = visible.filter(
+    (group) => !group.sessions.some((entry) => !entry.archived),
+  );
+  if (page === pages && allArchived.length > 0) {
+    if (shown.length > 0) lines.push('');
+    allArchived.forEach((group, index) => {
+      if (index > 0) lines.push('');
+      lines.push(...workspaceHeader(group.title, group.path, group.missing), '');
+      lines.push(`${group.sessions.length} 个会话全部已归档`);
+    });
+  }
+
+  const archivedTotal = visible.reduce(
+    (sum, group) => sum + group.sessions.filter((entry) => entry.archived).length,
+    0,
+  );
+  const nav = pageLinks(page, pages, (next) => `/sessions all ${next}`);
+  if (nav.length > 0) lines.push('', nav.join(' · '));
+
+  const footer = [commandLink('/sessions', '返回持有列表')];
+  if (archivedTotal > 0) footer.push(commandLink('/sessions archived', '查看已归档'));
+  lines.push('', footer.join(' · '));
   return lines.join('\n').trimEnd();
 }
 
 /**
  * 渲染已归档列表（可分页）。
  *
- * 这里不显示序号（序号只对 `/sessions` 有效），每行给 8 位短 id 和所属工作区。
+ * 这里不显示序号（序号只对 `/sessions` 的持有列表有效），每行给 8 位短 id 和所属工作区。
  */
 function renderArchived(entries: readonly WorkspaceSession[], page = 1): string {
   if (entries.length === 0) {
@@ -669,7 +966,7 @@ function renderArchived(entries: readonly WorkspaceSession[], page = 1): string 
   const start = (page - 1) * PAGE_SIZE;
   const shown = entries.slice(start, start + PAGE_SIZE);
   const lines: string[] = [
-    `### 🗄 已归档（共 ${total} 个）${pages > 1 ? ` · 第 ${page}/${pages} 页` : ''}`,
+    `### 🗄 已归档（共 ${total} 个）`,
     '',
   ];
 
@@ -679,8 +976,8 @@ function renderArchived(entries: readonly WorkspaceSession[], page = 1): string 
   }
 
   const nav = pageLinks(page, pages, (next) => `/sessions archived ${next}`);
-  nav.push(commandLink('/sessions', '返回会话列表'));
-  lines.push('', nav.join(' · '));
+  if (nav.length > 0) lines.push('', nav.join(' · '));
+  lines.push('', commandLink('/sessions', '返回持有列表'));
   return lines.join('\n');
 }
 
@@ -693,18 +990,22 @@ interface ArchiveResult {
 /**
  * 没有可执行目标时的回包：错误项带 ⚠️，跳过项用 `· ` 单列。
  *
- * 第一行必须是图标开头——命令回复要和大模型正文一眼分开。
+ * 第一行必须是图标开头——命令回复要和大模型正文一眼分开；只有跳过项时
+ * 先补一行汇总，避免整条消息以 `· ` 开头。
  */
 function formatNoPicks(
   errors: readonly string[],
   skipped: readonly string[],
   fallback: string,
+  next?: string,
 ): string {
   const lines = [
     ...errors.map((error) => `⚠️ ${error}`),
     ...skipped.map((note) => `· ${note}`),
   ];
-  return lines.length > 0 ? lines.join('\n') : `⚠️ ${fallback}`;
+  if (errors.length === 0) lines.unshift(`⚠️ ${fallback}`);
+  if (next !== undefined) lines.push(next);
+  return lines.join('\n');
 }
 
 /**
@@ -728,9 +1029,12 @@ function renderArchiveResults(
 
   const okCount = results.filter((item) => item.outcome.ok).length;
   const failCount = results.length - okCount;
-  const head = verb === 'archive'
-    ? `🗄 已归档 ${okCount} 个会话${failCount > 0 ? `，${failCount} 个失败` : ''}`
-    : `♻️ 已取消归档 ${okCount} 个会话${failCount > 0 ? `，${failCount} 个失败` : ''}`;
+  const action = verb === 'archive' ? '归档' : '取消归档';
+  const head = okCount === 0
+    ? `⚠️ ${failCount} 个会话${action}失败`
+    : verb === 'archive'
+      ? `🗄 已归档 ${okCount} 个会话${failCount > 0 ? `，${failCount} 个失败` : ''}`
+      : `♻️ 已取消归档 ${okCount} 个会话${failCount > 0 ? `，${failCount} 个失败` : ''}`;
 
   const lines: string[] = [head, ''];
   results.forEach(({ entry, outcome }, index) => {
@@ -742,15 +1046,20 @@ function renderArchiveResults(
 
   const remapped = results.reduce((sum, item) => sum + (item.outcome.remapped ?? 0), 0);
   if (remapped > 0) lines.push('', '当前聊天已切到新会话');
-  lines.push('', verb === 'archive'
-    ? commandLink('/sessions archived', '查看已归档')
-    : commandLink('/sessions', '返回会话列表'));
+  // 全部失败时回到操作前的列表；有成功项才去目标列表
+  const allFailed = okCount === 0;
+  const footer = verb === 'archive'
+    ? (allFailed ? commandLink('/sessions', '返回持有列表') : commandLink('/sessions archived', '查看已归档'))
+    : (allFailed ? commandLink('/sessions archived', '查看已归档') : commandLink('/sessions', '返回持有列表'));
+  lines.push('', footer);
   return lines.join('\n');
 }
 
 /** 渲染单条归档结果 */
 function renderArchive(entry: WorkspaceSession, outcome: ArchiveSessionOutcome): string {
-  if (!outcome.ok) return `⚠️ ${archiveFailureText(entry, outcome, 'archive')}`;
+  if (!outcome.ok) {
+    return `⚠️ ${archiveFailureText(entry, outcome, 'archive')} · ${commandLink('/sessions', '查看会话')}`;
+  }
 
   const lines = [`🗄 已归档「${shortTitle(entry)}」 · \`${displayId(entry.id)}\``];
   if (outcome.alreadyArchived) lines.push('它本来就在归档里');
@@ -761,7 +1070,9 @@ function renderArchive(entry: WorkspaceSession, outcome: ArchiveSessionOutcome):
 
 /** 渲染单条取消归档结果 */
 function renderUnarchive(entry: WorkspaceSession, outcome: ArchiveSessionOutcome): string {
-  if (!outcome.ok) return `⚠️ ${archiveFailureText(entry, outcome, 'unarchive')}`;
+  if (!outcome.ok) {
+    return `⚠️ ${archiveFailureText(entry, outcome, 'unarchive')} · ${commandLink('/sessions archived', '查看已归档')}`;
+  }
 
   return [
     `♻️ 已取消归档「${shortTitle(entry)}」 · \`${displayId(entry.id)}\``,

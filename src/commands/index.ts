@@ -8,8 +8,9 @@
  *   - qqbot：插件自身特有（bot-ping/bot-version/bot-status/bot-help）
  */
 import type { CommandDeps, CategorizedCommand } from './types.ts';
-import { newCommand, compactCommand } from './session.ts';
+import { newCommand, resetCommand, compactCommand } from './session.ts';
 import { sessionsCommand } from './sessions.ts';
+import { toCommand } from './to.ts';
 import { workspaceCommand } from './workspace.ts';
 import { lsCommand } from './ls.ts';
 import { modelCommand } from './model.ts';
@@ -29,8 +30,10 @@ export function buildCommandList(deps: CommandDeps): CategorizedCommand[] {
   const commands: CategorizedCommand[] = [
     // 通用能力（底层 agent）
     newCommand(deps),
+    resetCommand(deps),
     compactCommand(deps),
     sessionsCommand(deps),
+    toCommand(deps),
     workspaceCommand(deps),
     lsCommand(deps),
     modelCommand(deps),

@@ -25,6 +25,8 @@ export class DeliverablesDeliverer implements DeliverablesDelivererLike {
   private readonly config: ImQQBotConfig;
   private readonly logger: Logger;
   private readonly dirOf?: (record: SessionRecord) => string | undefined;
+  /** 非当前会话的文字提示前缀（`[#短id] `）；文件本身无法带标记 */
+  private readonly prefixOf?: (record: SessionRecord) => string;
 
   public constructor(
     sender: QQBotSender,
@@ -32,12 +34,14 @@ export class DeliverablesDeliverer implements DeliverablesDelivererLike {
     config: ImQQBotConfig,
     logger: Logger,
     dirOf?: (record: SessionRecord) => string | undefined,
+    prefixOf?: (record: SessionRecord) => string,
   ) {
     this.sender = sender;
     this.mediaBot = mediaBot;
     this.config = config;
     this.logger = logger;
     this.dirOf = dirOf;
+    this.prefixOf = prefixOf;
   }
 
   /** 轮末投递一批声明文件：逐个发送，未送达的聚合为一条文字提示 */
@@ -77,9 +81,10 @@ export class DeliverablesDeliverer implements DeliverablesDelivererLike {
 
     if (missed.length > 0) {
       const text = ['📎 已生成文件（未能直接发送）：', ...missed.map((name) => `- ${name}`)].join('\n');
+      const prefix = this.prefixOf?.(record) ?? '';
       for (const chunk of chunkMarkdownText(text, this.config.textChunkLimit)) {
         try {
-          await this.sender.sendMarkdown(record.replyTarget, chunk);
+          await this.sender.sendMarkdown(record.replyTarget, `${prefix}${chunk}`);
         } catch (err) {
           this.logger.error(
             `im-qqbot: deliverables notice failed: ${err instanceof Error ? err.message : String(err)}`,

@@ -6,10 +6,12 @@
  * - Layer 2: quotePart（引用消息块）
  * - Layer 3: userMessage（引用块 + 正文）
  * - Layer 4: dynamicCtx（媒体元数据）
+ *
+ * 消息始终落到「当前会话」；其它已获取会话由 `/sessions resume`、`/to` 与
+ * 问答通道驱动，不从这条普通消息路径直接写。
  */
-import type { ContentBlock } from '@deepseek-ai/dsh-llm';
-import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import type { SessionManager } from '../session/index.ts';
+import { createQQUserMessage } from '../session/user-message.ts';
 import type { ChatScope, Logger, QuotedAttachment, RawAttachment, ReplyTarget } from '../types.ts';
 import {
   classifyContentType,
@@ -109,12 +111,7 @@ export async function handleInbound(
   }
 
   // ── 构建 UserMessage → followup ──
-  const content: ContentBlock[] = [{ type: 'text' as const, text: agentBody }];
-
-  const message = createUserMessage({
-    content,
-    source: { kind: 'user' as const },
-  });
+  const message = createQQUserMessage(agentBody);
 
   record.agent.followup(message);
   logger.info(`→ followup sent: key=${scope}:${peerId}`);

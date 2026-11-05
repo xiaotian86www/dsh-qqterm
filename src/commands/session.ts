@@ -1,7 +1,8 @@
 /**
  * 会话相关命令
  *
- * - /new（别名 /reset /clear）：开始新会话（换新 sessionId），可顺带指定工作区
+ * - /new：开始新会话（换新 sessionId），可顺带指定工作区
+ * - /reset（别名 /clear）：停掉当前会话，再在原工作区开新会话
  * - /compact：原地压缩会话历史（保留 sessionId，摘要替换旧历史）
  *
  * 两者都对应底层 dsh agent 能力，分类为 agent（通用能力）。
@@ -16,9 +17,9 @@ function num(n: number): string {
 }
 
 /**
- * /new（别名 /reset /clear）— 开始新会话
+ * /new — 开始新会话
  *
- * 不带参数：在当前工作区开新会话（与旧行为一致）。
+ * 不带参数：在当前工作区开新会话（旧会话继续在后台跑，与 `/reset` 不同）。
  * 带参数：在指定工作区开新会话，等价于 `/new` 再 `/workspace <工作区>`。
  *
  * 参数先解析再动会话：路径写错不该把当前会话弄丢。换工作区等于换 agent 能读写
@@ -27,7 +28,7 @@ function num(n: number): string {
  */
 export function newCommand({ manager, config }: CommandDeps): CategorizedCommand {
   return {
-    name: ['new', 'reset', 'clear'],
+    name: 'new',
     category: 'agent',
     scope: 'all',
     description: '开始新会话（清空上下文，可指定工作区）',
@@ -66,6 +67,49 @@ export function newCommand({ manager, config }: CommandDeps): CategorizedCommand
       const changed = await manager.changeChatWorkspace(scope, peerId, arg);
       if (!changed.ok) return describeChangeFailure(changed);
       return `✅ 已开启新会话\n工作区: ${changed.title} · ${changed.path}`;
+    },
+  };
+}
+
+/**
+ * /reset（别名 /clear）— 停掉当前会话，再在原工作区开新会话
+ *
+ * 与 `/new` 的区别：`/new` 只把 current 指向新会话，旧会话继续在后台跑；
+ * `/reset` 会 cancel 并释放当前会话，旧会话不再回 QQ。`/reset all` 停掉所有
+ * 已获取会话。其它已获取会话不受影响（不带 all 时）。不支持工作区参数，
+ * 换工作区用 `/new <工作区|路径>`。
+ */
+export function resetCommand({ manager }: CommandDeps): CategorizedCommand {
+  return {
+    name: ['reset', 'clear'],
+    category: 'agent',
+    scope: 'all',
+    description: '停止当前会话并开启新会话，all 停全部',
+    usage: [
+      '/reset',
+      '/reset all',
+      '',
+      '停止当前会话，再在原工作区开启新会话。',
+      '带 all：停掉所有已获取会话，再开启新会话。',
+      '要换工作区用 `/new <工作区|路径>`。',
+    ].join('\n'),
+    handler: async (cmdCtx) => {
+      const arg = (cmdCtx.command?.raw ?? '').trim();
+      const name = cmdCtx.command?.name ?? 'reset';
+
+      if (arg !== '') {
+        if (arg.toLowerCase() !== 'all') {
+          return `⚠️ /${name} 不支持指定工作区\n换工作区用 /new <工作区|路径>。`;
+        }
+
+        const stopped = await manager.resetAllSessions();
+        return stopped === 0
+          ? '✅ 已开启新会话'
+          : `✅ 已停止 ${stopped} 个会话，并开启新会话`;
+      }
+
+      const stopped = await manager.resetCurrentSession();
+      return stopped ? '✅ 已停止当前会话，并开启新会话' : '✅ 已开启新会话';
     },
   };
 }

@@ -2,7 +2,8 @@
  * 杂项命令
  *
  * - /bot-ping /bot-version /bot-me：QQBot 插件特有（连通性测试、版本、身份）
- * - /stop：中止当前生成（对应底层 agent cancel，通用能力）
+ * - /stop：中止当前生成；`/stop all` 中止所有正在生成的已获取会话
+ *   （对应底层 agent cancel，通用能力）
  */
 import type { CommandDeps, CategorizedCommand } from './types.ts';
 import { getScopePeer, PLUGIN_VERSION, sendMarkdownChunked } from '../shared/index.ts';
@@ -75,16 +76,28 @@ export function meCommand({ config }: CommandDeps): CategorizedCommand {
   };
 }
 
-/** /stop — 中止当前生成（隐藏） */
+/** /stop — 中止当前生成；`/stop all` 中止全部已获取会话（隐藏） */
 export function stopCommand({ manager }: CommandDeps): CategorizedCommand {
   return {
     name: 'stop',
     category: 'agent',
     scope: 'all',
-    description: '中止当前生成',
+    description: '中止当前生成，或 /stop all 停全部会话',
     hidden: true,
     handler: (cmdCtx) => {
       const { scope, peerId } = getScopePeer(cmdCtx);
+      const arg = (cmdCtx.command?.raw ?? '').trim();
+
+      if (arg !== '') {
+        if (arg.toLowerCase() !== 'all') {
+          return '⚠️ 用法: /stop 或 /stop all';
+        }
+        const cancelled = manager.cancelAllRunning();
+        return cancelled.length === 0
+          ? '⚠️ 当前没有进行中的生成'
+          : `⛔ 已中止 ${cancelled.length} 个会话`;
+      }
+
       const record = manager.getSessionRecord(scope, peerId);
       // 会话存在不等于正在生成：只有 agent 处于 running 才算有进行中的回复
       if (record === undefined || record.agent.status !== 'running') {

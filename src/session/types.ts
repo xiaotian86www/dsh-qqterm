@@ -188,17 +188,24 @@ export interface PresetComposition {
   setup?: AgentSetup;
 }
 
-/** 单个会话记录 */
+/**
+ * 单个已获取会话记录。
+ *
+ * `handle` 只在 create/resume 时存在：`agents.get()` 借来的 live agent 没有
+ * dispose capability，只能 cancel，插件卸载时丢引用即可。
+ */
 export interface SessionRecord {
   sessionKey: string;
   sessionId: string;
   agent: DshAgent;
-  handle: DshAgentHandle;
+  handle?: DshAgentHandle;
   replyTarget: ReplyTarget;
   scope: ChatScope;
   peerId: string;
   senderId: string;
   agentPreset?: string;
+  /** 加入已获取集合的时间（运行期排序 / 排查用） */
+  acquiredAt: number;
 }
 
 /** 会话状态信息（/status 用） */
@@ -253,6 +260,10 @@ export interface WorkspaceSession {
   current: boolean;
   /** 是否正被进程内 agent 占用 */
   live: boolean;
+  /** 是否已由 QQ 获取（运行期 records；决定输出/提问/审批是否回 QQ） */
+  held: boolean;
+  /** 已获取且 agent 正在生成（只在 held 时有意义） */
+  running: boolean;
   /** 是否由 fork 派生（/model 换模型产生） */
   isSeeded: boolean;
   /** 是否在宿主的归档集里（归档 = 从列表/侧栏隐藏，日志仍在，可取消归档） */
@@ -264,11 +275,30 @@ export interface WorkspaceSession {
 /** 切换会话结果 */
 export interface SwitchSessionOutcome {
   ok: boolean;
-  reason?: 'same' | 'not-found' | 'in-use' | 'failed';
+  reason?: 'same' | 'not-found' | 'locked' | 'failed';
   message?: string;
   /** 目标会话原先已归档，本次恢复时顺带取消了归档 */
   unarchived?: boolean;
 }
+
+/**
+ * 向指定会话发 prompt / 回答的结果。
+ *
+ * - sent：作为普通 prompt 交给目标会话；
+ * - answered：目标在等答案，文本已作为答案提交；
+ * - answer-mode：目标在等答案，已进入「下一条消息作为回答」模式；
+ * - not-running：目标既不在已获取集合里，也没有 live agent；
+ * - empty：没有待答问题，也没给文本；
+ * - failed：followup / 答案解析失败。
+ */
+export type SendToOutcome =
+  | { ok: true; kind: 'sent' | 'answered' | 'answer-mode'; sessionId: string }
+  | {
+    ok: false;
+    reason: 'not-running' | 'empty' | 'forbidden' | 'failed';
+    sessionId: string;
+    message?: string;
+  };
 
 /** 归档 / 取消归档结果 */
 export interface ArchiveSessionOutcome {

@@ -163,6 +163,15 @@ export function resolveEnv(configValue: string, envKey: string): string {
 }
 
 /**
+ * 会话 id 的展示短形式：去掉统一的 `session-` 前缀，取前 8 位。
+ *
+ * 列表、消息标记、`/to` 链接共用同一套短 id，保证「看到的」和「能打出来的」一致。
+ */
+export function shortSessionId(id: string): string {
+  return id.replace(/^session-/, '').slice(0, 8);
+}
+
+/**
  * 格式化相对时间
  */
 export function formatRelativeTime(ts?: number): string {

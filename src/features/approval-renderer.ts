@@ -5,11 +5,26 @@
  */
 import type { InlineKeyboard } from '@tencent-connect/qqbot-nodejs';
 import type { ApprovalRequest } from './approval-channel.ts';
+import { shortSessionId } from '../shared/utils.ts';
 import { encodeButtonData } from './button-utils.ts';
 
+/** 渲染上下文：非当前会话的审批要带 `[#id]` 标记 */
+export interface ApprovalRenderContext {
+  sessionId?: string;
+  isCurrent?: boolean;
+}
+
 /** 把审批请求渲染成 QQ 文本（含被 gate 的命令回显） */
-export function buildApprovalText(request: ApprovalRequest, command?: string): string {
-  const lines: string[] = ['🔐 **执行审批**', ''];
+export function buildApprovalText(
+  request: ApprovalRequest,
+  command?: string,
+  context: ApprovalRenderContext = {},
+): string {
+  const nonCurrent = context.sessionId !== undefined && context.isCurrent === false;
+  const tag = nonCurrent && context.sessionId !== undefined
+    ? ` [#${shortSessionId(context.sessionId)}]`
+    : '';
+  const lines: string[] = [`🔐 **执行审批**${tag}`, ''];
   lines.push(`🔧 工具: ${request.toolName}`);
   if (command) {
     lines.push('');
@@ -27,13 +42,20 @@ export function buildApprovalText(request: ApprovalRequest, command?: string): s
 }
 
 /**
- * 构建审批键盘：两按钮（允许一次 / 拒绝），button_data 携带本审批的 nonce。
+ * 构建审批键盘：两按钮（允许一次 / 拒绝），button_data 携带本审批的 nonce
+ * 与所属会话 id。
  *
  * dsh 审批协议 outcome 是闭合集合（allowed-once/rejected/cancelled/unavailable），
  * 无 allow-always，因此只提供两个按钮。
  * nonce 与 pending 匹配，旧卡片/其它会话卡片点击不 settle（#94-3）。
  */
-export function buildApprovalKeyboard(nonce: string): InlineKeyboard {
+export function buildApprovalKeyboard(nonce?: string, sessionId?: string): InlineKeyboard {
+  const payload = (decision: 'allow' | 'deny'): string => encodeButtonData({
+    t: 'approval',
+    ...(sessionId !== undefined ? { s: sessionId } : {}),
+    d: decision,
+    ...(nonce !== undefined ? { n: nonce } : {}),
+  });
   const allow = {
     id: 'approval-allow',
     render_data: { label: '✅ 允许一次', visited_label: '✓ 已允许', style: 1 },
@@ -41,7 +63,7 @@ export function buildApprovalKeyboard(nonce: string): InlineKeyboard {
       type: 1,
       permission: { type: 2 },
       click_limit: 1,
-      data: encodeButtonData({ t: 'approval', d: 'allow', n: nonce }),
+      data: payload('allow'),
     },
   };
   const deny = {
@@ -51,7 +73,7 @@ export function buildApprovalKeyboard(nonce: string): InlineKeyboard {
       type: 1,
       permission: { type: 2 },
       click_limit: 1,
-      data: encodeButtonData({ t: 'approval', d: 'deny', n: nonce }),
+      data: payload('deny'),
     },
   };
   return { content: { rows: [{ buttons: [allow, deny] }] } };

@@ -21,6 +21,7 @@ const COMMANDS = [
   'compact',
   'sessions',
   'session',
+  'to',
   'workspace',
   'ls',
   'model',

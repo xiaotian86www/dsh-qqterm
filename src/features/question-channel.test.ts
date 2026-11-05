@@ -325,6 +325,74 @@ describe('QuestionChannel.handleInteraction', () => {
   });
 });
 
+describe('QuestionChannel: 多会话 routing', () => {
+  function recordFor(sessionId: string, peerId: string): QuestionSessionRecordLike {
+    return { sessionKey: `qqbot:app:c2c:${peerId}`, sessionId, peerId, scope: 'c2c', replyTarget: { scope: 'c2c', targetId: peerId, msgId: 'm' } };
+  }
+
+  it('answer(sessionId, text) 不依赖 current', async () => {
+    const sent: SentMessage[] = [];
+    const ch = new QuestionChannel(createManager(), createSender(sent), { askTimeoutMs: 60_000 }, createLogger());
+    const p = ch.askViaQQ(recordFor('sess-a', 'U1'), { questions: [q2()] });
+    await sleep(20);
+
+    expect(ch.answer('sess-a', '2')).toBe(true);
+    expect(await p).toEqual({ answers: [{ id: 'q', selected: ['B'] }] });
+  });
+
+  it('beginAnswerMode：下一条普通文本作为该会话答案，整组结束后退出', async () => {
+    const sent: SentMessage[] = [];
+    const ch = new QuestionChannel(createManager(), createSender(sent), { askTimeoutMs: 60_000 }, createLogger());
+    const p = ch.askViaQQ(recordFor('sess-a', 'U1'), { questions: [q2()] });
+    await sleep(20);
+
+    ch.beginAnswerMode('U1', 'sess-a');
+    expect(ch.tryAnswer('c2c', 'U1', '2')).toBe(true);
+    expect(await p).toEqual({ answers: [{ id: 'q', selected: ['B'] }] });
+    // 组已结束：模式自动退出，下一条消息照常走普通流程
+    expect(ch.tryAnswer('c2c', 'U1', '随便聊聊')).toBe(false);
+  });
+
+  it('按钮 button_data 带 s；非当前会话点击按 s 找回 pending', async () => {
+    const sent: SentMessage[] = [];
+    const ch = new QuestionChannel(createManager(), createSender(sent), { askTimeoutMs: 60_000 }, createLogger());
+    const p = ch.askViaQQ(recordFor('sess-a', 'U1'), { questions: [q2()] });
+    await sleep(20);
+
+    const kb = sent[0]?.opts?.keyboard as { content: { rows: Array<{ buttons: Array<{ action: { data: string } }> }> } };
+    const data = JSON.parse(kb.content.rows[0]!.buttons[1]!.action.data) as { s?: string; q: string; i: number };
+    expect(data).toMatchObject({ s: 'sess-a', q: 'q', i: 1 });
+
+    const event = {
+      id: 'i1',
+      type: 1,
+      version: 1,
+      user_openid: 'U1',
+      data: { type: 1, resolved: { button_data: JSON.stringify({ t: 'question', s: 'sess-a', q: 'q', i: 1 }) } },
+    } as InteractionEvent;
+    expect(ch.handleInteraction(event)).toBe(true);
+    expect(await p).toEqual({ answers: [{ id: 'q', selected: ['B'] }] });
+  });
+
+  it('点击者不是会话所属用户时忽略', async () => {
+    const sent: SentMessage[] = [];
+    const ch = new QuestionChannel(createManager(), createSender(sent), { askTimeoutMs: 60_000 }, createLogger());
+    const p = ch.askViaQQ(recordFor('sess-a', 'U1'), { questions: [q2()] });
+    await sleep(20);
+
+    const event = {
+      id: 'i1',
+      type: 1,
+      version: 1,
+      user_openid: 'U2',
+      data: { type: 1, resolved: { button_data: JSON.stringify({ t: 'question', s: 'sess-a', q: 'q', i: 0 }) } },
+    } as InteractionEvent;
+    expect(ch.handleInteraction(event)).toBe(false);
+    expect(ch.answer('sess-a', '1')).toBe(true);
+    await p;
+  });
+});
+
 describe('QuestionChannel.cancelPending', () => {
   it('rejects pending question when the session is evicted', async () => {
     const sent: SentMessage[] = [];
@@ -370,7 +438,10 @@ describe('QuestionChannel.install routing（user-questions/request waterfall）'
     const sent: SentMessage[] = [];
     const record = makeRecord(sessionKey('c2c', 'u9'));
     (record as { sessionId?: string }).sessionId = 'sess-qq';
-    const manager = createManager({ findBySessionId: (id) => (id === 'sess-qq' ? record : undefined) });
+    const manager = createManager({
+      findBySessionId: (id) => (id === 'sess-qq' ? record : undefined),
+      getSessionRecord: () => record,
+    });
     const ch = new QuestionChannel(manager, createSender(sent), { askTimeoutMs: 60_000 }, createLogger());
     const { handler } = installChannel(ch);
 
@@ -390,7 +461,10 @@ describe('QuestionChannel.install routing（user-questions/request waterfall）'
     const sent: SentMessage[] = [];
     const record = makeRecord(sessionKey('c2c', 'u9'));
     (record as { sessionId?: string }).sessionId = 'sess-qq';
-    const manager = createManager({ findBySessionId: (id) => (id === 'sess-qq' ? record : undefined) });
+    const manager = createManager({
+      findBySessionId: (id) => (id === 'sess-qq' ? record : undefined),
+      getSessionRecord: () => record,
+    });
     const logger = createLogger();
     const ch = new QuestionChannel(
       manager,

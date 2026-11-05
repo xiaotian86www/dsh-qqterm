@@ -28,4 +28,5 @@ export type {
   ChangeWorkspaceOutcome,
   SwitchSessionOutcome,
   ArchiveSessionOutcome,
+  SendToOutcome,
 } from './types.ts';

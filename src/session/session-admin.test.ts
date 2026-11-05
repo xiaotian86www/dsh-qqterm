@@ -29,6 +29,8 @@ const PEER = 'user1';
 const KEY = `qqbot:${APP_ID}:chat`;
 const MINTED = /^session-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const REPLY: ReplyTarget = { scope: 'c2c', targetId: PEER, msgId: 'm1' };
+const PEER_B = 'user2';
+const REPLY_B: ReplyTarget = { scope: 'c2c', targetId: PEER_B, msgId: 'm2' };
 
 const WORKSPACE = () => join(env.home, 'workspace');
 
@@ -250,10 +252,97 @@ describe('listWorkspaceSessions', () => {
     expect(entries).toHaveLength(1);
     expect(entries[0]?.title).toBeUndefined();
   });
+
+  it('获取过的会话带 held / running 标记，未获取的为 false', async () => {
+    const held = 'session-held';
+    const ctx = createCtx({
+      withQuery: true,
+      sessions: [
+        { id: held, cwd: WORKSPACE(), createdAt: 2 },
+        { id: 'session-cold', cwd: WORKSPACE(), createdAt: 1 },
+      ],
+    });
+    const { manager } = createManager(ctx);
+
+    await manager.switchSession('c2c', PEER, held, PEER, REPLY);
+    const runningRecord = manager.findBySessionId(held);
+    runningRecord!.agent.status = 'running';
+
+    const entries = await manager.listWorkspaceSessions('c2c', PEER);
+    expect(entries.map((entry) => [entry.id, entry.held, entry.running])).toEqual([
+      [held, true, true],
+      ['session-cold', false, false],
+    ]);
+  });
+});
+
+describe('listWorkspaceGroups', () => {
+  it('持有会话在分组视图里带 held 标记', async () => {
+    const held = 'session-held';
+    const ctx = createCtx({
+      withQuery: true,
+      sessions: [{ id: held, cwd: WORKSPACE(), createdAt: 1 }],
+      workspaces: [{ id: 'w1', path: WORKSPACE(), title: 'repo', sessionIds: [held] }],
+    });
+    const { manager } = createManager(ctx);
+    await manager.switchSession('c2c', PEER, held, PEER, REPLY);
+    manager.findBySessionId(held)!.agent.status = 'running';
+
+    const groups = await manager.listWorkspaceGroups('c2c', PEER);
+    const entry = groups.flatMap((group) => group.sessions).find((session) => session.id === held);
+
+    expect(entry).toMatchObject({ held: true, running: true, workspace: 'repo' });
+  });
+});
+
+describe('listHeldSessions', () => {
+  it('跨工作区列出持有会话，当前项优先并带标题 / 工作区', async () => {
+    const current = 'session-current';
+    const other = join(env.home, 'other-ws');
+    mkdirSync(other, { recursive: true });
+    const ctx = createCtx({
+      withQuery: true,
+      sessions: [
+        { id: current, cwd: WORKSPACE(), createdAt: 2 },
+        { id: 'session-other', cwd: other, createdAt: 1 },
+      ],
+      workspaces: [
+        { id: 'w1', path: WORKSPACE(), title: 'repo', sessionIds: [current] },
+        { id: 'w2', path: other, title: 'docs', sessionIds: ['session-other'] },
+      ],
+    });
+    const { manager } = createManager(ctx);
+
+    await manager.switchSession('c2c', PEER, 'session-other', PEER, REPLY);
+    await manager.switchSession('c2c', PEER, current, PEER, REPLY);
+
+    const entries = await manager.listHeldSessions('c2c', PEER);
+    expect(entries.map((entry) => [entry.id, entry.current, entry.held, entry.workspace])).toEqual([
+      [current, true, true, 'repo'],
+      ['session-other', false, true, 'docs'],
+    ]);
+    expect(entries[0]?.title).toContain('标题-');
+  });
+
+  it('宿主列表暂时没有返回的持有会话也保留（用获取时间兜底）', async () => {
+    const ctx = createCtx({ sessions: [] });
+    const { manager } = createManager(ctx);
+
+    const record = await manager.getOrCreate('c2c', PEER, PEER, REPLY);
+    const entries = await manager.listHeldSessions('c2c', PEER);
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      id: record.sessionId,
+      current: true,
+      held: true,
+      live: true,
+    });
+  });
 });
 
 describe('switchSession', () => {
-  it('恢复成功：旧 agent 被释放、映射落到目标会话', async () => {
+  it('恢复成功：只切 current，旧 agent 保留并继续接收', async () => {
     const target = 'session-target';
     const ctx = createCtx({ sessions: [{ id: target, cwd: WORKSPACE() }] });
     const { manager } = createManager(ctx);
@@ -264,7 +353,10 @@ describe('switchSession', () => {
     const outcome = await manager.switchSession('c2c', PEER, target, PEER, REPLY);
 
     expect(outcome).toEqual({ ok: true });
-    expect(before.handle.dispose).toHaveBeenCalled();
+    // 设计 v8：切走不 dispose、不 cancel，旧会话仍在已获取集合里继续回 QQ
+    expect(before.handle?.dispose).not.toHaveBeenCalled();
+    expect(manager.findBySessionId(before.sessionId)).toBe(before);
+    expect(manager.getSessionRecord('c2c', PEER)?.sessionId).toBe(target);
     expect(persistedId()).toBe(target);
   });
 
@@ -308,7 +400,7 @@ describe('switchSession', () => {
     expect(registry.resume).toHaveBeenCalledTimes(1); // 只有首次 getOrCreate 那次
   });
 
-  it('恢复失败：映射回滚到原会话，并把半成品记录清掉', async () => {
+  it('恢复失败：映射保持原样，也不留下半成品记录', async () => {
     const target = 'session-target';
     new PrefsStore().setSessionId(KEY, 'session-original');
     // 目标会话在盘上（存在性求证为 true），但 resume 被别的进程占用
@@ -322,7 +414,7 @@ describe('switchSession', () => {
     const outcome = await manager.switchSession('c2c', PEER, target, PEER, REPLY);
 
     expect(outcome.ok).toBe(false);
-    expect(outcome.message).toContain('ownership taken');
+    expect(outcome.reason).toBe('locked');
     expect(persistedId()).toBe('session-original');
     expect(manager.getSessionRecord('c2c', PEER)).toBeUndefined();
   });
@@ -631,6 +723,245 @@ describe('changeChatWorkspace（换工作区）', () => {
     const createCall = registry.create.mock.calls.at(-1)?.[0] as { meta?: { cwd?: string } } | undefined;
     expect(createCall?.meta?.cwd).toBe(other);
     expect(registryStub?.['create']).toHaveBeenCalledWith(other);
+  });
+});
+
+describe('多会话：已获取集合 / /to / 切走不释放', () => {
+  const TARGET = 'session-live-target';
+
+  /** 造一个 live agent，并让 registry.get 只命中指定 id */
+  function liveRegistry(id = TARGET) {
+    const agent = fakeAgent(id);
+    const { registry, handles } = createRegistry();
+    registry.get.mockImplementation((sessionId: string) => (sessionId === id ? agent : undefined));
+    return { agent, registry, handles };
+  }
+
+  it('/to 获取 live 会话：加入已获取集合、不改 current、没有 handle', async () => {
+    const { agent, registry } = liveRegistry();
+    const ctx = createCtx({ sessions: [{ id: 'session-current', cwd: WORKSPACE() }] });
+    const { manager } = createManager(ctx, registry);
+
+    const current = await manager.getOrCreate('c2c', PEER, PEER, REPLY);
+    const outcome = await manager.sendTo('c2c', PEER, PEER, TARGET, '继续', REPLY);
+
+    expect(outcome).toEqual({ ok: true, kind: 'sent', sessionId: TARGET });
+    expect(agent.followup).toHaveBeenCalledTimes(1);
+    const acquired = manager.findBySessionId(TARGET);
+    expect(acquired).toBeDefined();
+    expect(acquired?.handle).toBeUndefined();
+    expect(manager.getSessionRecord('c2c', PEER)?.sessionId).toBe(current.sessionId);
+  });
+
+  it('/to 目标不 live 时拒绝，不创建记录', async () => {
+    const ctx = createCtx({ sessions: [] });
+    const { manager } = createManager(ctx);
+
+    const outcome = await manager.sendTo('c2c', PEER, PEER, 'session-cold', 'hi', REPLY);
+
+    expect(outcome).toMatchObject({ ok: false, reason: 'not-running' });
+    expect(manager.findBySessionId('session-cold')).toBeUndefined();
+    expect(manager.size).toBe(0);
+  });
+
+  it('/to 目标在等答案时走答案通道，不再 followup', async () => {
+    const { agent, registry } = liveRegistry();
+    const ctx = createCtx({ sessions: [] });
+    const { manager } = createManager(ctx, registry);
+    const answer = vi.fn(() => true);
+    const beginAnswerMode = vi.fn();
+    manager.questionChannel = {
+      hasPending: () => true,
+      answer,
+      beginAnswerMode,
+      cancelPending: vi.fn(),
+    } as unknown as NonNullable<typeof manager.questionChannel>;
+
+    const outcome = await manager.sendTo('c2c', PEER, PEER, TARGET, 'B', REPLY);
+
+    expect(outcome).toEqual({ ok: true, kind: 'answered', sessionId: TARGET });
+    expect(answer).toHaveBeenCalledWith(TARGET, 'B');
+    expect(agent.followup).not.toHaveBeenCalled();
+  });
+
+  it('/to 空文本 + 待答问题 → 进入回答模式', async () => {
+    const { registry } = liveRegistry();
+    const ctx = createCtx({ sessions: [] });
+    const { manager } = createManager(ctx, registry);
+    const beginAnswerMode = vi.fn();
+    manager.questionChannel = {
+      hasPending: () => true,
+      answer: vi.fn(() => false),
+      beginAnswerMode,
+      cancelPending: vi.fn(),
+    } as unknown as NonNullable<typeof manager.questionChannel>;
+
+    const outcome = await manager.sendTo('c2c', PEER, PEER, TARGET, '', REPLY);
+
+    expect(outcome).toEqual({ ok: true, kind: 'answer-mode', sessionId: TARGET });
+    expect(beginAnswerMode).toHaveBeenCalledWith(PEER, TARGET);
+  });
+
+  it('/sessions resume 到已获取会话：只改指针，不再 resume/dispose', async () => {
+    const { registry, handles } = liveRegistry();
+    const ctx = createCtx({ sessions: [{ id: TARGET, cwd: WORKSPACE() }] });
+    const { manager } = createManager(ctx, registry);
+
+    const first = await manager.getOrCreate('c2c', PEER, PEER, REPLY);
+    await manager.sendTo('c2c', PEER, PEER, TARGET, 'hi', REPLY);
+    registry.resume.mockClear();
+
+    const outcome = await manager.switchSession('c2c', PEER, TARGET, PEER, REPLY);
+
+    expect(outcome).toEqual({ ok: true });
+    expect(registry.resume).not.toHaveBeenCalled();
+    expect(first.handle?.dispose).not.toHaveBeenCalled();
+    expect(manager.findBySessionId(first.sessionId)).toBe(first);
+    expect(manager.getSessionRecord('c2c', PEER)?.sessionId).toBe(TARGET);
+    expect(handles).toHaveLength(1); // 首次 getOrCreate 创建的那个，仍在
+  });
+
+  it('/to 别人的会话拒绝，不转发', async () => {
+    const { agent, registry } = liveRegistry();
+    const ctx = createCtx({ sessions: [] });
+    const { manager } = createManager(ctx, registry);
+    await manager.sendTo('c2c', PEER, PEER, TARGET, 'hi', REPLY);
+
+    const outcome = await manager.sendTo('c2c', PEER_B, PEER_B, TARGET, '越权', REPLY_B);
+
+    expect(outcome).toMatchObject({ ok: false, reason: 'forbidden' });
+    expect(agent.followup).toHaveBeenCalledTimes(1); // 只有第一次
+  });
+
+  it('卸载：只 dispose 自己创建的 agent，借来的只丢引用', async () => {
+    const { agent, registry, handles } = liveRegistry();
+    const ctx = createCtx({ sessions: [] });
+    const { manager } = createManager(ctx, registry);
+
+    await manager.getOrCreate('c2c', PEER, PEER, REPLY);
+    await manager.sendTo('c2c', PEER, PEER, TARGET, 'hi', REPLY);
+    await manager.disposeAll();
+
+    expect(handles[0]?.dispose).toHaveBeenCalled();
+    expect(agent.cancel).not.toHaveBeenCalled();
+    expect(manager.size).toBe(0);
+  });
+
+  it('外部把同一 id 换成另一个 agent：旧记录被摘掉，不再转发', async () => {
+    const { registry } = liveRegistry();
+    const ctx = createCtx({ sessions: [] });
+    const { manager } = createManager(ctx, registry);
+    await manager.sendTo('c2c', PEER, PEER, TARGET, 'hi', REPLY);
+    expect(manager.findBySessionId(TARGET)).toBeDefined();
+
+    // 宿主用同一个 sessionId 重开了另一个 agent
+    const replacement = fakeAgent(TARGET);
+    registry.get.mockImplementation(() => replacement);
+
+    expect(manager.findBySessionId(TARGET)).toBeUndefined();
+    expect(manager.size).toBe(0);
+  });
+
+  it('cancelAllRunning 中止所有 running 会话，清掉待答状态', async () => {
+    const { agent, registry } = liveRegistry();
+    const ctx = createCtx({ sessions: [{ id: 'session-current', cwd: WORKSPACE() }] });
+    const { manager } = createManager(ctx, registry);
+    const current = await manager.getOrCreate('c2c', PEER, PEER, REPLY);
+    await manager.sendTo('c2c', PEER, PEER, TARGET, 'hi', REPLY);
+    Object.assign(agent, { status: 'running' });
+    Object.assign(current.agent, { status: 'running' });
+    const cancelPending = vi.fn();
+    manager.questionChannel = { cancelPending } as unknown as NonNullable<typeof manager.questionChannel>;
+
+    const cancelled = manager.cancelAllRunning();
+
+    expect([...cancelled].sort()).toEqual([TARGET, current.sessionId].sort());
+    expect(agent.cancel).toHaveBeenCalledWith({ kind: 'user' });
+    expect(current.agent.cancel).toHaveBeenCalledWith({ kind: 'user' });
+    expect(cancelPending).toHaveBeenCalledWith(TARGET);
+    expect(cancelPending).toHaveBeenCalledWith(current.sessionId);
+  });
+
+  it('cancelAllRunning 不碰 idle 会话', async () => {
+    const { agent, registry } = liveRegistry();
+    const ctx = createCtx({ sessions: [] });
+    const { manager } = createManager(ctx, registry);
+    await manager.sendTo('c2c', PEER, PEER, TARGET, 'hi', REPLY);
+    Object.assign(agent, { status: 'idle' });
+
+    expect(manager.cancelAllRunning()).toEqual([]);
+    expect(agent.cancel).not.toHaveBeenCalled();
+  });
+
+  it('resetCurrentSession 停掉当前 owned 会话并换新 id，其它已获取会话不动', async () => {
+    const { registry } = liveRegistry();
+    const ctx = createCtx({ sessions: [{ id: 'session-current', cwd: WORKSPACE() }] });
+    const { manager } = createManager(ctx, registry);
+    const current = await manager.getOrCreate('c2c', PEER, PEER, REPLY);
+    await manager.sendTo('c2c', PEER, PEER, TARGET, 'hi', REPLY);
+    const cancelPending = vi.fn();
+    manager.questionChannel = { cancelPending } as unknown as NonNullable<typeof manager.questionChannel>;
+
+    const stopped = await manager.resetCurrentSession();
+
+    expect(stopped).toBe(true);
+    expect(current.agent.cancel).toHaveBeenCalledWith({ kind: 'user' });
+    expect(current.handle?.dispose).toHaveBeenCalled();
+    expect(manager.findBySessionId(current.sessionId)).toBeUndefined();
+    expect(manager.findBySessionId(TARGET)).toBeDefined();
+    expect(manager.currentSessionId()).not.toBe(current.sessionId);
+    expect(manager.getSessionRecord('c2c', PEER)).toBeUndefined();
+    expect(cancelPending).toHaveBeenCalledWith(current.sessionId);
+  });
+
+  it('resetCurrentSession 对借来的当前会话只 cancel，不 dispose', async () => {
+    new PrefsStore().setSessionId(KEY, TARGET);
+    const { agent, registry } = liveRegistry();
+    const ctx = createCtx({ sessions: [] });
+    const { manager } = createManager(ctx, registry);
+    const record = await manager.getOrCreate('c2c', PEER, PEER, REPLY);
+    expect(record.handle).toBeUndefined();
+
+    const stopped = await manager.resetCurrentSession();
+
+    expect(stopped).toBe(true);
+    expect(agent.cancel).toHaveBeenCalledWith({ kind: 'user' });
+    expect(manager.findBySessionId(TARGET)).toBeUndefined();
+  });
+
+  it('resetCurrentSession 没有当前会话时只换新 id', async () => {
+    const ctx = createCtx({ sessions: [] });
+    const { manager } = createManager(ctx);
+    const before = manager.currentSessionId();
+
+    expect(await manager.resetCurrentSession()).toBe(false);
+    expect(manager.currentSessionId()).not.toBe(before);
+  });
+
+  it('resetAllSessions 停掉 owned 与借来的全部会话，再换新 id', async () => {
+    const { agent, registry } = liveRegistry();
+    const ctx = createCtx({ sessions: [{ id: 'session-current', cwd: WORKSPACE() }] });
+    const { manager } = createManager(ctx, registry);
+    const current = await manager.getOrCreate('c2c', PEER, PEER, REPLY);
+    await manager.sendTo('c2c', PEER, PEER, TARGET, 'hi', REPLY);
+
+    const stopped = await manager.resetAllSessions();
+
+    expect(stopped).toBe(2);
+    expect(current.agent.cancel).toHaveBeenCalledWith({ kind: 'user' });
+    expect(current.handle?.dispose).toHaveBeenCalled();
+    expect(agent.cancel).toHaveBeenCalledWith({ kind: 'user' });
+    expect(manager.size).toBe(0);
+    expect(manager.currentSessionId()).not.toBe(current.sessionId);
+    expect(manager.getSessionRecord('c2c', PEER)).toBeUndefined();
+  });
+
+  it('resetAllSessions 没有已获取会话时返回 0', async () => {
+    const ctx = createCtx({ sessions: [] });
+    const { manager } = createManager(ctx);
+
+    expect(await manager.resetAllSessions()).toBe(0);
+    expect(manager.size).toBe(0);
   });
 });
 

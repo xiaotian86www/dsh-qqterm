@@ -48,12 +48,14 @@ function setup(opts?: {
   record?: SessionRecord | undefined;
   config?: ImQQBotConfig;
   deliverer?: { deliver: ReturnType<typeof vi.fn> };
+  current?: boolean;
 }) {
   const session = createSession();
   const bot = createBot(session);
   const record = 'record' in (opts ?? {}) ? opts!.record : createRecord(c2cTarget);
   const manager = {
     findBySessionId: vi.fn((id: string) => (id === 'sess-qq' ? record : undefined)),
+    isCurrentSession: vi.fn(() => opts?.current ?? true),
   } as unknown as SessionManager;
   const outbound = createOutboundHandler(
     manager, bot, opts?.config ?? createConfig(), createLogger(), undefined, opts?.deliverer,
@@ -188,6 +190,33 @@ describe('OutboundRouter.routeStreamFrame', () => {
   });
 });
 
+describe('OutboundRouter: 多会话标记', () => {
+  it('非当前会话静态发送，每一片都带 [#短id]，且不启用流式', async () => {
+    const { outbound, bot } = setup({ current: false });
+
+    outbound.routeSessionEvent({ header: { id: 'sess-qq' } }, {
+      type: 'assistant/message',
+      data: { message: { content: [{ type: 'text', text: 'hello' }] } },
+    });
+    await Promise.resolve();
+
+    expect(bot.openStream).not.toHaveBeenCalled();
+    expect(bot.sendMarkdown).toHaveBeenCalledWith(c2cTarget, '[#sess-qq] hello');
+  });
+
+  it('当前会话不加标记', async () => {
+    const { outbound, bot } = setup({ current: true });
+
+    outbound.routeSessionEvent({ header: { id: 'sess-qq' } }, {
+      type: 'assistant/message',
+      data: { message: { content: [{ type: 'text', text: 'hello' }] } },
+    });
+    await Promise.resolve();
+
+    expect(bot.sendMarkdown).toHaveBeenCalledWith(c2cTarget, 'hello');
+  });
+});
+
 describe('OutboundRouter: deliverables/presented', () => {
   beforeEach(() => { vi.useFakeTimers(); });
   afterEach(() => { vi.useRealTimers(); });
@@ -246,6 +275,7 @@ describe('OutboundRouter: deliverables/presented', () => {
     const record = createRecord(c2cTarget);
     const manager = {
       findBySessionId: vi.fn(() => record),
+      isCurrentSession: vi.fn(() => true),
     } as unknown as SessionManager;
     const deliver = vi.fn().mockResolvedValue(undefined);
     const outbound = createOutboundHandler(manager, bot, createConfig(), createLogger(), undefined, { deliver });

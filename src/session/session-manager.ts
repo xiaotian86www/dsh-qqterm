@@ -3,7 +3,14 @@
  *
  * 聊天会话只有一个，key 固定为 `qqbot:${appId}:chat`：任何 QQ 私聊窗口续写、
  * 看到的都是同一个聊天会话。后台会话（宿主里的 session）仍是多份，
- * `/sessions` 列出并切换、`/new` 新开，切换对所有窗口立即生效。
+ * `/sessions` 列出、`/sessions resume` 切换、`/new` 新开。
+ *
+ * 运行期维护两份内存索引：
+ *   - `records: Map<sessionId, SessionRecord>`：QQ 已经获取的会话（普通消息 /
+ *     `/sessions resume` / `/to` 实际拿到 agent 的那些），所有已获取会话的
+ *     输出、提问、审批都会回到 QQ；
+ *   - `currentByKey: Map<chatKey, sessionId>`：每个聊天当前接的是哪个会话。
+ * 已获取集合不落盘，重启后只有 current 从 prefs 恢复。
  *
  * sessionKey → sessionId 的映射存于 prefs（`model-prefs.json`），新会话 id 由
  * `mintSessionId()` 铸造（`session-` + UUID，与宿主一致）。没有映射即视为全新会话：
@@ -13,6 +20,7 @@
  * 挂载 preset（工具集、prompt sections 等），实现场景化配置。
  */
 import { mintSessionId } from './session-id.ts';
+import { createQQUserMessage } from './user-message.ts';
 import { SessionId } from '@deepseek-ai/dsh-session';
 import type { Context } from '@deepseek-ai/cordis';
 import { createHostAdapter, type HostAdapter, type HostSessionInfo } from '../host/adapter.ts';
@@ -50,6 +58,7 @@ import type {
   ChangeWorkspaceOutcome,
   SwitchSessionOutcome,
   ArchiveSessionOutcome,
+  SendToOutcome,
 } from './types.ts';
 
 /** ManualCompactionError 各 code 的友好提示 */
@@ -116,13 +125,16 @@ export function latestCompletedPrefixBoundary(events: readonly unknown[]): numbe
 }
 
 export class SessionManager {
-  private sessions = new Map<string, SessionRecord>();
+  /** 已获取集合：sessionId → 记录（普通消息 / resume / /to 实际拿到 agent 的） */
+  private readonly records = new Map<string, SessionRecord>();
+  /** 每个聊天当前接的会话：chatKey → sessionId（未落记录时也可以指向新铸的 id） */
+  private readonly currentByKey = new Map<string, string>();
   /**
    * 同 key 正在进行的 getOrCreate（singleflight）。
    *
    * 斜杠命令与待答问题截获位于 concurrencyGuard 之前（见 gateway/middleware-setup），
    * 与普通消息不串行：同 key 并发进入会各自 resume/create，产出两个 agent，
-   * 后写入 sessions 的覆盖前者且前者无人 dispose（泄漏）。
+   * 后写入 records 的覆盖前者且前者无人 dispose（泄漏）。
    */
   private inflight = new Map<string, Promise<SessionRecord>>();
   private readonly modelResolver: ModelResolver;
@@ -151,6 +163,27 @@ export class SessionManager {
     this.modelResolver = new ModelResolver(ctx, config, logger);
 
     this.registerDirectPromptInjection();
+    this.registerAgentDisposed();
+  }
+
+  /**
+   * 监听宿主的 `agent/disposed`：agent 被 Web/TUI 或宿主自己关掉时，
+   * 把它从已获取集合里摘掉，后续事件不再转发、也不再向死 agent 发 prompt。
+   *
+   * 事件按 agent 作用域派发，根作用域监听器必须带 `global` 才能收到。
+   */
+  private registerAgentDisposed(): void {
+    (this.ctx as unknown as {
+      on(event: string, handler: (...args: unknown[]) => void, options?: { global?: boolean }): void;
+    }).on('agent/disposed', (payload: unknown) => {
+      const agent = (payload as { agent?: DshAgent } | null)?.agent;
+      if (!agent) return;
+      const record = this.records.get(agent.id);
+      if (!record || record.agent !== agent) return;
+      this.records.delete(agent.id);
+      this.cancelPendingFor(agent.id);
+      this.logger.info(`acquired session disposed externally: sessionId=${agent.id}`);
+    }, { global: true });
   }
 
   /**
@@ -255,7 +288,7 @@ export class SessionManager {
 
     this.modelResolver.setOverride(key, route);
 
-    const record = this.sessions.get(key);
+    const record = this.getSessionRecord(scope, peerId);
     if (!record) {
       this.logger.info(`model pref saved (no active session): key=${key} → ${route.provider}/${route.model}`);
       return { ...route };
@@ -297,7 +330,7 @@ export class SessionManager {
     // 2. 持久化 per-peer 覆盖（新会话生效）
     this.modelResolver.setPreset(key, presetId);
 
-    const hasActive = this.sessions.has(key);
+    const hasActive = this.getSessionRecord(_scope, _peerId) !== undefined;
     this.logger.info(
       `preset pref saved: key=${key} → ${presetId}${hasActive ? ' (active session locked, next session applies)' : ''}`,
     );
@@ -358,7 +391,7 @@ export class SessionManager {
     const presets = this.getPermissionPresetsService();
     if (!presets) return undefined;
 
-    const record = this.sessions.get(this.sessionKey());
+    const record = this.currentRecord();
     if (record) {
       try {
         return presets.current(record.agent.session);
@@ -398,7 +431,7 @@ export class SessionManager {
       return { ok: true, preset, unchanged: true };
     }
 
-    let record = this.sessions.get(key);
+    let record = this.currentRecord(key);
     if (!record) {
       if (!revive) return { ok: false, reason: 'no-session' };
       try {
@@ -435,6 +468,7 @@ export class SessionManager {
     options: { route?: ModelRoute },
   ): Promise<void> {
     const key = record.sessionKey;
+    const oldId = record.sessionId;
 
     // 对齐宿主官方 fork（commands.fork）：buildForkSeed 产物原样作 seed，
     // create 传 inheritedEventCount + isSeeded + parentSession
@@ -442,18 +476,14 @@ export class SessionManager {
     const boundary = latestCompletedPrefixBoundary(events);
     if (boundary === undefined) {
       this.logger.warn(`fork unavailable (no completed turn), fallback to dispose: key=${key}`);
-      this.sessions.delete(key);
-      record.agent.cancel({ kind: 'user' });
-      await record.handle.dispose().catch(() => {});
+      await this.dropRecord(record, { cancel: true, dispose: true });
       return;
     }
 
     const seed = await this.host.buildForkSeed(events, boundary);
     if (seed === undefined) {
       this.logger.warn(`fork seed unavailable (old host), fallback to dispose: key=${key}`);
-      this.sessions.delete(key);
-      record.agent.cancel({ kind: 'user' });
-      await record.handle.dispose().catch(() => {});
+      await this.dropRecord(record, { cancel: true, dispose: true });
       return;
     }
 
@@ -468,7 +498,7 @@ export class SessionManager {
         cwd: this.host.sessionDirectory(record.agent.session) ?? await this.chatDirectory(key),
         isSeeded: true,
         // 旧版宿主的 delivery 豁免要求 parentSession，新版忽略——都传
-        parentSession: record.sessionId,
+        parentSession: oldId,
         ...(composed.agentPreset ? { agentPreset: composed.agentPreset } : {}),
       },
       ...(effectiveRoute ? { agentOptions: effectiveRoute } : {}),
@@ -476,14 +506,18 @@ export class SessionManager {
     });
 
     this.modelResolver.setSessionId(key, childId);
+    this.currentByKey.set(key, childId);
 
     const oldHandle = record.handle;
     record.sessionId = childId;
     record.agent = created.agent;
     record.handle = created;
     record.agentPreset = composed.agentPreset;
+    record.acquiredAt = Date.now();
+    this.records.delete(oldId);
+    this.records.set(childId, record);
 
-    void oldHandle.dispose().catch(() => {});
+    void oldHandle?.dispose().catch(() => {});
     this.logger.info(`session rebuilt via fork: key=${key} preset=${composed.agentPreset ?? 'none'} sessionId=${childId}`);
   }
 
@@ -504,7 +538,45 @@ export class SessionManager {
   // ── 会话状态 / 统计 ──
 
   getSessionRecord(_scope: ChatScope, _peerId: string): SessionRecord | undefined {
-    return this.sessions.get(this.sessionKey());
+    return this.currentRecord();
+  }
+
+  /** 当前聊天接的会话 id（内存指针优先，其次 prefs 里落盘的映射） */
+  currentSessionId(key: string = this.sessionKey()): string | undefined {
+    return this.currentByKey.get(key) ?? this.modelResolver.getSessionId(key);
+  }
+
+  /** 某个 sessionId 是不是当前聊天正在接的会话 */
+  isCurrentSession(sessionId: string): boolean {
+    return this.currentSessionId() === sessionId;
+  }
+
+  /** 已获取会话快照（出站 / 问答 / 审批共用） */
+  listAcquiredSessions(): readonly SessionRecord[] {
+    return [...this.records.values()];
+  }
+
+  /**
+   * 中止所有正在生成的已获取会话（`/stop all`）。
+   *
+   * QQ 侧只有一个聊天，已获取会话本来就都回同一个聊天，所以不再按 peer
+   * 过滤。返回被中止的会话 id；没有正在生成的会话时返回空数组。
+   */
+  cancelAllRunning(): string[] {
+    const cancelled: string[] = [];
+    for (const record of [...this.records.values()]) {
+      if (record.agent.status !== 'running') continue;
+      record.agent.cancel({ kind: 'user' });
+      this.cancelPendingFor(record.sessionId);
+      cancelled.push(record.sessionId);
+    }
+    return cancelled;
+  }
+
+  /** 当前聊天接的会话记录；没有获取过（或已被外部关掉）返回 undefined */
+  private currentRecord(key: string = this.sessionKey()): SessionRecord | undefined {
+    const sessionId = this.currentSessionId(key);
+    return sessionId === undefined ? undefined : this.findBySessionId(sessionId);
   }
 
   getStatus(scope: ChatScope, peerId: string): SessionStatus {
@@ -665,7 +737,7 @@ export class SessionManager {
     }
   }
 
-  /** 获取或恢复或创建会话（get → resume → create）；同 key 并发合并为一次 */
+  /** 获取或恢复或创建当前会话（get → resume → create）；同 key 并发合并为一次 */
   async getOrCreate(
     scope: ChatScope,
     peerId: string,
@@ -673,7 +745,7 @@ export class SessionManager {
     replyTarget: ReplyTarget,
   ): Promise<SessionRecord> {
     const key = this.sessionKey();
-    const existing = this.sessions.get(key);
+    const existing = this.currentRecord(key);
 
     if (existing) {
       this.touch(existing, scope, peerId, senderId, replyTarget);
@@ -700,8 +772,8 @@ export class SessionManager {
   /**
    * 收到一条消息后刷新会话记录上的「当前聊天」信息。
    *
-   * 唯一的会话记录被所有窗口复用，这几项必须跟着最后一条消息走，否则
-   * prompt、提问作答与回复目标会停在第一个说话的窗口上。
+   * 同一条记录可能被多个 QQ 窗口复用（聊天会话只有一个），这几项必须跟着最后
+   * 一条消息走，否则 prompt、提问作答与回复目标会停在第一个说话的窗口上。
    */
   private touch(
     record: SessionRecord,
@@ -714,6 +786,12 @@ export class SessionManager {
     record.scope = scope;
     record.peerId = peerId;
     record.senderId = senderId;
+  }
+
+  /** 改当前会话指针并落盘（prefs 仍只记 current） */
+  private setCurrent(key: string, sessionId: string): void {
+    this.currentByKey.set(key, sessionId);
+    this.persistSessionId(key, sessionId);
   }
 
   /** getOrCreate 的实际打开流程（已通过 singleflight 保证同 key 串行） */
@@ -730,17 +808,27 @@ export class SessionManager {
     let sessionId = SessionId(mapped ?? mintSessionId());
     this.logger.info(`getOrCreate: key=${key} route=${route ? `${route.provider}/${route.model}` : 'host-default'} sessionId=${sessionId}`);
 
+    // 这个聊天的工作目录：新会话落在它里面，恢复的会话以它自己的 header 为准
+    let directory = await this.chatDirectory(key);
+
+    // 已经获取过这个会话（`/to` 先拿到、或 `/sessions resume` 接上）：直接复用记录
+    const known = this.records.get(sessionId);
+    if (known) {
+      this.touch(known, scope, peerId, senderId, replyTarget);
+      this.setCurrent(key, sessionId);
+      this.rememberDirectory(key, this.host.sessionDirectory(known.agent.session) ?? directory);
+      return known;
+    }
+
     let agent: DshAgent;
     let handle: DshAgentHandle | undefined;
     let agentPreset: string | undefined;
-    // 这个聊天的工作目录：新会话落在它里面，恢复的会话以它自己的 header 为准
-    let directory = await this.chatDirectory(key);
 
     const live = this.agents.get(sessionId);
     if (live) {
       agent = live;
+      agentPreset = await this.resolvePersistedPreset(sessionId);
       directory = this.host.sessionDirectory(agent.session) ?? directory;
-      this.persistSessionId(key, sessionId);
       this.logger.info(`reusing live agent: key=${key}`);
     } else {
       // preset 只解析一次：resume/create 共用同一组合，避免重复 resolve/mount 目录。
@@ -758,7 +846,6 @@ export class SessionManager {
         agent = resumed.agent;
         handle = resumed;
         directory = this.host.sessionDirectory(agent.session) ?? directory;
-        this.persistSessionId(key, sessionId);
         this.logger.info(`resumed session: key=${key} preset=${agentPreset ?? 'none'} route=${resumeRoute ? `${resumeRoute.provider}/${resumeRoute.model}` : 'session-own'}`);
       } catch (err) {
         if (!(await this.mayCreateAfterResumeFailure(key, sessionId, err))) throw err;
@@ -775,7 +862,6 @@ export class SessionManager {
         });
         agent = created.agent;
         handle = created;
-        this.persistSessionId(key, sessionId);
         this.logger.info(`created new session: key=${key} sessionId=${sessionId} preset=${agentPreset ?? 'none'} cwd=${directory}`);
       }
     }
@@ -784,15 +870,17 @@ export class SessionManager {
       sessionKey: key,
       sessionId,
       agent,
-      handle: handle ?? { agent, dispose: async () => {} },
+      ...(handle ? { handle } : {}),
       replyTarget,
       scope,
       peerId,
       senderId,
-      agentPreset,
+      ...(agentPreset ? { agentPreset } : {}),
+      acquiredAt: Date.now(),
     };
 
-    this.sessions.set(key, record);
+    this.records.set(sessionId, record);
+    this.setCurrent(key, sessionId);
 
     // 工作区跟着会话走：记下这个聊天当前目录，供下次 /new 或重启后沿用
     this.rememberDirectory(key, directory);
@@ -852,31 +940,176 @@ export class SessionManager {
     return candidate;
   }
 
+  /**
+   * 按 sessionId 查已获取记录。
+   *
+   * 宿主把同一个 id 换成了另一个 live agent（外部 dispose 后重开）时，旧记录
+   * 已经失效：摘掉并返回 undefined，避免把事件转发到死 agent。
+   */
   findBySessionId(sessionId: string): SessionRecord | undefined {
-    for (const record of this.sessions.values()) {
-      if (record.sessionId === sessionId) return record;
+    const record = this.records.get(sessionId);
+    if (!record) return undefined;
+    const live = this.agents.get(sessionId);
+    if (live !== undefined && live !== record.agent) {
+      this.records.delete(sessionId);
+      this.cancelPendingFor(sessionId);
+      this.logger.info(`acquired session replaced externally, dropped: sessionId=${sessionId}`);
+      return undefined;
     }
-    return undefined;
+    return record;
   }
 
   findByAgent(agent: DshAgent): SessionRecord | undefined {
-    for (const record of this.sessions.values()) {
-      if (record.agent === agent) return record;
-    }
-    return undefined;
+    const record = this.records.get(agent.id);
+    return record?.agent === agent ? record : undefined;
   }
 
+  /** 某个 sessionId 是否还有 live agent（`/to` 的目标校验用） */
+  hasLiveSession(sessionId: string): boolean {
+    return this.agents.get(sessionId) !== undefined;
+  }
+
+  /**
+   * `/new`：只把当前指针换到一个新铸的 id。
+   *
+   * 旧会话仍然 live、仍在已获取集合里，继续把输出发回 QQ（带 `#短id`）；
+   * 不 cancel、不 dispose、不清 pending。
+   */
   async remove(): Promise<void> {
     const key = this.sessionKey();
-    const record = this.sessions.get(key);
-    this.modelResolver.setSessionId(key, mintSessionId());
+    const nextId = mintSessionId();
+    this.setCurrent(key, nextId);
+    this.logger.info(`new session started: key=${key} (previously acquired sessions stay live)`);
+  }
 
-    if (!record) return;
-    this.sessions.delete(key);
-    record.agent.cancel({ kind: 'user' });
-    await record.handle.dispose().catch(() => {});
-    this.cancelPendingFor(key);
-    this.logger.info(`session removed: key=${key}`);
+  /**
+   * `/reset` `/clear`：停掉当前会话，再换一个新铸的 id。
+   *
+   * 与 `remove()` 的区别：这里会把当前会话从已获取集合里摘掉——cancel 正在
+   * 生成的回合，有 handle 的 dispose，借来的只丢引用；它不再回 QQ。其它已获取
+   * 会话不受影响，工作区也不变。
+   *
+   * @returns 是否真的停掉了一个已获取的当前会话
+   */
+  async resetCurrentSession(): Promise<boolean> {
+    const key = this.sessionKey();
+    const record = this.currentRecord(key);
+    // 先挪指针再释放：dispose 可能要等，期间新消息不能又落回旧会话
+    this.setCurrent(key, mintSessionId());
+
+    if (!record) {
+      this.logger.info(`new session started: key=${key} (no current session to stop)`);
+      return false;
+    }
+
+    await this.dropRecord(record, { cancel: true, dispose: true });
+    this.logger.info(`session reset: key=${key} (stopped sessionId=${record.sessionId})`);
+    return true;
+  }
+
+  /**
+   * `/reset all` `/clear all`：停掉所有已获取会话，再换一个新铸的 id。
+   *
+   * 不分 running / idle：全部 cancel、清 pending、有 handle 的 dispose，
+   * 清空已获取集合后开新会话。工作区不变。
+   *
+   * @returns 被停掉的会话数
+   */
+  async resetAllSessions(): Promise<number> {
+    const key = this.sessionKey();
+    const records = [...this.records.values()];
+    // 先挪指针：循环里的 await 期间新消息不能落回任何一个旧会话
+    this.setCurrent(key, mintSessionId());
+
+    for (const record of records) {
+      await this.dropRecord(record, { cancel: true, dispose: true });
+    }
+
+    this.logger.info(`all sessions reset: key=${key} (stopped=${records.length})`);
+    return records.length;
+  }
+
+  /**
+   * `/to <会话> <文本>`：向指定会话发 prompt，或在它等答案时提交答案。
+   *
+   * 目标必须已经在已获取集合里，或者至少有一个 live agent（`agents.get` 命中）。
+   * 冷会话（只在磁盘上）拒绝，不在这里 resume——resume 是 `/sessions resume` 的事。
+   * 无论哪种情况都不改 current。
+   */
+  async sendTo(
+    scope: ChatScope,
+    peerId: string,
+    senderId: string,
+    sessionId: string,
+    text: string,
+    replyTarget: ReplyTarget,
+  ): Promise<SendToOutcome> {
+    const key = this.sessionKey();
+    const body = text.trim();
+
+    let record = this.findBySessionId(sessionId);
+    // current 是聊天自己的会话：重启后尚未打开时，允许走普通消息同一条打开路径。
+    // 其它冷会话仍然拒绝，避免 /to 偷偷复活一个任意的磁盘会话。
+    if (!record && sessionId === this.currentSessionId()) {
+      try {
+        record = await this.getOrCreate(scope, peerId, senderId, replyTarget);
+      } catch (err) {
+        const message = errorText(err);
+        this.logger.warn(`/to current session open failed: sessionId=${sessionId} err=${message}`);
+        return { ok: false, reason: 'failed', sessionId, message };
+      }
+    }
+    if (record) {
+      // 借来的记录没有 handle，只能靠 registry 判断是否还活着；已死的不要往里发
+      if (record.handle === undefined && this.agents.get(sessionId) === undefined) {
+        this.records.delete(sessionId);
+        this.cancelPendingFor(sessionId);
+        return { ok: false, reason: 'not-running', sessionId };
+      }
+      if (record.peerId !== peerId) {
+        return { ok: false, reason: 'forbidden', sessionId };
+      }
+      this.touch(record, scope, peerId, senderId, replyTarget);
+    } else {
+      const live = this.agents.get(sessionId);
+      if (!live) return { ok: false, reason: 'not-running', sessionId };
+      const agentPreset = await this.resolvePersistedPreset(sessionId);
+      record = {
+        sessionKey: key,
+        sessionId,
+        agent: live,
+        replyTarget,
+        scope,
+        peerId,
+        senderId,
+        ...(agentPreset ? { agentPreset } : {}),
+        acquiredAt: Date.now(),
+      };
+      this.records.set(sessionId, record);
+      this.logger.info(`session acquired via /to: sessionId=${sessionId}`);
+    }
+
+    const questions = this.questionChannel;
+    if (questions?.hasPending(sessionId)) {
+      if (body === '') {
+        questions.beginAnswerMode(peerId, sessionId);
+        return { ok: true, kind: 'answer-mode', sessionId };
+      }
+      if (questions.answer(sessionId, body)) return { ok: true, kind: 'answered', sessionId };
+      return { ok: false, reason: 'failed', sessionId, message: '答案解析失败' };
+    }
+
+    if (body === '') return { ok: false, reason: 'empty', sessionId };
+
+    try {
+      record.agent.followup(createQQUserMessage(body));
+    } catch (err) {
+      const message = errorText(err);
+      this.logger.warn(`/to followup failed: sessionId=${sessionId} err=${message}`);
+      return { ok: false, reason: 'failed', sessionId, message };
+    }
+    this.logger.info(`prompt sent via /to: sessionId=${sessionId}`);
+    return { ok: true, kind: 'sent', sessionId };
   }
 
   /**
@@ -889,7 +1122,7 @@ export class SessionManager {
    * @param key sessionKey
    */
   private async chatDirectory(key: string): Promise<string> {
-    const record = this.sessions.get(key);
+    const record = this.currentRecord(key);
     const live = record ? this.host.sessionDirectory(record.agent.session) : undefined;
     if (live) return live;
 
@@ -936,8 +1169,7 @@ export class SessionManager {
   async listWorkspaceSessions(_scope: ChatScope, _peerId: string): Promise<WorkspaceSession[]> {
     const key = this.sessionKey();
     const workspace = await this.chatDirectory(key);
-    const record = this.sessions.get(key);
-    const currentId = record?.sessionId ?? this.modelResolver.getSessionId(key);
+    const currentId = this.currentSessionId(key);
     const archived = this.host.archivedSessionIds();
 
     const visible = (await this.host.listSessions())
@@ -950,15 +1182,72 @@ export class SessionManager {
     const shown = visible.filter((session) => !archived.has(session.id)).slice(0, TITLE_FETCH_LIMIT);
     const titles = await this.host.sessionTitles(shown.map((s) => s.id));
 
-    return visible.map((session) => ({
-      id: session.id,
-      createdAt: session.createdAt,
-      current: session.id === currentId,
-      live: session.live,
-      isSeeded: session.isSeeded,
-      archived: archived.has(session.id),
-      ...(titles.has(session.id) ? { title: titles.get(session.id) } : {}),
-    }));
+    return visible.map((session) => {
+      const record = this.records.get(session.id);
+      return {
+        id: session.id,
+        createdAt: session.createdAt,
+        current: session.id === currentId,
+        live: session.live,
+        held: record !== undefined,
+        running: record?.agent.status === 'running',
+        isSeeded: session.isSeeded,
+        archived: archived.has(session.id),
+        ...(titles.has(session.id) ? { title: titles.get(session.id) } : {}),
+      };
+    });
+  }
+
+  /**
+   * 列出 QQ 已获取的会话（跨工作区，`/sessions` 默认视图）。
+   *
+   * 顺序是「当前 → 其它持有」，同组按获取时间倒序；宿主列表暂时没有返回的
+   * 持有会话也保留（用 agent 的目录与获取时间兜底），避免刚切过去就从列表消失。
+   * 标题读取失败不影响列表本身，取不到就显示「未命名会话」。
+   *
+   * @param scope 当前 chat 作用域（用于标记 current）
+   * @param peerId 当前 chat 的 peer id
+   */
+  async listHeldSessions(_scope: ChatScope, _peerId: string): Promise<WorkspaceSession[]> {
+    const key = this.sessionKey();
+    const currentId = this.currentSessionId(key);
+    const archived = this.host.archivedSessionIds();
+    const records = [...this.records.values()].filter((record) => !archived.has(record.sessionId));
+    if (records.length === 0) return [];
+
+    const hostSessions = await this.host.listSessions().catch(() => []);
+    const byId = new Map(hostSessions.map((session) => [session.id, session]));
+    const ordered = records.sort((left, right) => {
+      const currentDiff = Number(right.sessionId === currentId) - Number(left.sessionId === currentId);
+      return currentDiff !== 0 ? currentDiff : right.acquiredAt - left.acquiredAt;
+    });
+
+    const titles = await this.host
+      .sessionTitles(ordered.slice(0, TITLE_FETCH_LIMIT_ALL).map((record) => record.sessionId))
+      .catch(() => new Map<string, string>());
+    const workspaces = this.host.workspaceList();
+
+    return ordered.map((record) => {
+      const info = byId.get(record.sessionId);
+      const directory = info?.cwd ?? this.host.sessionDirectory(record.agent.session);
+      const workspace = directory === undefined
+        ? undefined
+        : workspaces.find((item) => samePath(item.path, directory));
+      return {
+        id: record.sessionId,
+        ...(titles.has(record.sessionId) ? { title: titles.get(record.sessionId) } : {}),
+        createdAt: info?.createdAt ?? record.acquiredAt,
+        current: record.sessionId === currentId,
+        live: true,
+        held: true,
+        running: record.agent.status === 'running',
+        isSeeded: info?.isSeeded ?? false,
+        archived: false,
+        ...(workspace !== undefined
+          ? { workspace: workspace.title }
+          : directory !== undefined ? { workspace: basename(directory) } : {}),
+      };
+    });
   }
 
   /**
@@ -1069,10 +1358,10 @@ export class SessionManager {
 
   /** 挡住工作区修改的会话 id；undefined = 还没有落盘的会话，可以改 */
   private async workspaceBlocker(key: string): Promise<string | undefined> {
-    const live = this.sessions.get(key);
+    const live = this.currentRecord(key);
     if (live) return live.sessionId;
 
-    const mapped = this.modelResolver.getSessionId(key);
+    const mapped = this.currentSessionId(key);
     if (mapped === undefined) return undefined;
     // undefined = 宿主没有 stat 能力，按「已有会话」处理（与 resume 同一约定）
     const exists = await this.host.sessionExists(mapped).catch(() => undefined);
@@ -1091,8 +1380,7 @@ export class SessionManager {
    */
   async listWorkspaceGroups(_scope: ChatScope, _peerId: string): Promise<WorkspaceGroup[]> {
     const key = this.sessionKey();
-    const record = this.sessions.get(key);
-    const currentId = record?.sessionId ?? this.modelResolver.getSessionId(key);
+    const currentId = this.currentSessionId(key);
     const archived = this.host.archivedSessionIds();
     const pinned = this.host.pinnedSessionIds();
 
@@ -1103,15 +1391,20 @@ export class SessionManager {
       .sort((a, b) => b.createdAt - a.createdAt);
 
     /** 分组条目：标题在分组拼好之后再补（要先知道哪些行真的会展示） */
-    const asEntry = (session: HostSessionInfo, workspace: string): WorkspaceSession => ({
-      id: session.id,
-      createdAt: session.createdAt,
-      current: session.id === currentId,
-      live: session.live,
-      isSeeded: session.isSeeded,
-      archived: archived.has(session.id),
-      workspace,
-    });
+    const asEntry = (session: HostSessionInfo, workspace: string): WorkspaceSession => {
+      const record = this.records.get(session.id);
+      return {
+        id: session.id,
+        createdAt: session.createdAt,
+        current: session.id === currentId,
+        live: session.live,
+        held: record !== undefined,
+        running: record?.agent.status === 'running',
+        isSeeded: session.isSeeded,
+        archived: archived.has(session.id),
+        workspace,
+      };
+    };
 
     const byId = new Map(sessions.map((session) => [session.id, session]));
     const pinOrder = [...pinned];
@@ -1181,10 +1474,11 @@ export class SessionManager {
   }
 
   /**
-   * 把当前 chat 切到指定会话（恢复历史）。
+   * 把当前 chat 切到指定会话（接上历史继续）。
    *
-   * 先释放当前 agent 再改映射，失败时把映射恢复回原会话——否则 chat 会停在
-   * 一个既没接上、又丢了原来上下文的中间态。
+   * 只改 current 指针：旧会话不 cancel、不 dispose、不退出已获取集合，仍继续
+   * 把输出发回 QQ（带 `#短id`）。目标已在内存里就直接接上；不在就 `agents.get`
+   * 拿 live agent，拿不到才 `agents.resume`。**resume 失败只报错，不 create**。
    *
    * 目标若已归档，先取消归档再恢复：归档的会话会被宿主的 `agent/pre-step`
    * 闸门拒绝，「恢复」本来就意味着让它重新可用。
@@ -1218,40 +1512,78 @@ export class SessionManager {
       }
     }
 
-    const current = this.sessions.get(key);
-    if (current?.sessionId === sessionId) {
-      return unarchived ? { ok: true, reason: 'same', unarchived: true } : { ok: true, reason: 'same' };
+    const wasCurrent = this.currentSessionId(key) === sessionId;
+
+    // 已经获取过：只把指针挪过去，不动 agent 生命周期
+    const existing = this.findBySessionId(sessionId);
+    if (existing) {
+      this.touch(existing, scope, peerId, senderId, replyTarget);
+      this.setCurrent(key, sessionId);
+      this.rememberDirectory(key, this.host.sessionDirectory(existing.agent.session));
+      this.logger.info(`session switched (already acquired): key=${key} sessionId=${sessionId}`);
+      return wasCurrent
+        ? (unarchived ? { ok: true, reason: 'same', unarchived: true } : { ok: true, reason: 'same' })
+        : (unarchived ? { ok: true, unarchived: true } : { ok: true });
     }
 
     // 存在性求证：undefined = 宿主没有 stat 能力，按存在处理（交给 resume 判定）
     const exists = await this.host.sessionExists(sessionId);
     if (exists === false) return { ok: false, reason: 'not-found' };
 
-    // 映射失败时要回到的值：原会话（没有则铸一个新 id，避免停在被删/无效 id 上）
-    const fallbackId = this.modelResolver.getSessionId(key) ?? mintSessionId();
+    let agent: DshAgent;
+    let handle: DshAgentHandle | undefined;
+    let agentPreset: string | undefined;
 
-    await this.disposeRecord(key, current);
-    this.modelResolver.setSessionId(key, sessionId);
-
-    try {
-      const record = await this.getOrCreate(scope, peerId, senderId, replyTarget);
-      if (record.sessionId !== sessionId) {
-        // resume 失败后宿主可能自建了新会话：不能悄悄留在这个“新会话”上
-        throw new Error(`宿主打开的是 ${record.sessionId}，不是目标会话`);
+    const live = this.agents.get(sessionId);
+    if (live) {
+      agent = live;
+      agentPreset = await this.resolvePersistedPreset(sessionId);
+    } else {
+      const presetId = (await this.resolvePersistedPreset(sessionId)) ?? this.getEffectivePresetByKey(key);
+      const composed = await this.composePreset(presetId);
+      agentPreset = composed.agentPreset;
+      try {
+        const resumeRoute = this.modelResolver.getResumeRoute(key);
+        const resumed = await this.agents.resume({
+          resumeSessionId: sessionId,
+          ...(resumeRoute ? { agentOptions: resumeRoute } : {}),
+          ...(composed.setup ? { setup: composed.setup } : {}),
+        });
+        agent = resumed.agent;
+        handle = resumed;
+      } catch (err) {
+        const raw = errorText(err);
+        const locked = (err as { name?: string } | null)?.name === 'SessionAlreadyOwnedError'
+          || /already ?owned|ownership|write handle/i.test(raw);
+        this.logger.warn(`session switch failed: key=${key} target=${sessionId} err=${raw}`);
+        return locked
+          ? { ok: false, reason: 'locked' }
+          : { ok: false, reason: 'failed', message: raw };
       }
-      this.logger.info(`session switched: key=${key} sessionId=${sessionId}`);
-      return unarchived ? { ok: true, unarchived: true } : { ok: true };
-    } catch (err) {
-      this.modelResolver.setSessionId(key, fallbackId);
-      await this.disposeRecord(key, this.sessions.get(key));
-      const raw = errorText(err);
-      // 跨进程写所有权冲突是最常见的失败原因，补一句可操作的提示
-      const message = /already ?owned|ownership/i.test(raw)
-        ? `${raw}（该会话可能正被 Web 端打开，先关闭再恢复）`
-        : raw;
-      this.logger.warn(`session switch failed: key=${key} target=${sessionId} err=${raw}`);
-      return { ok: false, reason: 'failed', message };
     }
+
+    const directory = this.host.sessionDirectory(agent.session) ?? await this.chatDirectory(key);
+    const record: SessionRecord = {
+      sessionKey: key,
+      sessionId,
+      agent,
+      ...(handle ? { handle } : {}),
+      replyTarget,
+      scope,
+      peerId,
+      senderId,
+      ...(agentPreset ? { agentPreset } : {}),
+      acquiredAt: Date.now(),
+    };
+    this.records.set(sessionId, record);
+    this.setCurrent(key, sessionId);
+    this.rememberDirectory(key, directory);
+    if (directory) void this.host.attachSessionToWorkspace(sessionId, directory);
+
+    this.logger.info(`session switched: key=${key} sessionId=${sessionId} acquired=${handle ? 'owned' : 'borrowed'}`);
+    return wasCurrent
+      ? (unarchived ? { ok: true, reason: 'same', unarchived: true } : { ok: true, reason: 'same' })
+      : (unarchived ? { ok: true, unarchived: true } : { ok: true });
   }
 
   /**
@@ -1269,10 +1601,9 @@ export class SessionManager {
    * @param sessionId 待归档的会话 id
    */
   async archiveSession(sessionId: string): Promise<ArchiveSessionOutcome> {
-    // 1) 释放进程内 agent（同一会话可能被多个 chat 指向）
-    for (const [key, record] of [...this.sessions]) {
-      if (record.sessionId === sessionId) await this.disposeRecord(key, record);
-    }
+    // 1) 释放本进程内指向它的 agent（正在生成的先 cancel；借来的只能 cancel）
+    const record = this.records.get(sessionId);
+    if (record) await this.dropRecord(record, { cancel: true, dispose: true });
 
     const alreadyArchived = this.host.archivedSessionIds().has(sessionId);
 
@@ -1285,10 +1616,10 @@ export class SessionManager {
 
     // 3) 悬空映射换成新 id，下一条消息落到全新会话
     let remapped = 0;
-    for (const [key, mapped] of this.modelResolver.listSessionIdEntries()) {
-      if (mapped !== sessionId) continue;
-      this.modelResolver.setSessionId(key, mintSessionId());
-      remapped += 1;
+    const key = this.sessionKey();
+    if (this.currentSessionId(key) === sessionId) {
+      this.setCurrent(key, mintSessionId());
+      remapped = 1;
     }
 
     this.logger.info(`session archived: id=${sessionId} remapped=${remapped} already=${alreadyArchived}`);
@@ -1313,19 +1644,28 @@ export class SessionManager {
     return outcome;
   }
 
-  /** 释放并移除一条会话记录（cancel 后再 dispose，避免生成中的 turn 悬挂） */
-  private async disposeRecord(key: string, record: SessionRecord | undefined): Promise<void> {
-    if (!record) return;
-    if (this.sessions.get(key) === record) this.sessions.delete(key);
-    record.agent.cancel({ kind: 'user' });
-    await record.handle.dispose().catch(() => {});
-    this.cancelPendingFor(key);
+  /**
+   * 摘掉一条已获取记录。
+   *
+   * dispose 只对 create/resume 拿到的 handle 可用；`agents.get()` 借来的 agent
+   * 只能 cancel，不能替宿主 dispose。
+   */
+  private async dropRecord(
+    record: SessionRecord,
+    options: { cancel?: boolean; dispose?: boolean } = {},
+  ): Promise<void> {
+    if (this.records.get(record.sessionId) === record) this.records.delete(record.sessionId);
+    if (options.cancel) record.agent.cancel({ kind: 'user' });
+    this.cancelPendingFor(record.sessionId);
+    if (options.dispose && record.handle) {
+      await record.handle.dispose().catch(() => {});
+    }
   }
 
   /** 释放会话时统一清理其待答问题/待批审批，避免 pending 悬挂泄漏 */
-  private cancelPendingFor(key: string): void {
-    this.questionChannel?.cancelPending(key);
-    this.approvalChannel?.cancelPending(key);
+  private cancelPendingFor(sessionId: string): void {
+    this.questionChannel?.cancelPending(sessionId);
+    this.approvalChannel?.cancelPending(sessionId);
   }
 
   /**
@@ -1340,7 +1680,7 @@ export class SessionManager {
     revive?: { senderId: string; replyTarget: ReplyTarget },
   ): Promise<CompactOutcome> {
     const key = this.sessionKey();
-    let record = this.sessions.get(key);
+    let record = this.currentRecord(key);
     if (!record) {
       // 无活跃会话（重启后尚未打开）时从磁盘拉起，历史在磁盘上仍可压缩
       if (!revive) return { ok: false, reason: 'no-session' };
@@ -1380,19 +1720,29 @@ export class SessionManager {
     }
   }
 
+  /**
+   * 插件卸载：有 handle 的 cancel + dispose；`agents.get()` 借来的只清引用，
+   * 不替宿主决定生命周期。
+   */
   async disposeAll(): Promise<void> {
-    const records = [...this.sessions.entries()];
-    this.sessions.clear();
-    for (const [key, record] of records) {
-      record.agent.cancel({ kind: 'user' });
-      this.cancelPendingFor(key);
+    const records = [...this.records.values()];
+    this.records.clear();
+    this.currentByKey.clear();
+
+    const owned: SessionRecord[] = [];
+    for (const record of records) {
+      this.cancelPendingFor(record.sessionId);
+      if (record.handle) {
+        record.agent.cancel({ kind: 'user' });
+        owned.push(record);
+      }
     }
-    await Promise.allSettled(records.map(([, record]) => record.handle.dispose()));
-    this.logger.info(`all sessions disposed (count=${records.length})`);
+    await Promise.allSettled(owned.map((record) => record.handle!.dispose()));
+    this.logger.info(`all acquired sessions released (count=${records.length}, owned=${owned.length})`);
   }
 
   get size(): number {
-    return this.sessions.size;
+    return this.records.size;
   }
 }
 

@@ -21,16 +21,20 @@ export function buttonLabel(text: string | undefined): string {
 
 // ── button_data 统一编码 ──
 
-/** 问答按钮：q=问题 id，i=选项下标 */
+/** 问答按钮：s=会话 id，q=问题 id，i=选项下标 */
 export interface QuestionButtonData {
   t: 'question';
+  /** 归属会话：多会话时按它找回 pending，不再依赖 current */
+  s?: string;
   q: string;
   i: number;
 }
 
-/** 审批按钮：d=决策，n=本审批的 nonce（与 pending 匹配，防旧卡片混淆 #94-3） */
+/** 审批按钮：s=会话 id，d=决策，n=本审批的 nonce（与 pending 匹配，防旧卡片混淆 #94-3） */
 export interface ApprovalButtonData {
   t: 'approval';
+  /** 归属会话：多会话时按它找回 pending */
+  s?: string;
   d: 'allow' | 'deny';
   n?: string;
 }
