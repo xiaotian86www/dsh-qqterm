@@ -93,7 +93,7 @@ export interface CompactionServiceLike {
 /** compact 操作结果 */
 export interface CompactOutcome {
   ok: boolean;
-  reason?: 'no-session' | 'busy' | 'failed';
+  reason?: 'no-session' | 'busy' | 'no-compaction' | 'failed';
   shadowed?: number;
   tokens?: number;
   message?: string;

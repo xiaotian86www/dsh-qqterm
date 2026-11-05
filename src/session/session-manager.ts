@@ -2001,7 +2001,8 @@ export class SessionManager {
     if (record.agent.status !== 'idle') return { ok: false, reason: 'busy' };
 
     const compaction = ((await this.host.serviceFor(record.agent, 'compaction'))
-      ?? (this.ctx as unknown as { compaction?: CompactionServiceLike }).compaction) as CompactionServiceLike;
+      ?? (this.ctx as unknown as { compaction?: CompactionServiceLike }).compaction) as CompactionServiceLike | undefined;
+    if (!compaction) return { ok: false, reason: 'no-compaction' };
 
     const route = this.modelResolver.getEffectiveRoute(key);
     const agentCtx = {

@@ -44,7 +44,7 @@
 - `apply()` 必须快速返回：扫码、网关连接、长轮询等一律 `void …catch()`，**禁止 await 用户交互**（会阻塞 Host ready / Web URL 输出）。
 - 禁止在运行时写 `process.env`；凭据持久化只写 profile 的 `cordis.patch.yml`（会触发 HMR 重载）。
 - 未捕获的 rejection 在宿主是 fail-loud 致命错误，所有异步链必须有兜底 catch。
-- `export const name = 'im-qqbot'`、bundle patch 里的 entry id `im-qqbot` 都是兼容契约；改动会让用户 profile 里按 id 写的配置覆盖失效。`inject` 随依赖增长而扩展（当前 15 项），只进不退。
+- `export const name = 'im-qqbot'`、bundle patch 里的 entry id `im-qqbot` 都是兼容契约；改动会让用户 profile 里按 id 写的配置覆盖失效。`inject` 随依赖增长而扩展（当前 14 项），只进不退。`compaction` 不进 `inject`：web/desktop 把它挂在 agent preset 作用域里，宿主面没有这个服务。
 
 ### 3.3 客户端
 

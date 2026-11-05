@@ -10,7 +10,7 @@ import { ConfigSchema, type ImQQBotConfig } from '../config.ts';
 import type { SessionManager } from '../session/index.ts';
 import type { Logger } from '../types.ts';
 import type { CommandDeps } from './types.ts';
-import { newCommand, resetCommand } from './session.ts';
+import { compactCommand, newCommand, resetCommand } from './session.ts';
 
 const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
 
@@ -180,5 +180,15 @@ describe('/new <工作区>', () => {
     expect(manager.remove).not.toHaveBeenCalled();
     expect(manager.changeChatWorkspace).not.toHaveBeenCalled();
     expect(text).toContain('只在私聊 + 白名单');
+  });
+});
+
+describe('/compact 缺少 preset 压缩能力', () => {
+  it('只说 preset 没有压缩能力，并给出切换入口', async () => {
+    const manager = { compact: vi.fn(async () => ({ ok: false, reason: 'no-compaction' })) };
+    const command = compactCommand({ manager } as unknown as CommandDeps);
+    const result = await command.handler(makeCtx('', 'user1', 'compact'));
+
+    expect(result).toBe('⚠️ 当前会话的 preset 没有压缩能力\n换一个带压缩能力的 preset: `/preset`');
   });
 });

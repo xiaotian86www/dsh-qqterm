@@ -314,6 +314,20 @@ describe('getOrCreate — E2 并发改写映射', () => {
     expect(persistedId()).toBe(record.sessionId); // 重启后仍是同一会话
   });
 
+  it('preset 没有压缩能力时返回 no-compaction', async () => {
+    const { registry } = createRegistry(async () => {
+      throw notFound('missing');
+    });
+    const services = hostCtxServices();
+    delete (services as Record<string, unknown>).compaction;
+    const ctx = { ...services, get: () => undefined, on: vi.fn() } as unknown as Context;
+    const manager = createManagerWithCtx(registry, ctx);
+
+    expect(
+      await manager.compact('c2c', PEER, { senderId: PEER, replyTarget: REPLY }),
+    ).toEqual({ ok: false, reason: 'no-compaction' });
+  });
+
   it('E2-2 /compact 拉起与普通消息并发 getOrCreate → singleflight 合并为一次 resume/create，无 agent 泄漏', async () => {
     const resumes: Array<Deferred<DshAgentHandle>> = [];
     const { registry, handles } = createRegistry(() => {

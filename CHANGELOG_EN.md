@@ -18,7 +18,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Changed
 
-- **Host services are now hard dependencies; capability fallbacks are gone**: `inject` lists every host service the plugin uses (sessions, models, workspaces, archiving, titles, queries, presets, permissions, compaction, tools, attachments, web server), and a missing service keeps the plugin inactive. Every "service not mounted → unavailable" probe has been removed, so `/sessions archive`, `/rename`, `/compact`, `/preset`, and `/permission` no longer have half-working states. A minimal `dsh-base`-only profile must mount these services.
+- **Host services are now hard dependencies; capability fallbacks are gone**: `inject` lists every host service the plugin uses (sessions, models, workspaces, archiving, titles, queries, presets, permissions, tools, attachments, web server), and a missing service keeps the plugin inactive. Every "service not mounted → unavailable" probe has been removed, so `/sessions archive`, `/rename`, `/preset` and `/permission` no longer have half-working states. A minimal `dsh-base`-only profile must mount these services. `compaction` is the one exception: Web/Desktop mount it inside the agent preset scope rather than on the host, so it stays out of `inject`; `/compact` still resolves the engine from the current session's preset and points at `/preset` when it is absent.
 
 - **The reply / resume buttons under other sessions' messages no longer repeat the session id**: the id is already in the header line, so the button label now carries only the action. Clicking still fills `/to #shortid ` into the input box; the "answer" link on questions from other sessions follows the same rule.
 
