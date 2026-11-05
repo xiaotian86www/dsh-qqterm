@@ -224,6 +224,17 @@ interface SessionTitleLike {
 }
 
 /**
+ * ctx.workingDirectory 的最小只读契约（dsh-base 的 working-directory）。
+ *
+ * `defaultDirectory` 是 dsh 启动目录；`get(session)` 取会话当前 cwd，覆盖运行期
+ * `cd`。服务已写进 `inject`，属性访问不再需要软读。
+ */
+interface WorkingDirectoryLike {
+  defaultDirectory?: unknown;
+  get?: (target: unknown) => unknown;
+}
+
+/**
  * 把宿主的会话记录/快照统一成 {@link HostSessionInfo}。
  *
  * 两种形态：`sessionQuery.listSessions()` 返回 `{ header, live }`；
@@ -287,6 +298,7 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
     sessionTitle: SessionTitleLike;
     workspaceRegistry: WorkspaceRegistryLike;
     agentPresets: { serviceFor(agent: unknown, name: string): unknown };
+    workingDirectory: WorkingDirectoryLike;
   };
   const persistence = host.sessionPersistence;
   const query = host.sessionQuery;
@@ -364,8 +376,8 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
       const auto = workspaceList().find((workspace) => workspace.title === DEFAULT_WORKSPACE_TITLE);
       if (auto) return auto.path;
 
-      // 2) workingDirectory.defaultDirectory（默认 = dsh 启动目录）；0.2.1 无服务声明，按可选读
-      const working = (ctx as unknown as { workingDirectory?: { defaultDirectory?: unknown } }).workingDirectory;
+      // 2) workingDirectory.defaultDirectory（默认 = dsh 启动目录）
+      const working = host.workingDirectory;
       if (typeof working?.defaultDirectory === 'string' && working.defaultDirectory !== '') {
         return working.defaultDirectory;
       }
@@ -374,7 +386,7 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
 
     sessionDirectory(session) {
       // workingDirectory.get(session) 覆盖运行期 cd；拿不到再退回 header.cwd
-      const working = (ctx as unknown as { workingDirectory?: { get?: (target: unknown) => unknown } }).workingDirectory;
+      const working = host.workingDirectory;
       if (typeof working?.get === 'function') {
         try {
           const dir = working.get(session);
@@ -498,7 +510,7 @@ async function migrateLegacyTitle(
  *
  * 类名判定（不用 instanceof）与归档一致：宿主可能装了同一个包的另一个副本。
  * 会话已关闭时宿主的报错文本不统一，按关键字识别成 `not-live`，让调用方给出
- * 「先发一条消息再改名」这种可执行提示，而不是把原始英文抛给用户。
+ * 「会话已关闭」这类可读提示，而不是把原始英文抛给用户。
  */
 function renameFailure(err: unknown): SessionRenameOutcome {
   const name = err instanceof Error ? err.name : '';

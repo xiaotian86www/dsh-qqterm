@@ -14,17 +14,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Removed
 
-- **Removed the `/workspace` command**: viewing and switching workspace is now handled entirely by `/new <workspace|path>` — a workspace *is* the session's `cwd`, it can only be chosen before a session is persisted, and that window is exactly right after `/new`; a separate "switch workspace without starting a session" command had no real use. `/status` and `/sessions workspace` still show workspace info.
+- **Removed the `/sessions workspace` view**: `/sessions` already groups the sessions QQ holds by workspace, so a second "current workspace only" view was a duplicate entry point. Use `/sessions all` to find sessions in other projects; the old command (including the `/sessions ws` alias and the paged form) now replies with a migration hint instead of a list, and the held list footer no longer links to it.
+
+- **Removed the `/workspace` command**: viewing and switching workspace is now handled entirely by `/new <workspace|path>` — a workspace *is* the session's `cwd`, it can only be chosen before a session is persisted, and that window is exactly right after `/new`; a separate "switch workspace without starting a session" command had no real use. `/status` still shows workspace info.
 
 ### Changed
 
-- **Host services are now hard dependencies; capability fallbacks are gone**: `inject` lists every host service the plugin uses (sessions, models, workspaces, archiving, titles, queries, presets, permissions, tools, attachments, web server), and a missing service keeps the plugin inactive. Every "service not mounted → unavailable" probe has been removed, so `/sessions archive`, `/rename`, `/preset` and `/permission` no longer have half-working states. A minimal `dsh-base`-only profile must mount these services. `compaction` is the one exception: Web/Desktop mount it inside the agent preset scope rather than on the host, so it stays out of `inject`; `/compact` resolves the engine only from the current session's preset and fails explicitly when it is absent (pointing at `/preset`) instead of falling back to a host-plane engine.
+- **Host services are now hard dependencies; capability fallbacks are gone**: `inject` lists every host service the plugin uses (sessions, models, workspaces, archiving, titles, queries, presets, permissions, tools, attachments, web server), and a missing service keeps the plugin inactive. Every "service not mounted → unavailable" probe has been removed, so `/sessions archive`, `/rename`, `/preset` and `/permission` no longer have half-working states. A minimal `dsh-base`-only profile must mount these services. `compaction` is the one exception: Web/Desktop mount it inside the agent preset scope rather than on the host, so it stays out of `inject`; `/compact` resolves the engine only from the current session's preset and answers a single line, `⚠️ 当前 preset 没有压缩能力`, when it is absent — without naming a specific preset, since any preset may lack the engine — instead of falling back to a host-plane engine.
 
 - **The reply / resume buttons under other sessions' messages no longer repeat the session id**: the id is already in the header line, so the button label now carries only the action. Clicking still fills `/to #shortid ` into the input box; the "answer" link on questions from other sessions follows the same rule.
 
 - **Every `/to` result now names the target session**: successes and failures both read `"title" · `#shortid``, for example `✅ 已发送到「修登录」 · `#3f2a9b1c``; "not running", "archived", "missing text", "belongs to another user" and "send failed" include the name too. When the target is not in the list, only the id is shown rather than inventing an "untitled session".
 
 ### Fixed
+
+- **No more "send a message" hints when there is no session**: `/status` now prints just `未建立` for the session line, and `/rename`, `/permission`, `/cost` and the empty `/sessions` views drop the "send a message and one will be created" guidance, stating only that no session exists. The hint was repetitive and added no information — on a first visit it read like the bot was nagging the user to speak.
+
+- **Every message failed after a restart and `/compact` reported `cannot get property "workingDirectory" without inject`**: the plugin read a host service, `workingDirectory` (the session directory), that was not declared in `inject`, and Cordis throws on any property that is not injected — taking down both the message entry point and the compaction command. The service is now in `inject`, matching `dsh-base`'s working-directory.
 
 - **`/status` and `/bot-status` now name the session**: both printed only a short id (and `/bot-status` dropped the `#`), so several sessions in one workspace looked alike. The session line is now `"title" · `#shortid``, matching `/to` and `/sessions`; when the host has not generated a title yet only the short id is shown instead of "untitled session".
 

@@ -75,19 +75,18 @@ describe('/rename（不带参数）', () => {
     expect(manager.renameCurrentSession).not.toHaveBeenCalled();
   });
 
-  it('当前没有会话时提示先发消息', async () => {
+  it('当前没有会话时只说明状态', async () => {
     const manager = makeManager({
       currentSessionId: vi.fn(() => undefined),
       hasCurrentSession: vi.fn(() => false),
     });
 
     const text = await run(manager);
-    expect(text).toContain('当前无活跃会话');
-    expect(text).toContain('/rename <新标题>');
+    expect(text).toBe('⚠️ 当前无活跃会话');
     expect(manager.renameCurrentSession).not.toHaveBeenCalled();
   });
 
-  it('指针还在但会话没打开时同样提示先发消息', async () => {
+  it('指针还在但会话没打开时同样只说明状态', async () => {
     const manager = makeManager({ hasCurrentSession: vi.fn(() => false) });
 
     expect(await run(manager)).toContain('当前无活跃会话');
@@ -117,14 +116,12 @@ describe('/rename <新标题>', () => {
     expect(manager.renameCurrentSession).toHaveBeenCalledWith('修登录 2');
   });
 
-  it('当前没有会话时给出可执行提示', async () => {
+  it('当前没有会话时只说明状态', async () => {
     const manager = makeManager({
       renameCurrentSession: vi.fn(() => ({ ok: false as const, reason: 'no-session' as const })),
     });
 
-    const text = await run(manager, '新名字');
-    expect(text).toContain('当前无活跃会话');
-    expect(text).toContain('先发一条消息');
+    expect(await run(manager, '新名字')).toBe('⚠️ 当前无活跃会话');
   });
 
   it('标题为空时明确拒绝', async () => {
@@ -135,12 +132,12 @@ describe('/rename <新标题>', () => {
     expect(await run(manager, 'x')).toBe('⚠️ 新标题不能为空');
   });
 
-  it('会话已关闭时提示先发消息', async () => {
+  it('会话已关闭时如实说明', async () => {
     const manager = makeManager({
       renameCurrentSession: vi.fn(() => ({ ok: false as const, reason: 'not-live' as const })),
     });
 
-    expect(await run(manager, '新名字')).toContain('会话已关闭');
+    expect(await run(manager, '新名字')).toBe('⚠️ 会话已关闭');
   });
 
   it('其它失败用 ❌ 并带上原因', async () => {

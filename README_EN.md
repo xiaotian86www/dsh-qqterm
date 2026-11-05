@@ -113,7 +113,7 @@ The plugin separates two things: the **chat session** is the conversation the QQ
 and **background sessions** are the host's session logs.
 
 - There is exactly one *current* chat session: every private chat window reads and continues the same context.
-- Background sessions stay multiple: `/sessions` groups the sessions QQ holds by workspace by default, `/sessions workspace` shows the current workspace, and `/new` starts one. Sessions actually acquired by `/sessions resume` or `/to` stay in a runtime acquired set — their output, questions, and approvals still come back to QQ (messages from a non-current session get a source line `#shortid · title` above the body and a `/to` reply link at the end).
+- Background sessions stay multiple: `/sessions` groups the sessions QQ holds by workspace by default, `/sessions all` shows every workspace, and `/new` starts one. Sessions actually acquired by `/sessions resume` or `/to` stay in a runtime acquired set — their output, questions, and approvals still come back to QQ (messages from a non-current session get a source line `#shortid · title` above the body and a `/to` reply link at the end).
 - Sessions are never reclaimed by time: long-running tasks are never interrupted.
 - Queueing is per session: a message for an idle current session starts at once even while another session is generating, while several messages sent to the same session run one turn each, in order.
 
@@ -159,7 +159,7 @@ When several private chats talk at once, the reply goes to the chat of the lates
 | `/new` | Start a new session (clear context); may take a workspace: `/new <workspace\|path>` |
 | `/reset` (alias `/clear`) | Stop the current session and start a new one in the same workspace; `/reset all` stops every acquired session |
 | `/compact` | Compact session history (replace old records with a summary) |
-| `/sessions` (alias `/session`) | Session management: group held sessions by workspace with status and the current marker by default; `workspace` for the current workspace, `all` for everything |
+| `/sessions` (alias `/session`) | Session management: group held sessions by workspace with status and the current marker by default; `all` for every workspace |
 | `/rename` | Rename the current session (the title is pinned against automatic titles) |
 | `/to` | Send a message to a specific session, or answer its question |
 | `/ls` | List the subdirectories of a directory; click a row to go deeper |
@@ -202,14 +202,12 @@ A workspace *is* the session's `cwd`. It is written into the session header when
 
 ### Session management (`/sessions`)
 
-`/sessions` answers "which sessions does QQ currently hold?" from the runtime acquired set. The workspace and all views still come from the same host source as the Web sidebar (`sessionQuery` / `sessionPersistence`).
+`/sessions` answers "which sessions does QQ currently hold?" from the runtime acquired set. The all-workspaces view still comes from the same host source as the Web sidebar (`sessionQuery` / `sessionPersistence`).
 
 | Usage | Description |
 |------|------|
 | `/sessions` | List sessions acquired by QQ grouped by workspace, current first; group headers show the workspace path; each row shows `生成中` / `空闲`, and the current row ends with `✅`; if the current pointer is not in the acquired set, a `待恢复` line is added; indexes are continuous across groups; 10 per page |
 | `/sessions <page>` | Next page of the held list, e.g. `/sessions 2`; the footer shows `上一页 · 第 1/2 页 · 下一页` |
-| `/sessions workspace` | List unarchived sessions of **the current workspace** (newest first, 10 per page); only acquired sessions get a `📌` mark, with no current marker and no generation status |
-| `/sessions workspace <page>` | Next page of the workspace view; same footer format as the held list |
 | `/sessions all` | List every session grouped by workspace (pinned first inside a group); acquired sessions are marked `📌`, with no current marker; groups show no index, only short ids; 10 per page |
 | `/sessions all <page>` | Next page of the all-workspaces view; the workspace title of the first session on the page is repeated; same footer format |
 | `/sessions resume <index\|id>` | Rebind this chat to that session and continue its history (an archived target is unarchived on the way); the workspace follows; **indexes resolve against the held list only** |
@@ -222,7 +220,7 @@ A workspace *is* the session's `cwd`. It is written into the session header when
 
 Notes:
 
-- **Handle rule**: every row shows an 8-char short id (like `#3f2a9b1c`; the `#` is optional) that works from any view; an **index only means a row of the `/sessions` held list**, and it stays continuous across groups and pages. `workspace` / `all` / `archived` / the archive picker show no indexes.
+- **Handle rule**: every row shows an 8-char short id (like `#3f2a9b1c`; the `#` is optional) that works from any view; an **index only means a row of the `/sessions` held list**, and it stays continuous across groups and pages. `all` / `archived` / the archive picker show no indexes.
 - **Paging**: multi-page views use `上一页 · 第 1/2 页 · 下一页` in the footer, omitting the missing direction; the page number is not in the title and "N more" is not shown.
 - Status words appear only in the held list: `生成中` (agent running), `空闲` (held but idle); a current pointer that has not been acquired yet shows `待恢复`. Other views only mark acquired sessions with `📌` (QQ holds it), with no current marker and no status.
 - Private chat only, and the operator must be in the allowlist (`access.c2cAllow`) — titles and archive state touch other chats' data; with no allowlist configured the command is disabled (`/bot-me` shows your OpenID).
@@ -232,7 +230,7 @@ Notes:
 - **Several sessions can stay live at once**: a session joins the acquired set when a normal message, `/sessions resume`, or `/to` actually gets its agent. Output, questions, and approvals from every acquired session go back to QQ; the current session is untagged, while messages from other sessions get a separate source line `#shortid · title` before the body and a `/to` reply link at the end. The acquired set is runtime-only — after a restart only the current session is restored from `model-prefs.json`.
 - **Switching does not release**: `/sessions resume` only moves the current pointer; the old session keeps running and its output keeps flowing to QQ. `/new` behaves the same. On unload the plugin disposes only the agents it created; borrowed Web/TUI agents are just dereferenced.
 - **Questions are routed per session**: the current session answers with plain text; buttons from other sessions carry the session id and work when clicked; questions without buttons append a `/to #id ` link. A plain message that did not come through a link is never forwarded to the current model — the user is told to use a button or `/to`.
-- The held list is ordered "current → other held (by acquisition time)"; the workspace view stays newest-first. The time column is the **creation time** (the host header stores no "last used" timestamp).
+- The held list is ordered "current → other held (by acquisition time)". The time column is the **creation time** (the host header stores no "last used" timestamp).
 - After a cross-workspace resume the agent works inside **that session's own directory**, and the file-send allowlist follows it.
 
 

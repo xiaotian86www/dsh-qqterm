@@ -3,7 +3,7 @@
  *
  * 标题走宿主的 `sessionTitle.rename`：作为显式用户修订写进 `session/title`
  * 事件，并固定该标题，后续不再被自动标题覆盖。宿主的标题服务只接受存活的
- * session，所以当前会话还没打开时只提示先发一条消息，不在改名里偷偷拉起会话。
+ * session，所以当前会话还没打开时只如实拒绝，不在改名里偷偷拉起会话。
  */
 import type { CommandDeps, CategorizedCommand } from './types.ts';
 
@@ -23,7 +23,7 @@ function displayTitle(raw: string | undefined): string {
 }
 
 /** 当前没有可改名的会话时的统一提示 */
-const NO_SESSION = '⚠️ 当前无活跃会话\n先发一条消息开启会话，再 /rename <新标题>';
+const NO_SESSION = '⚠️ 当前无活跃会话';
 
 export function renameCommand({ manager }: CommandDeps): CategorizedCommand {
   return {
@@ -57,7 +57,7 @@ export function renameCommand({ manager }: CommandDeps): CategorizedCommand {
         case 'invalid':
           return '⚠️ 新标题不能为空';
         case 'not-live':
-          return '⚠️ 会话已关闭，先发一条消息再改名';
+          return '⚠️ 会话已关闭';
         default:
           return `❌ 改名失败: ${outcome.message ?? '未知错误'}`;
       }

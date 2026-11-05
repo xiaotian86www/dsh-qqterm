@@ -184,11 +184,11 @@ describe('/new <工作区>', () => {
 });
 
 describe('/compact 缺少 preset 压缩能力', () => {
-  it('只说 preset 没有压缩能力，并给出切换入口', async () => {
+  it('只回一行，不点名具体 preset', async () => {
     const manager = { compact: vi.fn(async () => ({ ok: false, reason: 'no-compaction' })) };
     const command = compactCommand({ manager } as unknown as CommandDeps);
     const result = await command.handler(makeCtx('', 'user1', 'compact'));
 
-    expect(result).toBe('⚠️ 当前会话的 preset 没有压缩能力\n换一个带压缩能力的 preset: `/preset`');
+    expect(result).toBe('⚠️ 当前 preset 没有压缩能力');
   });
 });

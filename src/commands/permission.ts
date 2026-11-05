@@ -84,7 +84,7 @@ export function permissionCommand({ manager, config, logger }: CommandDeps): Cat
           case 'unknown-preset':
             return `⚠️ 未知权限预设: ${target}\n可用: ${entries.map((entry) => entry.id).join(', ')}`;
           case 'no-session':
-            return '⚠️ 本聊天没有可用会话，先发一条消息再切换权限';
+            return '⚠️ 当前无活跃会话';
           default:
             return `❌ 切换失败: ${outcome.message ?? '未知错误'}`;
         }

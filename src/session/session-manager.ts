@@ -810,7 +810,7 @@ export class SessionManager {
    * 宿主的标题服务只接受**存活**的 session（它要往会话日志追加
    * `session/title` 事件），所以这里先找已获取记录；记录不在但进程内还有
    * live agent（Web / TUI 打开的同一会话）时也允许改名。冷会话返回
-   * `no-session`，由命令层提示先发一条消息。
+   * `no-session`，由命令层如实拒绝。
    */
   renameCurrentSession(title: string): RenameSessionOutcome {
     const record = this.currentRecord();

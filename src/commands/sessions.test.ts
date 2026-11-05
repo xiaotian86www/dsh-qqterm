@@ -294,14 +294,14 @@ describe('/sessions 持有视图', () => {
     );
   });
 
-  it('没有持有会话时指向工作区视图', async () => {
+  it('没有持有会话时只留归档与全部两个入口', async () => {
     const manager = makeManager({ listHeldSessions: vi.fn(async () => []) });
     const text = await run(manager, '');
     expect(text).toContain('持有会话（0 个）');
     expect(text).toContain('还没有持有会话');
-    expect(text).toContain('<qqbot-cmd-input text="/sessions workspace" show="工作区会话"/>');
-    // 空列表只留页脚一个入口，不再重复「查看工作区」
-    expect(text.split('/sessions workspace').length).toBe(2);
+    expect(text).toContain('<qqbot-cmd-input text="/sessions archive" show="归档"/>');
+    expect(text).toContain('<qqbot-cmd-input text="/sessions all" show="查看全部"/>');
+    expect(text).not.toContain('/sessions workspace');
   });
 
   it('列举持有会话失败时回显原因而不是抛错', async () => {
@@ -316,144 +316,17 @@ describe('/sessions 持有视图', () => {
   });
 });
 
-describe('/sessions workspace', () => {
-  it('只标 📌，不标当前，也不展示状态', async () => {
-    const manager = makeManager({
-      listWorkspaceSessions: vi.fn(async () => [
-        entry({ id: 'session-cccc1111', current: true, held: true, running: true, title: '当前会话' }),
-        entry({ id: 'session-dddd2222', title: '旧会话' }),
-      ]),
-    });
-
-    const text = await run(manager, 'workspace');
-
-    expect(text).toContain('### 🗂 工作区会话（2 个未归档');
-    expect(text).toContain('#cccc1111 · 当前会话 · 1m 前 · 📌');
-    expect(text).toContain('#dddd2222 · 旧会话');
-    expect(text).not.toContain(' ✅');
-    expect(text).not.toContain('生成中');
-    expect(text).not.toContain('空闲');
-    expect(text).not.toContain('第 1/1 页');
-    expect(text).not.toContain('下一页');
+describe('/sessions workspace（已移除）', () => {
+  it('给出迁移指引，不再渲染工作区列表', async () => {
+    const text = await run(makeManager(), 'workspace');
+    expect(text).toContain('已移除');
+    expect(text).toContain('<qqbot-cmd-input text="/sessions all" show="查看全部工作区"/>');
+    expect(text).not.toContain('工作区会话（');
   });
 
-  it('标题写明时间列是创建时间，页脚只留一行', async () => {
-    const manager = makeManager({
-      listWorkspaceSessions: vi.fn(async () => [entry({ id: 'session-cccc1111' })]),
-    });
-    const text = await run(manager, 'workspace');
-    expect(text).toContain('按创建时间倒序');
-    expect(text.split('\n').filter((line) => line.includes('/sessions all')).length).toBe(1);
-  });
-
-  it('页脚的归档与全部是可点击链接', async () => {
-    const manager = makeManager({
-      listWorkspaceSessions: vi.fn(async () => [
-        entry({ id: 'session-cccc1111' }),
-        entry({ id: 'session-dddd2222', archived: true }),
-      ]),
-    });
-    const text = await run(manager, 'workspace');
-
-    expect(text).toContain('<qqbot-cmd-input text="/sessions archive" show="归档"/>');
-    expect(text).toContain('<qqbot-cmd-input text="/sessions all" show="查看全部"/>');
-    expect(text).toContain('<qqbot-cmd-input text="/sessions archived" show="已归档 1"/>');
-  });
-
-  it('没有会话时给出引导', async () => {
-    const manager = makeManager({ listWorkspaceSessions: vi.fn(async () => []) });
-    expect(await run(manager, 'workspace')).toContain('这个工作区还没有会话');
-  });
-
-  it('工作区目录不存在时告警独占一行，不跟在路径后面', async () => {
-    const manager = makeManager({
-      currentWorkspaceInfo: vi.fn(async () => ({ title: 'repo', path: '/repo', missing: true })),
-    });
-    const text = await run(manager, 'workspace');
-
-    expect(text).toContain('**repo** · `/repo`\n⚠️ 目录不存在');
-    expect(text).not.toContain('`/repo` ⚠️');
-  });
-
-  it('本工作区为空但别处有会话时指向 /sessions all', async () => {
-    const manager = makeManager({
-      listWorkspaceSessions: vi.fn(async () => []),
-      listWorkspaceGroups: vi.fn(async () => [{
-        id: 'ws-2',
-        title: '别的项目',
-        path: '/other',
-        missing: false,
-        sessions: [entry({ id: 'session-eeee3333', workspace: '别的项目' })],
-      }]),
-    });
-    const text = await run(manager, 'workspace');
-    expect(text).toContain('其它工作区还有 1 个会话');
-    expect(text).toContain('/sessions all');
-  });
-
-  it('列举失败时回显原因而不是抛错', async () => {
-    const manager = makeManager({
-      listWorkspaceSessions: vi.fn(async () => {
-        throw new Error('sqlite malformed');
-      }),
-    });
-    const text = await run(manager, 'workspace');
-    expect(text).toContain('读取会话列表失败');
-    expect(text).toContain('sqlite malformed');
-  });
-
-  it('超过展示上限时给出下一页链接，行内不编号', async () => {
-    const many = Array.from({ length: 13 }, (_, i) => entry({ id: `session-${String(i).padStart(8, '0')}` }));
-    const manager = makeManager({ listWorkspaceSessions: vi.fn(async () => many) });
-    const text = await run(manager, 'workspace');
-    expect(text).toContain('第 1/2 页 · <qqbot-cmd-input text="/sessions workspace 2" show="下一页"/>');
-    expect(text).not.toContain('还有 3 个');
-    expect(text).not.toMatch(/^\d+\. /m);
-  });
-
-  it('分页：第二页接续展示且仍不编号', async () => {
-    const many = Array.from({ length: 13 }, (_, i) => entry({
-      id: `session-${String(i).padStart(8, '0')}`,
-      title: `第${i + 1}个`,
-    }));
-    const manager = makeManager({ listWorkspaceSessions: vi.fn(async () => many) });
-
-    const page2 = await run(manager, 'workspace 2');
-    expect(page2).toContain('第 2/2 页');
-    expect(page2).toContain('#00000010 · 第11个');
-    expect(page2).toContain('<qqbot-cmd-input text="/sessions workspace 1" show="上一页"/> · 第 2/2 页');
-    expect(page2).not.toMatch(/^\d+\. /m);
-  });
-
-  it('页码越界时说明总页数', async () => {
-    const manager = makeManager();
-    expect(await run(manager, 'workspace 9')).toContain('共 1 页');
-  });
-
-  it('已归档的会话不占工作区列表，只在底部提示数量', async () => {
-    const manager = makeManager({
-      listWorkspaceSessions: vi.fn(async () => [
-        entry({ id: 'session-cccc1111', title: '在用的' }),
-        entry({ id: 'session-dddd2222', title: '归档的', archived: true }),
-      ]),
-    });
-
-    const text = await run(manager, 'workspace');
-
-    expect(text).toContain('工作区会话（1 个未归档');
-    expect(text).toContain('在用的');
-    expect(text).not.toContain('归档的');
-    expect(text).toContain('已归档 1');
-    expect(text).toContain('/sessions archived');
-  });
-
-  it('全部归档时工作区列表给出跳转提示', async () => {
-    const manager = makeManager({
-      listWorkspaceSessions: vi.fn(async () => [entry({ archived: true })]),
-    });
-    const text = await run(manager, 'workspace');
-    expect(text).toContain('没有未归档的会话');
-    expect(text).toContain('/sessions archived');
+  it('别名 ws 与带页码的写法也走同一条提示', async () => {
+    expect(await run(makeManager(), 'ws')).toContain('已移除');
+    expect(await run(makeManager(), 'workspace 2')).toContain('已移除');
   });
 });
 

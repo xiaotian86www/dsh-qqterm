@@ -164,7 +164,7 @@ export function compactCommand({ manager }: CommandDeps): CategorizedCommand {
         case 'busy':
           return '⚠️ 正在生成中，无法压缩';
         case 'no-compaction':
-          return '⚠️ 当前会话的 preset 没有压缩能力\n换一个带压缩能力的 preset: `/preset`';
+          return '⚠️ 当前 preset 没有压缩能力';
         default:
           return `❌ 压缩失败: ${outcome.message ?? '未知错误'}`;
       }

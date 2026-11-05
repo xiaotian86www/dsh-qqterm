@@ -44,7 +44,7 @@
 - `apply()` 必须快速返回：扫码、网关连接、长轮询等一律 `void …catch()`，**禁止 await 用户交互**（会阻塞 Host ready / Web URL 输出）。
 - 禁止在运行时写 `process.env`；凭据持久化只写 profile 的 `cordis.patch.yml`（会触发 HMR 重载）。
 - 未捕获的 rejection 在宿主是 fail-loud 致命错误，所有异步链必须有兜底 catch。
-- `export const name = 'im-qqbot'`、bundle patch 里的 entry id `im-qqbot` 都是兼容契约；改动会让用户 profile 里按 id 写的配置覆盖失效。`inject` 随依赖增长而扩展（当前 14 项），只进不退。`compaction` 不进 `inject`：web/desktop 把它挂在 agent preset 作用域里，宿主面没有这个服务，`/compact` 只从会话 preset 取引擎，不退回宿主面。
+- `export const name = 'im-qqbot'`、bundle patch 里的 entry id `im-qqbot` 都是兼容契约；改动会让用户 profile 里按 id 写的配置覆盖失效。`inject` 随依赖增长而扩展（当前 15 项），只进不退。`compaction` 不进 `inject`：web/desktop 把它挂在 agent preset 作用域里，宿主面没有这个服务，`/compact` 只从会话 preset 取引擎，不退回宿主面。
 
 ### 3.3 客户端
 
@@ -56,7 +56,7 @@
 
 - 插件只处理 C2C 私聊：群消息在 accessPolicy 层被拦掉，代码里不再有群聊分支。按钮键盘只在 C2C 可用，发送失败必须保留文本回退（现有实现会降级并记 warn）。改问答/审批时在 C2C 验证按钮回退。
 - `ask_user_question` / `approval` 走宿主 waterfall 通道，不要再退回 `userQuestions.ask` 这类服务探测式实现。
-- 聊天会话 key 固定为 `qqbot:${appId}:chat`：全 bot 只有一个「当前会话」，任何 QQ 窗口共享它；已获取集合（普通消息 / `/sessions resume` / `/to` 实际拿到 agent 的会话）可以有多份，全部输出回 QQ，非当前会话的消息首行标 `` > `#短id` · 标题 ``、末行给「回复」「恢复」两个链接（长回复只在首片带标题、末片带链接；提问 / 审批用同一个首行，见 §4.12）。`/sessions` 默认按工作区分组列出已持有会话（组标题带路径，行带 `生成中` / `空闲` 与当前 `✅`），`/sessions workspace` 看当前工作区、`/sessions all` 看全部；后两者只标 `📌`，不标当前。`/sessions resume` 与 `/new` 只改当前指针，切走不 dispose 旧会话；`/reset`（别名 `/clear`）会先停掉当前会话再开新的，`/reset all` 停掉全部已获取会话。`/stop` 只停当前会话，`/stop all` 停掉所有正在生成的已获取会话。没有映射即视为全新会话，会话 id 由 `mintSessionId()` 铸造。
+- 聊天会话 key 固定为 `qqbot:${appId}:chat`：全 bot 只有一个「当前会话」，任何 QQ 窗口共享它；已获取集合（普通消息 / `/sessions resume` / `/to` 实际拿到 agent 的会话）可以有多份，全部输出回 QQ，非当前会话的消息首行标 `` > `#短id` · 标题 ``、末行给「回复」「恢复」两个链接（长回复只在首片带标题、末片带链接；提问 / 审批用同一个首行，见 §4.12）。`/sessions` 默认按工作区分组列出已持有会话（组标题带路径，行带 `生成中` / `空闲` 与当前 `✅`），`/sessions all` 看全部工作区，只标 `📌`，不标当前。`/sessions resume` 与 `/new` 只改当前指针，切走不 dispose 旧会话；`/reset`（别名 `/clear`）会先停掉当前会话再开新的，`/reset all` 停掉全部已获取会话。`/stop` 只停当前会话，`/stop all` 停掉所有正在生成的已获取会话。没有映射即视为全新会话，会话 id 由 `mintSessionId()` 铸造。
 - 会话名（标题）由宿主 `sessionTitle.rename` 写入 `session/title` 事件，写完即固定，自动标题不再覆盖。`/rename <新标题>` 只改当前会话（与聊天同一权限面，不限白名单）；`/sessions rename <序号|id> <新标题>` 改已打开的其他会话，沿用 `/sessions` 的私聊 + 白名单。两者都只接受 live session：冷会话提示先 `/sessions resume`，不要为了改名悄悄拉起会话。
 - 入站消息的 `source.kind` 必须是 `user`（`src/session/user-message.ts`）：宿主把「人类消息」作为一批能力的触发条件——会话标题（`dsh-session-title` 只对 `kind === 'user'` 排期，内置回退标题也走这条路）、最近提问时间、轮次大纲、replay 断点。自造 kind（如早期的 `qqbot`）会让这些能力静默失效，症状是所有新建会话停在「未命名会话」。宿主自带的外部通道（ACP / JSON-RPC SDK / headless）同样发 `{ kind: 'user' }`。
 - Markdown 输出按 `textChunkLimit` 分片，代码块/表格感知切分在 `src/transport/chunker.ts`，不要绕过。
@@ -105,7 +105,7 @@
 |---|---|---|
 | 指令总览 / 模型配置 | 🤖 | `/bot-help`、`/model` |
 | 会话 / 工作区 | 🗂 | `/sessions`、`/sessions all` |
-| 持有会话 | 📌 | `/sessions workspace`、`/sessions all`、归档候选的行尾 |
+| 持有会话 | 📌 | `/sessions all`、归档候选的行尾 |
 | 归档 | 🗄 | `/sessions archived`、归档结果 |
 | 取消归档 | ♻️ | `unarchive` 结果 |
 | 目录浏览 | 📁 | `/ls` |
@@ -140,7 +140,7 @@
 
 3. #7b1e0022 · 补文档 · 空闲 · 2h 前
 
-归档 `/sessions archive <序号>` · `/sessions workspace` 看工作区
+归档 `/sessions archive <序号>` · `/sessions all` 看全部工作区
 ```
 
 - 标题 `### 图标 标题`：图标后一个空格；标题说清「是什么 + 多少个」，不加句号。
@@ -195,8 +195,8 @@
   - `text` 必须是**真能执行**的命令（含真实 provider / id / 序号，重复点击由命令自身幂等兜底）；
   - `show` 是给人看的短标签，**不写 markdown**（键盘按纯文本渲染，反引号会原样显示）；正文里的 `#id` 在 `show` 里裸写。
 - 属性值先净化再拼接：去换行、去 `` ` * _ ~ < > " ' ``，超长截断到 28 字补 `…`（`shortTitle()`）；`&` 按上下文转义。
-- 当前项标记一律放行尾：`… ✅`（前面一个空格）。按钮 `show` 与正文列表都这样，不用 `✅ ` 前缀——`/sessions` 持有列表、`/model`、`/preset`、`/permission` 共用这一种写法；`/sessions workspace`、`/sessions all`、归档页不标当前。
-- 持有标记一律放行尾：`… 📌`（前面一个空格），只出现在 `/sessions workspace`、`/sessions all` 与归档候选；持有列表本身不重复标 `📌`，同一条消息也不会同时出现 `✅` 和 `📌`。
+- 当前项标记一律放行尾：`… ✅`（前面一个空格）。按钮 `show` 与正文列表都这样，不用 `✅ ` 前缀——`/sessions` 持有列表、`/model`、`/preset`、`/permission` 共用这一种写法；`/sessions all`、归档页不标当前。
+- 持有标记一律放行尾：`… 📌`（前面一个空格），只出现在 `/sessions all` 与归档候选；持有列表本身不重复标 `📌`，同一条消息也不会同时出现 `✅` 和 `📌`。
 - 按钮发送失败必须降级成纯文本，保留同样的事实与下一步，不许静默丢消息。
 
 ### 4.7 纯文本回退通道

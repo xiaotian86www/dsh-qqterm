@@ -52,7 +52,7 @@ async function renderStatus(
       `**会话**: ${sessionTargetLabel(status.sessionId, title)} · ${running ? '生成中' : '空闲'}`,
     );
   } else {
-    lines.push('**会话**: 未建立（发一条消息即创建）');
+    lines.push('**会话**: 未建立');
   }
 
   // 工作区：会话落在哪个目录（读不到就跳过，不影响其它字段）

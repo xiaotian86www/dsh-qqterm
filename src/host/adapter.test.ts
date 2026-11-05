@@ -274,3 +274,30 @@ describe('attachSessionToWorkspace', () => {
     expect(logger.warn).toHaveBeenCalled();
   });
 });
+
+describe('workingDirectory（已写进 inject）', () => {
+  /** ctx 的最小形态：只挂 adapter 会读的服务，其余保持 undefined */
+  function ctxWith(working: unknown) {
+    return { agentPresets: { serviceFor: () => undefined }, workingDirectory: working } as never;
+  }
+
+  beforeEach(() => {
+    _resetAdapterCache();
+  });
+
+  it('defaultWorkspacePath 回退到 workingDirectory.defaultDirectory', () => {
+    const adapter = createHostAdapter(ctxWith({ defaultDirectory: 'D:\\ws' }));
+    expect(adapter.defaultWorkspacePath()).toBe('D:\\ws');
+  });
+
+  it('sessionDirectory 优先用 workingDirectory.get(session)', () => {
+    const adapter = createHostAdapter(ctxWith({ get: () => 'D:\\live' }));
+    expect(adapter.sessionDirectory({ header: { cwd: 'D:\\header' } })).toBe('D:\\live');
+  });
+
+  it('会话目录取不到时退回 header.cwd', () => {
+    const adapter = createHostAdapter(ctxWith({ get: () => undefined }));
+    expect(adapter.sessionDirectory({ header: { cwd: 'D:\\header' } })).toBe('D:\\header');
+    expect(adapter.defaultWorkspacePath()).toBeUndefined();
+  });
+});
