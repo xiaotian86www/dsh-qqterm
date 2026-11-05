@@ -80,8 +80,8 @@ export async function ensureCredentials(
   }
 
   // 端内绑定页路由（webServer 已在 inject 中声明）
-  const webServer = (ctx as unknown as { webServer?: WebServerLike }).webServer;
-  if (webServer !== undefined && typeof webServer.register === 'function') {
+  const webServer = (ctx as unknown as { webServer: WebServerLike }).webServer;
+  {
     const disposeRoutes = registerBindRoutes(webServer, service, logger, {
       // 未绑定流程中的手动提交：终止扫码轮询，走同一持久化路径
       onManualCredentials: (credentials) => {
@@ -106,8 +106,7 @@ export async function ensureCredentials(
  * 保存后触发 HMR 重载、新 fiber 以新凭据重启网关。
  */
 export function registerBoundCredentialRoutes(ctx: Context, logger: Logger, appId: string, config: Record<string, unknown>): void {
-  const webServer = (ctx as unknown as { webServer?: WebServerLike }).webServer;
-  if (webServer === undefined || typeof webServer.register !== 'function') return;
+  const webServer = (ctx as unknown as { webServer: WebServerLike }).webServer;
   const disposeRoutes = registerBindRoutes(webServer, null, logger, {
     boundAppId: () => appId,
     onManualCredentials: (credentials) => persistCredentials(credentials, logger),

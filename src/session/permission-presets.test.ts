@@ -90,7 +90,7 @@ function hostServices() {
     sessionQuery: { listSessions: async () => [], readTitleSnapshots: async () => [] },
     sessionTitle: { rename: () => ({}) },
     workspaceRegistry: { list: () => [], create: async () => ({ path: '/', attachSession: async () => {} }) },
-    agentPresets: {},
+    agentPresets: { serviceFor: () => undefined },
     compaction: {},
   };
 }

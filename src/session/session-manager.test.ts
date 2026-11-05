@@ -72,9 +72,8 @@ function hostCtxServices() {
       list: () => [],
       create: async () => ({ path: '/', attachSession: async () => {} }),
     },
-    agentPresets: {},
+    agentPresets: { serviceFor: () => undefined },
     permissionPresets: { names: [], optionOf: () => undefined },
-    compaction: {},
   };
 }
 
@@ -232,6 +231,7 @@ describe('getOrCreate — 对照组（主路径行为正确）', () => {
     const presets = {
       resolve: vi.fn(async (id?: string) => ({ id: id ?? 'default' })),
       mount: vi.fn(async () => {}),
+      serviceFor: () => undefined,
       list: vi.fn(async () => []),
     };
     const ctx = {
@@ -318,10 +318,7 @@ describe('getOrCreate — E2 并发改写映射', () => {
     const { registry } = createRegistry(async () => {
       throw notFound('missing');
     });
-    const services = hostCtxServices();
-    delete (services as Record<string, unknown>).compaction;
-    const ctx = { ...services, get: () => undefined, on: vi.fn() } as unknown as Context;
-    const manager = createManagerWithCtx(registry, ctx);
+    const manager = createManager(registry);
 
     expect(
       await manager.compact('c2c', PEER, { senderId: PEER, replyTarget: REPLY }),
@@ -437,6 +434,7 @@ describe('切换类操作 — 可重入', () => {
     const presets = {
       resolve: vi.fn(async (id?: string) => ({ id: id ?? 'default' })),
       mount: vi.fn(async () => {}),
+      serviceFor: () => undefined,
       list: vi.fn(async () => []),
     };
     return {

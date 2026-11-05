@@ -18,7 +18,7 @@
 
 ### 行为变更
 
-- **宿主服务改为硬依赖，不再做能力降级**：`inject` 现在列出插件用到的全部宿主服务（会话、模型、工作区、归档、标题、查询、preset、权限、工具、附件、Web 服务），缺任一项插件不激活；代码里所有「服务没挂载 → 返回不可用」的探测分支已删除，`/sessions archive`、`/rename`、`/preset`、`/permission` 等不再出现半可用状态。只装 `dsh-base` 的精简 profile 需要补齐这些服务。`compaction` 是唯一例外：Web/Desktop 把它挂在 agent preset 作用域里，宿主面没有这个服务，所以不进 `inject`；`/compact` 仍从当前会话的 preset 取压缩引擎，preset 不带时提示 `/preset` 换一个。
+- **宿主服务改为硬依赖，不再做能力降级**：`inject` 现在列出插件用到的全部宿主服务（会话、模型、工作区、归档、标题、查询、preset、权限、工具、附件、Web 服务），缺任一项插件不激活；代码里所有「服务没挂载 → 返回不可用」的探测分支已删除，`/sessions archive`、`/rename`、`/preset`、`/permission` 等不再出现半可用状态。只装 `dsh-base` 的精简 profile 需要补齐这些服务。`compaction` 是唯一例外：Web/Desktop 把它挂在 agent preset 作用域里，宿主面没有这个服务，所以不进 `inject`；`/compact` 只从当前会话的 preset 取压缩引擎，取不到就明确失败（提示 `/preset` 换一个），不再退回宿主面引擎。
 
 - **其他会话尾部的「回复」「恢复」按钮不再重复会话 id**：id 已经写在首行署名里，按钮上再跟一遍只是噪音，现在 `show` 只写动作。点击后仍把 `/to #短id ` 填进输入框；非当前会话提问的「回答」链接同样只写动作。
 

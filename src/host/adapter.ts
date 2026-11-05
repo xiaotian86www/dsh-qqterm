@@ -16,24 +16,20 @@ export interface AdapterLogger {
 }
 
 export interface HostAdapter {
-  /** 会话事件读取：新宿主 snapshotEvents()，旧宿主 events getter */
-  sessionEvents(session: { snapshotEvents?: () => readonly unknown[]; events?: readonly unknown[] }): readonly unknown[];
-  /** preset 作用域服务解析：旧宿主实例方法 / 新宿主模块函数 */
+  /** 会话事件读取（宿主 snapshotEvents） */
+  sessionEvents(session: { snapshotEvents: () => readonly unknown[] }): readonly unknown[];
+  /** preset 作用域服务解析（宿主 registry 的 serviceFor） */
   serviceFor(agent: { ctx: unknown }, name: string): Promise<unknown | undefined>;
-  /** 全局服务读取（未注册返回 undefined，不抛） */
-  globalService(name: string): unknown | undefined;
-  /** 官方 fork seed 构造；旧宿主无导出时返回 undefined */
+  /** 官方 fork seed 构造；宿主无该导出时返回 undefined */
   buildForkSeed(events: readonly unknown[], boundary: number): Promise<readonly unknown[] | undefined>;
   /** 会话 header 读取（取 agentPreset 等）；会话不存在、服务缺失或读取失败返回 undefined */
   sessionHeader(sessionId: string): Promise<SessionHeaderLike | undefined>;
   /**
    * 会话是否存在于持久化层。
    *
-   * `undefined` = 没有求证手段（宿主未注册 sessionPersistence，或其形态不含
-   * `stat`）。调用方不得把它当成「不存在」——那正是重建已存在会话、撞出重复
-   * id 的根因。后端真故障时照常抛出。
+   * 后端故障时抛错（求证失败 ≠ 不存在）：那正是重建已存在会话、撞出重复 id 的根因。
    */
-  sessionExists(sessionId: string): Promise<boolean | undefined>;
+  sessionExists(sessionId: string): Promise<boolean>;
   /**
    * 将会话挂载到其 cwd 对应的工作区（侧边栏可见性）。
    *
@@ -44,10 +40,7 @@ export interface HostAdapter {
    */
   attachSessionToWorkspace(sessionId: string, cwd: string): Promise<void>;
   /**
-   * 列出宿主可见的全部会话（与 Web 侧栏同一来源）。
-   *
-   * 优先 `ctx.sessionQuery.listSessions()`（带 live 标记），回退
-   * `ctx.sessionPersistence.list()`（只有持久化快照）。两者都没有时返回空数组；
+   * 列出宿主可见的全部会话（与 Web 侧栏同一来源，`sessionQuery.listSessions()`）。
    * 后端故障时抛错，由调用方决定如何降级展示。
    *
    * 注意：宿主列表**不过滤归档**（过滤是客户端的活），调用方要自己按
@@ -180,17 +173,17 @@ export interface WorkspaceLike {
 /** workspaceRegistry 服务最小契约（对齐 dsh-workspace WorkspaceRegistry） */
 export interface WorkspaceRegistryLike {
   /** 获取目录对应的现有工作区；不存在时创建（幂等；路径须已存在且为目录） */
-  create?(path: string, title?: string): Promise<WorkspaceLike>;
+  create(path: string, title?: string): Promise<WorkspaceLike>;
   /** 工作区列表（按侧边栏顺序） */
-  list?(): readonly WorkspaceLike[];
-  /** registry 全局归档集（只读；宿主早期版本没有该字段） */
-  readonly archivedSessionIds?: readonly string[];
+  list(): readonly WorkspaceLike[];
+  /** registry 全局归档集（只读） */
+  readonly archivedSessionIds: readonly string[];
   /** registry 全局置顶集（最近置顶在前） */
-  readonly pinnedSessionIds?: readonly string[];
+  readonly pinnedSessionIds: readonly string[];
   /** 归档一个会话；`stopActivity` 为真时先让 providers 停掉该会话的工作 */
-  archiveSession?(sessionId: string, options?: { stopActivity?: boolean }): Promise<void>;
+  archiveSession(sessionId: string, options?: { stopActivity?: boolean }): Promise<void>;
   /** 取消归档（幂等） */
-  unarchiveSession?(sessionId: string): Promise<void>;
+  unarchiveSession(sessionId: string): Promise<void>;
 }
 
 /**
@@ -293,7 +286,7 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
     sessionQuery: SessionQueryLike;
     sessionTitle: SessionTitleLike;
     workspaceRegistry: WorkspaceRegistryLike;
-    agentPresets: { serviceFor?(agent: unknown, name: string): unknown };
+    agentPresets: { serviceFor(agent: unknown, name: string): unknown };
   };
   const persistence = host.sessionPersistence;
   const query = host.sessionQuery;
@@ -301,23 +294,17 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
   const registry = host.workspaceRegistry;
   const presets = host.agentPresets;
 
-  const resolveFn: ((agent: { ctx: unknown }, name: string) => unknown | undefined) | undefined =
-    typeof presets.serviceFor === 'function'
-      ? (agent, name) => presets.serviceFor!(agent, name)
-      : undefined;
-
   const capabilities: string[] = [
-    'sessionEvents(s自适应)',
+    'sessionEvents(snapshotEvents)',
     'sessionPersistence.stat',
     'workspaceRegistry',
     'sessionQuery',
     'sessionTitle.rename',
-    resolveFn ? 'serviceFor(presets实例方法)' : 'serviceFor(serviceForAgent动态)',
+    'serviceFor(agentPresets.serviceFor)',
   ];
 
   /** registry.list() 收窄成纯数据快照；异常降级为空列表 */
   const workspaceList = (): WorkspaceInfo[] => {
-    if (typeof registry.list !== 'function') return [];
     try {
       return registry.list().flatMap((workspace) => {
         if (typeof workspace?.path !== 'string' || typeof workspace.id !== 'string') return [];
@@ -337,32 +324,11 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
     capabilities,
 
     sessionEvents(session) {
-      if (typeof session.snapshotEvents === 'function') return session.snapshotEvents();
-      const legacy = session.events;
-      return Array.isArray(legacy) ? legacy : [];
+      return session.snapshotEvents();
     },
 
     async serviceFor(agent, name) {
-      if (resolveFn) {
-        try {
-          const found = resolveFn(agent, name);
-          if (found) return found;
-        } catch { /* 宿主实现差异，走模块函数 */ }
-      }
-      const mod = await importModule('@deepseek-ai/dsh-agent-presets', logger);
-      const fn = mod?.serviceForAgent as
-        | ((ctx: unknown, agent: { ctx: unknown }, name: string) => unknown)
-        | undefined;
-      if (typeof fn !== 'function') return undefined;
-      try {
-        return fn(ctx, agent, name);
-      } catch {
-        return undefined;
-      }
-    },
-
-    globalService(name) {
-      return (ctx as unknown as Record<string, unknown>)[name];
+      return presets.serviceFor(agent, name);
     },
 
     async sessionHeader(sessionId) {
@@ -379,17 +345,8 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
 
     async attachSessionToWorkspace(sessionId, cwd) {
       try {
-        if (typeof registry.create !== 'function') {
-          logger?.warn?.(`host adapter: workspaceRegistry 无 create，跳过会话 ${sessionId} 的工作区归属`);
-          return;
-        }
         // 不传 title：宿主按目录最后一段生成显示名（一般规律）
         const workspace = await registry.create(cwd);
-        if (!workspace || typeof workspace.attachSession !== 'function') {
-          // 宿主接口演进：返回对象不含 attachSession → warn 避免静默失效
-          logger?.warn?.(`host adapter: workspaceRegistry.create 返回了无 attachSession 的对象，跳过会话 ${sessionId}`);
-          return;
-        }
         await migrateLegacyTitle(workspace, cwd, logger);
         await workspace.attachSession(sessionId);
         logger?.debug?.(`host adapter: attached session ${sessionId} to workspace ${workspace.path ?? cwd}`);
@@ -484,7 +441,7 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
       try {
         // stopActivity：宿主先让 providers 停掉该会话的工作再写归档集，避免
         // 活跃会话被 session-active 拒绝；进程内的 agent 由 manager 先释放
-        await registry.archiveSession!(sessionId, { stopActivity: true });
+        await registry.archiveSession(sessionId, { stopActivity: true });
         logger?.debug?.(`host adapter: archived session ${sessionId}`);
         return { ok: true };
       } catch (err) {
@@ -494,7 +451,7 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
 
     async unarchiveSession(sessionId) {
       try {
-        await registry.unarchiveSession!(sessionId);
+        await registry.unarchiveSession(sessionId);
         logger?.debug?.(`host adapter: unarchived session ${sessionId}`);
         return { ok: true };
       } catch (err) {
@@ -503,13 +460,11 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
     },
 
     archivedSessionIds() {
-      const archived = registry.archivedSessionIds;
-      return new Set(Array.isArray(archived) ? archived : []);
+      return new Set(registry.archivedSessionIds);
     },
 
     pinnedSessionIds() {
-      const pinned = registry.pinnedSessionIds;
-      return new Set(Array.isArray(pinned) ? pinned : []);
+      return new Set(registry.pinnedSessionIds);
     },
   };
 }

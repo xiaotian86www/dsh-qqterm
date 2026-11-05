@@ -185,9 +185,8 @@ function createCtx(options: {
       create: async (path: string) => ({ path, title: basename(path), attachSession: async () => {} }),
     },
     sessionTitle: options.sessionTitle ?? { rename: () => ({ title: '' }) },
-    agentPresets: {},
+    agentPresets: { serviceFor: () => undefined },
     permissionPresets: { names: [], optionOf: () => undefined },
-    compaction: {},
     get: (name: string) => {
       if (name === 'sessionPersistence') return persistence;
       if (name === 'sessionQuery') return query;

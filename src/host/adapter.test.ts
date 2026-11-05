@@ -3,7 +3,7 @@ import { createHostAdapter, _resetAdapterCache } from './adapter.ts';
 
 /** 最小 ctx：服务直接挂在 ctx 上（宿主已通过 inject 保证存在） */
 function makeCtx(services: Record<string, unknown> = {}) {
-  return { agentPresets: {}, ...services } as never;
+  return { agentPresets: { serviceFor: () => undefined }, ...services } as never;
 }
 
 describe('host adapter', () => {
@@ -12,50 +12,21 @@ describe('host adapter', () => {
     vi.unstubAllGlobals();
   });
 
-  it('sessionEvents：新宿主 snapshotEvents() 优先', () => {
+  it('sessionEvents：读宿主 snapshotEvents()', () => {
     const adapter = createHostAdapter(makeCtx());
     const events = [{ type: 'a', seq: 0 }];
     expect(adapter.sessionEvents({ snapshotEvents: () => events })).toBe(events);
   });
 
-  it('sessionEvents：旧宿主 events getter 兜底', () => {
-    const adapter = createHostAdapter(makeCtx());
-    const events = [{ type: 'a', seq: 0 }];
-    expect(adapter.sessionEvents({ events })).toEqual(events);
-  });
-
-  it('sessionEvents：两者皆无返回空数组（不抛）', () => {
-    const adapter = createHostAdapter(makeCtx());
-    expect(adapter.sessionEvents({})).toEqual([]);
-  });
-
-  it('serviceFor：presets 实例方法直接命中', async () => {
+  it('serviceFor：直接用 agentPresets.serviceFor', async () => {
     const compaction = { compactNow: () => {} };
-    const presets = { serviceFor: (agent: unknown, name: string) => (name === 'compaction' ? compaction : undefined) };
+    const presets = {
+      serviceFor: (_agent: unknown, name: string) => (name === 'compaction' ? compaction : undefined),
+    };
     const adapter = createHostAdapter(makeCtx({ agentPresets: presets }));
     expect(await adapter.serviceFor({ ctx: {} }, 'compaction')).toBe(compaction);
-    expect(adapter.capabilities).toContain('serviceFor(presets实例方法)');
-  });
-
-  it('serviceFor：无实例方法时走动态模块函数', async () => {
-    const compaction = { compactNow: () => {} };
-    vi.doMock('@deepseek-ai/dsh-agent-presets', () => ({
-      serviceForAgent: (_ctx: unknown, agent: unknown, name: string) =>
-        name === 'compaction' ? compaction : undefined,
-    }));
-    const adapter = createHostAdapter(makeCtx());
-    expect(await adapter.serviceFor({ ctx: {} }, 'compaction')).toBe(compaction);
-  });
-
-  it('globalService：未注册返回 undefined（不抛）', () => {
-    const adapter = createHostAdapter(makeCtx());
-    expect(adapter.globalService('compaction')).toBeUndefined();
-  });
-
-  it('globalService：已注册返回服务', () => {
-    const compaction = { compactNow: () => {} };
-    const adapter = createHostAdapter(makeCtx({ compaction }));
-    expect(adapter.globalService('compaction')).toBe(compaction);
+    expect(await adapter.serviceFor({ ctx: {} }, 'nothing')).toBeUndefined();
+    expect(adapter.capabilities).toContain('serviceFor(agentPresets.serviceFor)');
   });
 
   it('buildForkSeed：模块不可解析时返回 undefined（不抛）', async () => {
