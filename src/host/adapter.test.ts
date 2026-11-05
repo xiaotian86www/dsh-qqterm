@@ -1,14 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createHostAdapter, _resetAdapterCache } from './adapter.ts';
 
-/** 最小 ctx：可控的 get() */
-function makeCtx(services: Record<string, unknown>) {
-  return {
-    get: (name: string) => {
-      if (!(name in services)) throw new Error(`cannot get property "${name}" without inject`);
-      return services[name];
-    },
-  } as never;
+/** 最小 ctx：服务直接挂在 ctx 上（宿主已通过 inject 保证存在） */
+function makeCtx(services: Record<string, unknown> = {}) {
+  return { agentPresets: {}, ...services } as never;
 }
 
 describe('host adapter', () => {
@@ -18,23 +13,23 @@ describe('host adapter', () => {
   });
 
   it('sessionEvents：新宿主 snapshotEvents() 优先', () => {
-    const adapter = createHostAdapter(makeCtx({}));
+    const adapter = createHostAdapter(makeCtx());
     const events = [{ type: 'a', seq: 0 }];
     expect(adapter.sessionEvents({ snapshotEvents: () => events })).toBe(events);
   });
 
   it('sessionEvents：旧宿主 events getter 兜底', () => {
-    const adapter = createHostAdapter(makeCtx({}));
+    const adapter = createHostAdapter(makeCtx());
     const events = [{ type: 'a', seq: 0 }];
     expect(adapter.sessionEvents({ events })).toEqual(events);
   });
 
   it('sessionEvents：两者皆无返回空数组（不抛）', () => {
-    const adapter = createHostAdapter(makeCtx({}));
+    const adapter = createHostAdapter(makeCtx());
     expect(adapter.sessionEvents({})).toEqual([]);
   });
 
-  it('serviceFor：旧宿主 presets 实例方法直接命中', async () => {
+  it('serviceFor：presets 实例方法直接命中', async () => {
     const compaction = { compactNow: () => {} };
     const presets = { serviceFor: (agent: unknown, name: string) => (name === 'compaction' ? compaction : undefined) };
     const adapter = createHostAdapter(makeCtx({ agentPresets: presets }));
@@ -48,12 +43,12 @@ describe('host adapter', () => {
       serviceForAgent: (_ctx: unknown, agent: unknown, name: string) =>
         name === 'compaction' ? compaction : undefined,
     }));
-    const adapter = createHostAdapter(makeCtx({}));
+    const adapter = createHostAdapter(makeCtx());
     expect(await adapter.serviceFor({ ctx: {} }, 'compaction')).toBe(compaction);
   });
 
   it('globalService：未注册返回 undefined（不抛）', () => {
-    const adapter = createHostAdapter(makeCtx({}));
+    const adapter = createHostAdapter(makeCtx());
     expect(adapter.globalService('compaction')).toBeUndefined();
   });
 
@@ -64,7 +59,7 @@ describe('host adapter', () => {
   });
 
   it('buildForkSeed：模块不可解析时返回 undefined（不抛）', async () => {
-    const adapter = createHostAdapter(makeCtx({}));
+    const adapter = createHostAdapter(makeCtx());
     expect(await adapter.buildForkSeed([{ seq: 0 }], 0)).toBeUndefined();
   });
 
@@ -99,18 +94,14 @@ describe('host adapter', () => {
     await expect(adapter.sessionExists('s1')).rejects.toThrow(/EIO/);
   });
 
-  it('sessionExists：服务未注册 → undefined', async () => {
-    const adapter = createHostAdapter(makeCtx({}));
-    expect(await adapter.sessionExists('s1')).toBeUndefined();
-    expect(adapter.capabilities).toContain('sessionPersistence.stat(不可用，会话存在性判定降级)');
-  });
-
-  it('sessionExists：服务形态不含 stat → undefined，不让 TypeError 冒出', async () => {
-    // 回归：此前按不存在的 load() 调用，TypeError 被当成「后端故障」，
-    // 全新会话被误判为「可能存在」而拒绝创建，用户侧表现为处理消息异常
-    const adapter = createHostAdapter(makeCtx({ sessionPersistence: { open: async () => ({}) } }));
-    expect(await adapter.sessionExists('s1')).toBeUndefined();
-    expect(await adapter.sessionHeader('s1')).toBeUndefined();
+  it('capabilities 固定列出必需服务', () => {
+    const adapter = createHostAdapter(makeCtx());
+    expect(adapter.capabilities).toEqual(expect.arrayContaining([
+      'sessionPersistence.stat',
+      'workspaceRegistry',
+      'sessionQuery',
+      'sessionTitle.rename',
+    ]));
   });
 });
 
@@ -133,21 +124,12 @@ describe('会话归档（workspaceRegistry）', () => {
     expect(registry.archiveSession).toHaveBeenCalledWith('session-x', { stopActivity: true });
   });
 
-  it('archivedSessionIds 返回 Set，未挂载时为空集（不抛）', () => {
-    const mounted = createHostAdapter(makeCtx({ workspaceRegistry: makeRegistry() }));
-    expect([...mounted.archivedSessionIds()]).toEqual(['session-a']);
-
-    const bare = createHostAdapter(makeCtx({}));
-    expect(bare.archivedSessionIds().size).toBe(0);
-  });
-
-  it('宿主没有归档接口时返回 unavailable', async () => {
-    const adapter = createHostAdapter(makeCtx({ workspaceRegistry: makeRegistry({ archiveSession: undefined }) }));
-
-    const outcome = await adapter.archiveSession('session-x');
-
-    expect(outcome.ok).toBe(false);
-    expect(outcome.ok === false && outcome.reason).toBe('unavailable');
+  it('archivedSessionIds / pinnedSessionIds 返回 Set', () => {
+    const adapter = createHostAdapter(makeCtx({
+      workspaceRegistry: makeRegistry({ pinnedSessionIds: ['session-p'] }),
+    }));
+    expect([...adapter.archivedSessionIds()]).toEqual(['session-a']);
+    expect([...adapter.pinnedSessionIds()]).toEqual(['session-p']);
   });
 
   it('未知会话 → not-found（按错误名识别，不依赖 instanceof）', async () => {
@@ -185,23 +167,53 @@ describe('会话归档（workspaceRegistry）', () => {
     expect(outcome.ok === false && outcome.message).toContain('EIO');
   });
 
-  it('unarchiveSession 成功返回 ok，宿主缺失时 unavailable', async () => {
+  it('unarchiveSession 成功返回 ok', async () => {
     const registry = makeRegistry();
     const adapter = createHostAdapter(makeCtx({ workspaceRegistry: registry }));
     expect(await adapter.unarchiveSession('session-x')).toEqual({ ok: true });
     expect(registry.unarchiveSession).toHaveBeenCalledWith('session-x');
+  });
+});
 
-    const bare = createHostAdapter(makeCtx({ workspaceRegistry: makeRegistry({ unarchiveSession: undefined }) }));
-    const outcome = await bare.unarchiveSession('session-x');
-    expect(outcome.ok === false && outcome.reason).toBe('unavailable');
+describe('会话改名（sessionTitle）', () => {
+  const session = { id: 'session-x' };
+
+  it('把用户标题交给宿主，并回报宿主规范化后的标题', () => {
+    const sessionTitle = { rename: vi.fn(() => ({ title: '修登录' })) };
+    const adapter = createHostAdapter(makeCtx({ sessionTitle }));
+
+    expect(adapter.renameSession(session, '  修登录  ')).toEqual({ ok: true, title: '修登录' });
+    expect(sessionTitle.rename).toHaveBeenCalledWith(session, '  修登录  ');
   });
 
-  it('能力摘要里记录归档接口是否可用', () => {
-    const withArchive = createHostAdapter(makeCtx({ workspaceRegistry: makeRegistry() }));
-    expect(withArchive.capabilities.join('\n')).toContain('workspaceRegistry.archiveSession(可用');
+  it('标题被规范化成空 → invalid（按错误名识别，不依赖 instanceof）', () => {
+    const error = new Error('title is empty');
+    error.name = 'SessionTitleInvalidError';
+    const adapter = createHostAdapter(makeCtx({
+      sessionTitle: { rename: vi.fn(() => { throw error; }) },
+    }));
 
-    const withoutArchive = createHostAdapter(makeCtx({}));
-    expect(withoutArchive.capabilities.join('\n')).toContain('workspaceRegistry.archiveSession(不可用');
+    const outcome = adapter.renameSession(session, '   ');
+    expect(outcome.ok === false && outcome.reason).toBe('invalid');
+  });
+
+  it('会话已关闭 → not-live', () => {
+    const adapter = createHostAdapter(makeCtx({
+      sessionTitle: { rename: vi.fn(() => { throw new Error('session is not live'); }) },
+    }));
+
+    const outcome = adapter.renameSession(session, '新名字');
+    expect(outcome.ok === false && outcome.reason).toBe('not-live');
+  });
+
+  it('其它错误 → failed，并保留原始文案', () => {
+    const adapter = createHostAdapter(makeCtx({
+      sessionTitle: { rename: vi.fn(() => { throw new Error('EIO'); }) },
+    }));
+
+    const outcome = adapter.renameSession(session, '新名字');
+    expect(outcome.ok === false && outcome.reason).toBe('failed');
+    expect(outcome.ok === false && outcome.message).toContain('EIO');
   });
 });
 
@@ -255,22 +267,12 @@ describe('attachSessionToWorkspace', () => {
     expect(ws.setTitle).not.toHaveBeenCalled();
   });
 
-  it('workspaceRegistry 未挂载时静默降级（debug，不 warn）', async () => {
-    const logger = makeLogger();
-    const adapter = createHostAdapter(makeCtx({}), logger);
-
-    await expect(adapter.attachSessionToWorkspace('sess-1', '/proj')).resolves.toBeUndefined();
-    expect(logger.debug).toHaveBeenCalled();
-    expect(logger.warn).not.toHaveBeenCalled();
-  });
-
-  it('registry 无可用 create() 时静默降级', async () => {
+  it('registry 无 create() 时 warn 并跳过', async () => {
     const logger = makeLogger();
     const adapter = createHostAdapter(makeCtx({ workspaceRegistry: {} }), logger);
 
     await expect(adapter.attachSessionToWorkspace('sess-1', '/proj')).resolves.toBeUndefined();
-    expect(logger.debug).toHaveBeenCalled();
-    expect(logger.warn).not.toHaveBeenCalled();
+    expect(logger.warn).toHaveBeenCalled();
   });
 
   it('create() 失败时吞掉异常并 warn', async () => {

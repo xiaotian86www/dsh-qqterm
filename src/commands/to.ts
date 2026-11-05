@@ -3,15 +3,16 @@
  *
  * 目标必须是 live 或已经获取过的会话（普通消息 / `/sessions resume` / 之前的
  * `/to`）；冷会话拒绝，先 `/sessions resume`。命令不改 current：发完仍回到
- * 原来的会话，输出照样回 QQ（非 current 带 `[#短id]`）。
+ * 原来的会话，输出照样回 QQ（非 current 带来源行与回复链接）。
  *
  * 目标正在等 `ask_user_question` 时，文本必须走答案通道，不能当新 prompt
  * 排在问题后面——否则永远答不上。空文本进入「下一条消息作为回答」模式。
  */
 import type { CommandDeps, CategorizedCommand } from './types.ts';
 import { getScopePeer, shortSessionId } from '../shared/index.ts';
+import { sessionTargetLabel, sessionTitleOf } from '../transport/session-source.ts';
 import { resolveSessionTarget } from './sessions.ts';
-import type { WorkspaceGroup, WorkspaceSession } from '../session/index.ts';
+import type { SessionRecord, WorkspaceGroup, WorkspaceSession } from '../session/index.ts';
 
 const USAGE = [
   '/to <会话> <文本> 发消息；目标在等答案时作为回答',
@@ -67,11 +68,13 @@ export function toCommand({ manager, logger }: CommandDeps): CategorizedCommand 
 
       // 列表里没有（例如 live 但没有 cwd）时，允许直接用完整 id
       let sessionId: string;
+      let title: string | undefined;
       if (target) {
-        if (target.archived) {
-          return `⚠️ 该会话已归档: ${displayId(target.id)}\n先 /sessions unarchive ${displayId(target.id)}。`;
-        }
         sessionId = target.id;
+        title = target.title;
+        if (target.archived) {
+          return `⚠️ 该会话已归档: ${sessionTargetLabel(sessionId, title)}\n先 /sessions unarchive ${displayId(sessionId)}。`;
+        }
       } else {
         const candidate = targetArg.replace(/^#/, '');
         if (candidate.length < 4 || !manager.hasLiveSession(candidate)) {
@@ -79,6 +82,13 @@ export function toCommand({ manager, logger }: CommandDeps): CategorizedCommand 
         }
         sessionId = candidate;
       }
+
+      // 名字：列表里有就用列表的标题，否则从已获取会话的日志里捞一次
+      if (title === undefined) {
+        const record: SessionRecord | undefined = manager.findBySessionId(sessionId);
+        title = record === undefined ? undefined : sessionTitleOf(record);
+      }
+      const label = sessionTargetLabel(sessionId, title);
 
       const outcome = await manager.sendTo(
         scope,
@@ -92,23 +102,23 @@ export function toCommand({ manager, logger }: CommandDeps): CategorizedCommand 
       if (outcome.ok) {
         switch (outcome.kind) {
           case 'answered':
-            return `✅ 已回答 ${displayId(sessionId)}`;
+            return `✅ 已回答${label}`;
           case 'answer-mode':
-            return `💡 请发送回答（${displayId(sessionId)}）`;
+            return `💡 请发送回答: ${label}`;
           default:
-            return `✅ 已发送到 ${displayId(sessionId)}`;
+            return `✅ 已发送到${label}`;
         }
       }
 
       switch (outcome.reason) {
         case 'not-running':
-          return `⚠️ 会话未运行: ${displayId(sessionId)}\n先 /sessions resume ${displayId(sessionId)}，或在 Web 打开它。`;
+          return `⚠️ 会话未运行: ${label}\n先 /sessions resume ${displayId(sessionId)}，或在 Web 打开它。`;
         case 'forbidden':
-          return `⚠️ 这个会话属于另一个用户: ${displayId(sessionId)}`;
+          return `⚠️ 这个会话属于另一个用户: ${label}`;
         case 'empty':
-          return `⚠️ 缺少文本 · /to ${displayId(sessionId)} <文本>`;
+          return `⚠️ 缺少文本: ${label}\n/to ${displayId(sessionId)} <文本>`;
         default:
-          return `❌ 发送失败: ${outcome.message ?? '未知错误'}`;
+          return `❌ 发送失败: ${label}\n${outcome.message ?? '未知错误'}`;
       }
     },
   };

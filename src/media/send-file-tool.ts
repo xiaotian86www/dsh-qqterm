@@ -48,7 +48,7 @@ function parseTarget(input: string): ReplyTarget | undefined {
   return { scope, targetId };
 }
 
-/** 注册 qqbot_send_file 工具（tools 服务缺失时优雅降级，不阻断插件启动） */
+/** 注册 qqbot_send_file 工具 */
 export function registerSendFileTool(
   ctx: Context,
   bot: MediaSenderLike,
@@ -56,11 +56,7 @@ export function registerSendFileTool(
   config: ImQQBotConfig,
   logger: Logger,
 ): void {
-  const tools = ctx.get('tools') as ToolsRegistryLike | undefined;
-  if (!tools?.register) {
-    logger.warn('im-qqbot: tools 服务不可用，qqbot_send_file 工具未注册');
-    return;
-  }
+  const tools = (ctx as unknown as { tools: ToolsRegistryLike }).tools;
 
   const definition = {
     name: SEND_FILE_TOOL_NAME,

@@ -46,8 +46,42 @@ const corrupt = (id: string): Error => new Error(`EIO: corrupt session log for "
  * 存在则返回快照。替身必须跟真实契约一致——此前替身带了宿主根本没有的
  * `load()`，用例全绿但线上直接 TypeError。
  */
+/** inject 保证存在的宿主服务：测试底座一并提供 */
+function hostCtxServices() {
+  return {
+    llm: {
+      listProviders: () => [{ id: 'p', name: 'p' }],
+      listModels: async () => [],
+      resolveModelInfo: async () => ({}),
+    },
+    sessionProjections: { stateOf: () => undefined },
+    sessionController: {
+      selectModel: async (request: { provider: string; model: string; reasoningEffort?: string }) => ({
+        selected: {
+          provider: request.provider,
+          model: request.model,
+          ...(request.reasoningEffort !== undefined ? { reasoningEffort: request.reasoningEffort } : {}),
+        },
+      }),
+    },
+    agentDefaultModel: { currentSelection: () => ({ provider: 'p', model: 'm' }) },
+    sessionPersistence: { stat: async () => undefined },
+    sessionQuery: { listSessions: async () => [], readTitleSnapshots: async () => [] },
+    sessionTitle: { rename: () => ({}) },
+    workspaceRegistry: {
+      list: () => [],
+      create: async () => ({ path: '/', attachSession: async () => {} }),
+    },
+    agentPresets: {},
+    permissionPresets: { names: [], optionOf: () => undefined },
+    compaction: {},
+  };
+}
+
 function persistenceCtx(stat: (id: string) => Promise<{ header?: { agentPreset?: string } } | undefined>): Context {
   return {
+    ...hostCtxServices(),
+    sessionPersistence: { stat },
     get: (name: string) => (name === 'sessionPersistence' ? { stat } : undefined),
     on: vi.fn(),
   } as unknown as Context;
@@ -115,7 +149,7 @@ const managers: Array<InstanceType<typeof SessionManager>> = [];
 
 /** 无任何宿主服务的 ctx（无 sessionPersistence，存在性无法求证） */
 function emptyCtx(): Context {
-  return { get: () => undefined, on: vi.fn() } as unknown as Context;
+  return { ...hostCtxServices(), get: () => undefined, on: vi.fn() } as unknown as Context;
 }
 
 /** 默认替身：磁盘上没有任何会话（stat 一律 undefined） */
@@ -201,6 +235,11 @@ describe('getOrCreate — 对照组（主路径行为正确）', () => {
       list: vi.fn(async () => []),
     };
     const ctx = {
+      ...hostCtxServices(),
+      agentPresets: presets,
+      sessionPersistence: {
+        stat: async (id: string) => (id === 'session-current' ? { header: { agentPreset: 'locked-preset' } } : undefined),
+      },
       get: (name: string) => {
         if (name === 'sessionPersistence') {
           return { stat: async (id: string) => (id === 'session-current' ? { header: { agentPreset: 'locked-preset' } } : undefined) };
@@ -250,32 +289,6 @@ describe('getOrCreate — E1 resume 失败按会话是否存在分流', () => {
     const { registry } = createRegistry(async ({ resumeSessionId }) => { throw corrupt(resumeSessionId); });
 
     const record = await createManager(registry).getOrCreate('c2c', PEER, PEER, REPLY);
-
-    expect(record.sessionId).toMatch(MINTED);
-    expect(createdIds(registry)).toEqual([record.sessionId]);
-  });
-
-  it('E1-5 宿主无 sessionPersistence.stat → 无求证手段，按 resume 结果创建并留痕', async () => {
-    const { registry } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
-    const logger = createLogger();
-
-    const record = await createManagerWithCtx(registry, emptyCtx(), logger).getOrCreate('c2c', PEER, PEER, REPLY);
-
-    expect(record.sessionId).toMatch(MINTED);
-    expect(createdIds(registry)).toEqual([record.sessionId]);
-    expect(allLogText(logger)).toContain('host lacks sessionPersistence.stat');
-  });
-
-  it('E1-6 宿主 persistence 形态不含 stat → 不卡住全新会话的创建', async () => {
-    // 回归：此前按不存在的 load() 求证，TypeError 被当成「后端故障」→ 拒绝创建，
-    // 全新用户的第一条消息直接收到「处理消息时出现异常」
-    const { registry } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
-    const legacyShape = {
-      get: (name: string) => (name === 'sessionPersistence' ? { open: async () => ({}) } : undefined),
-      on: vi.fn(),
-    } as unknown as Context;
-
-    const record = await createManagerWithCtx(registry, legacyShape).getOrCreate('c2c', PEER, PEER, REPLY);
 
     expect(record.sessionId).toMatch(MINTED);
     expect(createdIds(registry)).toEqual([record.sessionId]);
@@ -362,6 +375,8 @@ describe('getOrCreate — 会话创建/恢复后挂载到对应工作区', () =>
   /** 带 workspaceRegistry 的 ctx（sessionPersistence 缺省为「磁盘无会话」） */
   function workspaceCtx(workspaceRegistry: unknown): Context {
     return {
+      ...hostCtxServices(),
+      workspaceRegistry,
       get: (name: string) => {
         if (name === 'sessionPersistence') return { stat: async () => undefined };
         if (name === 'workspaceRegistry') return workspaceRegistry;
@@ -411,6 +426,8 @@ describe('切换类操作 — 可重入', () => {
       list: vi.fn(async () => []),
     };
     return {
+      ...hostCtxServices(),
+      agentPresets: presets,
       get: (name: string) => {
         if (name === 'sessionPersistence') return { stat: async () => undefined };
         return name === 'agentPresets' ? presets : undefined;
@@ -498,5 +515,192 @@ describe('聊天会话（全 bot 一个）', () => {
     const after = await manager.getOrCreate('c2c', PEER, PEER, REPLY);
     expect(after.sessionId).toBe('session-b');
     expect(new PrefsStore().getSessionId(KEY)).toBe('session-b');
+  });
+});
+
+const EFFORTS = [
+  { id: 'off', name: 'Off' },
+  { id: 'low', name: 'Low' },
+  { id: 'high', name: 'High' },
+  { id: 'max', name: 'Max' },
+];
+
+type HostSelectionState = { provider: string; model: string; reasoningEffort?: string };
+
+interface EffortHost {
+  ctx: Context;
+  state: { pending: HostSelectionState | null; lastUsed: HostSelectionState | null; saved: HostSelectionState };
+  selectModel: ReturnType<typeof vi.fn>;
+}
+
+/**
+ * ctx 替身：llm 元数据 + 宿主的会话选择 / 部署默认选择
+ *
+ * - `sessionController.selectModel` 模拟宿主：会话下一轮生效 + 保存默认
+ * - `sessionProjections.stateOf` 给出 modelSelection 的 pending / lastUsed
+ * - `agentDefaultModel.currentSelection` 给出部署默认选择
+ */
+function effortCtx(
+  reasoning: Record<string, { efforts: typeof EFFORTS; defaultEffort?: string }>,
+): EffortHost {
+  const state = {
+    pending: null as HostSelectionState | null,
+    lastUsed: null as HostSelectionState | null,
+    saved: { provider: 'p', model: 'm' } as HostSelectionState,
+  };
+  const selectModel = vi.fn(async (request: HostSelectionState & { sessionId: string }) => {
+    const selected: HostSelectionState = {
+      provider: request.provider,
+      model: request.model,
+      ...(request.reasoningEffort !== undefined ? { reasoningEffort: request.reasoningEffort } : {}),
+    };
+    state.pending = selected;
+    state.saved = selected;
+    return { selected };
+  });
+  const services: Record<string, unknown> = {
+    ...hostCtxServices(),
+    llm: {
+      listProviders: async () => [{ id: 'p', name: 'p' }],
+      listModels: async () => [],
+      resolveModelInfo: async (providerId: string, model: string) => {
+        const info = reasoning[`${providerId}/${model}`];
+        return info ? { reasoning: info } : {};
+      },
+    },
+    sessionProjections: { stateOf: () => state },
+    agentDefaultModel: { currentSelection: () => state.saved },
+    sessionController: { selectModel },
+  };
+  const ctx = {
+    ...services,
+    get: (name: string) => services[name],
+    on: vi.fn(),
+  } as unknown as Context;
+  return { ctx, state, selectModel };
+}
+
+/** registry.create 最近一次收到的 agentOptions */
+function lastAgentOptions(registry: { create: { mock: { calls: unknown[][] } } }): Record<string, unknown> | undefined {
+  const call = registry.create.mock.calls.at(-1)?.[0] as { agentOptions?: Record<string, unknown> } | undefined;
+  return call?.agentOptions;
+}
+
+describe('思考强度 — 宿主选择与重建', () => {
+  const REASONING = { 'p/m': { efforts: EFFORTS, defaultEffort: 'high' } };
+
+  it('未显式设置时档位跟随模型默认，create 只带路由', async () => {
+    const { registry } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
+    const host = effortCtx(REASONING);
+    const manager = createManagerWithCtx(registry, host.ctx);
+
+    await manager.getOrCreate('c2c', PEER, PEER, REPLY);
+
+    expect(lastAgentOptions(registry)).toEqual({ provider: 'p', model: 'm' });
+    expect(await manager.getEffortView('c2c', PEER)).toMatchObject({
+      defaulted: true,
+      current: { id: 'high', name: 'High' },
+    });
+  });
+
+  it('显式选中模型默认档位视为未变化，不写宿主', async () => {
+    const { registry } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
+    const host = effortCtx(REASONING);
+    const manager = createManagerWithCtx(registry, host.ctx);
+    await manager.getOrCreate('c2c', PEER, PEER, REPLY);
+
+    expect(await manager.selectEffort('c2c', PEER, 'high')).toEqual({
+      ok: true,
+      effort: 'high',
+      unchanged: true,
+    });
+    expect(host.selectModel).not.toHaveBeenCalled();
+  });
+
+  it('切换档位走宿主 selectModel，当前会话下一轮生效、不重建', async () => {
+    const { registry } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
+    const host = effortCtx(REASONING);
+    const manager = createManagerWithCtx(registry, host.ctx);
+    await manager.getOrCreate('c2c', PEER, PEER, REPLY);
+
+    const outcome = await manager.selectEffort('c2c', PEER, 'max');
+
+    expect(outcome).toEqual({ ok: true, effort: 'max' });
+    expect(host.selectModel).toHaveBeenCalledWith({
+      sessionId: expect.any(String),
+      provider: 'p',
+      model: 'm',
+      reasoningEffort: 'max',
+    });
+    expect(await manager.getEffortView('c2c', PEER)).toMatchObject({
+      defaulted: false,
+      current: { id: 'max', name: 'Max' },
+    });
+
+    // 宿主下一轮请求嗅探的是 model/selection，不 fork：仍用同一个 agent
+    await manager.getOrCreate('c2c', PEER, PEER, REPLY);
+    expect(registry.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('恢复默认交回模型默认档位，宿主选择里不再带 reasoningEffort', async () => {
+    const { registry } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
+    const host = effortCtx(REASONING);
+    const manager = createManagerWithCtx(registry, host.ctx);
+    await manager.getOrCreate('c2c', PEER, PEER, REPLY);
+    await manager.selectEffort('c2c', PEER, 'max');
+
+    const outcome = await manager.selectEffort('c2c', PEER, undefined);
+
+    expect(outcome).toMatchObject({ ok: true, effort: 'high' });
+    expect(host.selectModel).toHaveBeenLastCalledWith({
+      sessionId: expect.any(String),
+      provider: 'p',
+      model: 'm',
+    });
+    expect(await manager.getEffortView('c2c', PEER)).toMatchObject({
+      defaulted: true,
+      current: { id: 'high' },
+    });
+  });
+
+  it('换成不支持思考强度的模型时不显示档位，重建只带路由', async () => {
+    const { registry } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
+    const host = effortCtx(REASONING);
+    const manager = createManagerWithCtx(registry, host.ctx);
+    await manager.getOrCreate('c2c', PEER, PEER, REPLY);
+    await manager.selectEffort('c2c', PEER, 'max');
+
+    await manager.setModelOverride('c2c', PEER, { provider: 'p', model: 'plain' });
+
+    expect(await manager.getEffortView('c2c', PEER)).toEqual({ defaulted: true });
+
+    await manager.getOrCreate('c2c', PEER, PEER, REPLY);
+    expect(lastAgentOptions(registry)).toEqual({ provider: 'p', model: 'plain' });
+  });
+
+  it('未知档位与不支持思考强度的模型都拒绝写入', async () => {
+    const { registry } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
+    const host = effortCtx(REASONING);
+    const manager = createManagerWithCtx(registry, host.ctx);
+    await manager.getOrCreate('c2c', PEER, PEER, REPLY);
+
+    expect(await manager.selectEffort('c2c', PEER, 'turbo')).toMatchObject({
+      ok: false,
+      reason: 'unknown-effort',
+    });
+    expect(host.selectModel).not.toHaveBeenCalled();
+
+    await manager.setModelOverride('c2c', PEER, { provider: 'p', model: 'plain' });
+    expect(await manager.selectEffort('c2c', PEER, 'high')).toEqual({ ok: false, reason: 'unsupported' });
+  });
+
+  it('没有会话时拒绝切换，不写宿主', async () => {
+    const { registry } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
+    const host = effortCtx(REASONING);
+    const manager = createManagerWithCtx(registry, host.ctx);
+
+    expect(await manager.selectEffort('c2c', PEER, 'max')).toEqual({ ok: false, reason: 'no' });
+    expect(host.selectModel).not.toHaveBeenCalled();
+    expect(registry.create).not.toHaveBeenCalled();
   });
 });

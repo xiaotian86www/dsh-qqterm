@@ -45,7 +45,7 @@ function entry(over: Partial<WorkspaceSession> = {}): WorkspaceSession {
 
 type ManagerStub = Partial<Record<
   'listWorkspaceSessions' | 'listHeldSessions' | 'listWorkspaceGroups' | 'currentWorkspaceInfo'
-  | 'currentSessionId' | 'switchSession' | 'archiveSession' | 'unarchiveSession' | 'directoryForAgent',
+  | 'currentSessionId' | 'switchSession' | 'renameSession' | 'archiveSession' | 'unarchiveSession' | 'directoryForAgent',
   unknown
 >>;
 
@@ -69,6 +69,7 @@ function makeManager(over: ManagerStub = {}) {
     currentWorkspaceInfo: vi.fn(async () => ({ title: 'repo', path: '/repo', missing: false })),
     currentSessionId: vi.fn(() => undefined),
     switchSession: vi.fn(async () => ({ ok: true })),
+    renameSession: vi.fn(() => ({ ok: true, title: '改好的名字' })),
     archiveSession: vi.fn(async () => ({ ok: true })),
     unarchiveSession: vi.fn(async () => ({ ok: true })),
     directoryForAgent: vi.fn(() => undefined),
@@ -154,15 +155,25 @@ describe('resolveSessionTarget', () => {
 });
 
 describe('/sessions 持有视图', () => {
-  it('默认只列持有会话：状态、当前项与序号', async () => {
+  it('默认只列持有会话：按工作区分组，组内带状态与序号', async () => {
     const manager = makeManager({
       listHeldSessions: vi.fn(async () => [
-        entry({ id: 'session-cccc1111', current: true, held: true, running: true, title: '当前会话' }),
+        entry({
+          id: 'session-cccc1111',
+          current: true,
+          held: true,
+          running: true,
+          title: '当前会话',
+          workspace: 'repo',
+          workspacePath: '/repo',
+        }),
         entry({
           id: 'session-dddd2222',
           held: true,
           title: '旧会话',
           createdAt: Date.now() - 3 * 86_400_000,
+          workspace: 'repo',
+          workspacePath: '/repo',
         }),
       ]),
       currentSessionId: vi.fn(() => 'session-cccc1111'),
@@ -171,6 +182,8 @@ describe('/sessions 持有视图', () => {
     const text = await run(manager, '');
 
     expect(text).toContain('### 🗂 持有会话（2 个）');
+    expect(text).toContain('**repo** · `/repo`');
+    expect(text).not.toContain('未分组');
     expect(text).toContain('1. #cccc1111 · 当前会话 · 生成中');
     expect(text).toContain('2. #dddd2222 · 旧会话 · 空闲');
     expect(text).toMatch(/<qqbot-cmd-input text="\/sessions resume #cccc1111" show="1\. #cccc1111 · 当前会话 · 生成中 · [^"]* ✅"\/>/);
@@ -193,17 +206,48 @@ describe('/sessions 持有视图', () => {
     expect(text).not.toContain(' ✅');
   });
 
-  it('跨工作区的持有项带工作区后缀', async () => {
+  it('跨工作区的持有项按工作区分组，序号跨组连续', async () => {
     const manager = makeManager({
       listHeldSessions: vi.fn(async () => [
-        entry({ held: true, title: '本区会话' }),
-        entry({ held: true, title: '别的项目', workspace: 'docs' }),
+        entry({
+          id: 'session-aaaa1111',
+          held: true,
+          title: '本区会话',
+          workspace: 'repo',
+          workspacePath: '/repo',
+        }),
+        entry({
+          id: 'session-bbbb2222',
+          held: true,
+          title: '别的项目',
+          workspace: 'docs',
+          workspacePath: '/docs',
+        }),
       ]),
     });
     const text = await run(manager, '');
 
-    expect(text).toContain('本区会话');
-    expect(text).toContain('· docs');
+    // 组标题与 /sessions all 同一写法，组之间空行；行内不再重复工作区后缀
+    expect(text).toContain('**repo** · `/repo`');
+    expect(text).toContain('**docs** · `/docs`');
+    expect(text).toContain('show="1. #aaaa1111 · 本区会话 · 空闲');
+    expect(text).toContain('show="2. #bbbb2222 · 别的项目 · 空闲');
+    expect(text.indexOf('**repo**')).toBeLessThan(text.indexOf('**docs**'));
+  });
+
+  it('工作区目录不存在时组标题补一行警示', async () => {
+    const manager = makeManager({
+      listHeldSessions: vi.fn(async () => [entry({
+        held: true,
+        title: '旧目录里的会话',
+        workspace: 'gone',
+        workspacePath: '/gone',
+        workspaceMissing: true,
+      })]),
+    });
+    const text = await run(manager, '');
+
+    expect(text).toContain('**gone** · `/gone`\n⚠️ 目录不存在');
   });
 
   it('当前项在别的页时只补当前行，不出现恢复入口', async () => {
@@ -665,6 +709,73 @@ describe('/sessions resume', () => {
   });
 });
 
+describe('/sessions rename', () => {
+  it('序号按持有列表解析，标题原样交给 manager', async () => {
+    const manager = makeManager({
+      listHeldSessions: vi.fn(async () => [entry({ id: 'session-held01', held: true })]),
+    });
+
+    const text = await run(manager, 'rename 1 新的 会话名');
+
+    expect(manager.renameSession).toHaveBeenCalledWith('session-held01', '新的 会话名');
+    expect(text).toBe('✅ 会话名已改为「改好的名字」 · `#held01`');
+  });
+
+  it('id 可以从全量清单解析（目标还没打开时提示先恢复）', async () => {
+    const id = 'session-cold1234';
+    const manager = makeManager({
+      listHeldSessions: vi.fn(async () => []),
+      listWorkspaceGroups: vi.fn(async () => [{
+        id: 'ws-1',
+        title: 'repo',
+        path: '/repo',
+        missing: false,
+        sessions: [entry({ id })],
+      }]),
+      renameSession: vi.fn(() => ({ ok: false, reason: 'no-session' })),
+    });
+
+    const text = await run(manager, `rename ${id} 新名字`);
+
+    expect(manager.renameSession).toHaveBeenCalledWith(id, '新名字');
+    expect(text).toContain('这个会话还没打开');
+    expect(text).toContain(`/sessions resume #cold1234`);
+  });
+
+  it('缺目标 / 缺新标题各给一行用法', async () => {
+    const manager = makeManager();
+
+    const missingTarget = await run(manager, 'rename');
+    expect(missingTarget).toContain('缺少目标');
+    expect(missingTarget.split('\n')).toHaveLength(1);
+
+    const missingTitle = await run(manager, 'rename 1');
+    expect(missingTitle).toContain('缺少新标题');
+    expect(missingTitle.split('\n')).toHaveLength(1);
+    expect(manager.renameSession).not.toHaveBeenCalled();
+  });
+
+  it('目标解析失败时给返回列表的链接', async () => {
+    const text = await run(makeManager(), 'rename 99 新名字');
+
+    expect(text.startsWith('⚠️ 序号 99 超出范围')).toBe(true);
+    expect(text).toContain('查看会话');
+  });
+
+  it('标题为空 / 已关闭 / 其它失败各有文案', async () => {
+    const invalid = makeManager({ renameSession: vi.fn(() => ({ ok: false, reason: 'invalid' })) });
+    expect(await run(invalid, 'rename 1 x')).toBe('⚠️ 新标题不能为空');
+
+    const closed = makeManager({ renameSession: vi.fn(() => ({ ok: false, reason: 'not-live' })) });
+    expect(await run(closed, 'rename 1 x')).toContain('这个会话已关闭');
+
+    const failed = makeManager({
+      renameSession: vi.fn(() => ({ ok: false, reason: 'failed', message: 'EIO' })),
+    });
+    expect(await run(failed, 'rename 1 x')).toBe('❌ 改名失败: EIO');
+  });
+});
+
 describe('/sessions archive', () => {
   it('序号按持有列表解析，归档的是持有会话', async () => {
     const heldId = 'session-held01';
@@ -784,19 +895,6 @@ describe('/sessions archive', () => {
     expect(text.startsWith('⚠️ 没有可归档的会话')).toBe(true);
     expect(text).toContain('本来就在归档里');
     expect(manager.archiveSession).not.toHaveBeenCalled();
-  });
-
-  it('宿主没有归档接口时明确说明（不静默失败）', async () => {
-    const manager = makeManager({
-      archiveSession: vi.fn(async () => ({
-        ok: false,
-        reason: 'unavailable',
-        message: '当前 profile 没装会话归档接口（web / desktop 自带）',
-      })),
-    });
-    const text = await run(manager, 'archive 1');
-    expect(text).toContain('归档失败');
-    expect(text).toContain('归档接口');
   });
 
   it('会话仍在运行时如实报告', async () => {

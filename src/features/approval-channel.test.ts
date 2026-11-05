@@ -142,6 +142,25 @@ describe('buildApprovalText', () => {
     expect(text).toContain('ls -la');
     expect(text).toContain('用户要求列出文件');
   });
+
+  it('非当前会话：首行标来源（id + 标题），不再塞 [#id]', () => {
+    const text = buildApprovalText(makeRequest({ toolName: 'bash' }), 'ls', {
+      sessionId: 'session-04de1556-9c1f-4d6a-9b0e-1f2a3b4c5d6e',
+      isCurrent: false,
+      title: '修登录',
+    });
+    expect(text.startsWith('> `#04de1556` · 修登录\n\n')).toBe(true);
+    expect(text).toContain('🔐 **执行审批**');
+    expect(text).not.toContain('[#');
+  });
+
+  it('当前会话不标来源行', () => {
+    const text = buildApprovalText(makeRequest({ toolName: 'bash' }), 'ls', {
+      sessionId: 'session-04de1556',
+      isCurrent: true,
+    });
+    expect(text.startsWith('> `#')).toBe(false);
+  });
 });
 
 describe('ApprovalChannel.install', () => {

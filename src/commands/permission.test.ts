@@ -103,15 +103,15 @@ describe('/permission（查看）', () => {
     expect(text).not.toContain('立即生效');
   });
 
-  it('取不到当前值（宿主无服务）时不显示当前行', async () => {
+  it('取不到当前值时不显示当前行', async () => {
     const text = await run(makeManager({ current: undefined }));
     expect(text).not.toContain('当前:');
     expect(text).toContain('### 🛡️ 权限预设');
   });
 
-  it('宿主没有 permissionPresets 服务时如实报不可用', async () => {
+  it('部署没有配置权限预设时如实说没有', async () => {
     const text = await run(makeManager({ presets: [] }));
-    expect(text).toContain('permissionPresets 服务未注入');
+    expect(text).toBe('⚠️ 当前部署没有权限预设');
   });
 });
 

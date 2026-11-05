@@ -51,7 +51,7 @@ export function permissionCommand({ manager, config, logger }: CommandDeps): Cat
 
       const entries = manager.listPermissionPresets();
       if (entries.length === 0) {
-        return '⚠️ 当前部署不支持权限预设（permissionPresets 服务未注入）';
+        return '⚠️ 当前部署没有权限预设';
       }
 
       const current = manager.getPermissionPreset(scope, peerId);
@@ -81,8 +81,6 @@ export function permissionCommand({ manager, config, logger }: CommandDeps): Cat
 
       if (!outcome.ok) {
         switch (outcome.reason) {
-          case 'unavailable':
-            return '⚠️ 当前部署不支持权限预设（permissionPresets 服务未注入）';
           case 'unknown-preset':
             return `⚠️ 未知权限预设: ${target}\n可用: ${entries.map((entry) => entry.id).join(', ')}`;
           case 'no-session':

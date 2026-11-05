@@ -2,7 +2,9 @@
  * 工具调用结果 → Markdown 格式化
  *
  * 适配 QQ 消息通道：优先用工具自定义的 presentResult 视图，
- * fallback 到 raw text。错误始终展示，成功结果按 config 开关。
+ * fallback 到 raw text。成功与失败都按 config 的 showToolResults 开关
+ * （开关在 outbound 层判定，本模块只负责把失败写清楚：哪个工具、对什么、
+ * 为什么失败）。
  */
 
 /** dsh-tools 主机平面注册表（presentResult 能力） */
@@ -30,6 +32,9 @@ type ToolResultView =
   | { card: 'read'; title?: string; path?: string; content?: ReadonlyArray<{ type: string; text?: string }> };
 
 const RESULT_PREVIEW_LIMIT = 1500;
+/** 失败消息里「目标」与「原因」的展示上限 */
+const ERROR_TARGET_LIMIT = 80;
+const ERROR_DETAIL_LIMIT = 200;
 
 /**
  * 将工具调用结果格式化为 Markdown 文本
@@ -43,9 +48,9 @@ export function formatToolResult(
   toolsRegistry: ToolsRegistryLike | undefined,
   agent: unknown,
 ): string | null {
-  // 1. 错误优先：始终展示
+  // 1. 错误优先：交代哪个工具、对什么、为什么失败
   if (data.error) {
-    return `❌ 工具 \`${name}\` 执行失败\n\`${data.error.name}: ${data.error.code}\``;
+    return formatError(name, rawArgs, data, data.error);
   }
 
   // 2. 尝试工具自定义视图（presentResult）
@@ -61,6 +66,59 @@ export function formatToolResult(
   if (!result) return null;
 
   return `🔧 \`${name}\` 完成\n${truncate(result)}`;
+}
+
+/**
+ * 失败结果：首行「哪个工具对什么失败」，次行给错误码与原始原因。
+ *
+ * 只有 `❌ 工具 x 执行失败` 一行时，用户看不出是哪次操作、为什么失败，
+ * 所以补上调用参数里的操作对象（文件 / 命令 / URL）与工具结果正文里的原因。
+ */
+function formatError(
+  name: string,
+  rawArgs: string,
+  data: ToolResultData,
+  error: { name: string; code: string },
+): string {
+  const target = errorTarget(rawArgs);
+  const head = target === undefined
+    ? `❌ 工具 \`${name}\` 执行失败`
+    : `❌ 工具 \`${name}\` 执行失败: \`${target}\``;
+  const code = `\`${error.name}: ${error.code}\``;
+  const detail = errorDetail(data);
+  return detail === '' ? `${head}\n原因: ${code}` : `${head}\n原因: ${code} · ${detail}`;
+}
+
+/** 失败工具的操作对象：文件路径 / 命令 / URL 取第一个可用参数 */
+const TARGET_ARG_KEYS = ['file_path', 'path', 'notebook_path', 'command', 'url', 'pattern', 'query'] as const;
+
+function errorTarget(rawArgs: string): string | undefined {
+  let args: unknown;
+  try {
+    args = JSON.parse(rawArgs);
+  } catch {
+    return undefined;
+  }
+  if (typeof args !== 'object' || args === null) return undefined;
+  for (const key of TARGET_ARG_KEYS) {
+    const value = (args as Record<string, unknown>)[key];
+    if (typeof value === 'string' && value.trim() !== '') return inline(value.trim(), ERROR_TARGET_LIMIT);
+  }
+  return undefined;
+}
+
+/** 失败原因：工具结果正文（`Error: …`）去掉前缀后压成一行 */
+function errorDetail(data: ToolResultData): string {
+  const block = data.message.content[0];
+  const raw = block !== undefined && block.type === 'tool-result' ? textOf(block.content) : '';
+  const text = raw.replace(/^Error:\s*/, '').replace(/\s+/g, ' ').trim();
+  return text === '' ? '' : inline(text, ERROR_DETAIL_LIMIT);
+}
+
+/** 单行化 + 截断 + 去掉会破坏 markdown 的反引号 */
+function inline(text: string, limit: number): string {
+  const oneLine = text.replace(/[\r\n]+/g, ' ').replace(/`/g, "'").trim();
+  return oneLine.length <= limit ? oneLine : `${oneLine.slice(0, limit)}…`;
 }
 
 /** 调用工具自定义 presentResult，失败/不可用时返回 undefined */

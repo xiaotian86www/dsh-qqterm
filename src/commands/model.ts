@@ -4,6 +4,7 @@
 import type { CommandDeps, CategorizedCommand } from './types.ts';
 import { commandAllowlistAuth } from './auth.ts';
 import { getScopePeer, sendMarkdownChunked } from '../shared/index.ts';
+import { effortLabel } from '../model/effort-label.ts';
 
 export function modelCommand({ manager, config, logger }: CommandDeps): CategorizedCommand {
   return {
@@ -36,6 +37,14 @@ export function modelCommand({ manager, config, logger }: CommandDeps): Categori
           '',
           `**当前模型**: ${currentDisplay}`,
         ];
+
+        // 思考强度是模型配置的一部分：有档位才显示，免得给不支持思考的模型挂一行噪声
+        const effort = await manager.getEffortView(scope, peerId);
+        if (effort.current) {
+          lines.push(
+            `**思考强度**: ${effortLabel(effort.current)}${effort.defaulted ? '（默认）' : ''}`,
+          );
+        }
 
         if (models.length > 0) {
           lines.push('', '**可用模型（点击切换）:**');

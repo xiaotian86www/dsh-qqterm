@@ -8,8 +8,9 @@
  * 两者都对应底层 dsh agent 能力，分类为 agent（通用能力）。
  */
 import type { CommandDeps, CategorizedCommand } from './types.ts';
+import type { ChangeWorkspaceOutcome } from '../session/index.ts';
 import { getScopePeer } from '../shared/index.ts';
-import { describeChangeFailure } from './workspace.ts';
+import { shortId } from './sessions.ts';
 
 /** 千分位（与 /status 一致，避免不同环境的本地化分隔符） */
 function num(n: number): string {
@@ -20,7 +21,7 @@ function num(n: number): string {
  * /new — 开始新会话
  *
  * 不带参数：在当前工作区开新会话（旧会话继续在后台跑，与 `/reset` 不同）。
- * 带参数：在指定工作区开新会话，等价于 `/new` 再 `/workspace <工作区>`。
+ * 带参数：在指定工作区开新会话。
  *
  * 参数先解析再动会话：路径写错不该把当前会话弄丢。换工作区等于换 agent 能读写
  * 的目录，所以带参数时要求白名单（`access.c2cAllow`），不带参数的 `/new` 不受
@@ -37,7 +38,7 @@ export function newCommand({ manager, config }: CommandDeps): CategorizedCommand
       '/new <工作区|路径>',
       '',
       '不带参数：在当前工作区开新会话（上下文清空）。',
-      '带参数：在指定工作区开新会话，等价于 `/new` 再 `/workspace <工作区>`。',
+      '带参数：在指定工作区开新会话。',
       '工作区认标题、目录名（大小写不敏感，支持唯一前缀）或绝对路径。',
     ].join('\n'),
     handler: async (cmdCtx) => {
@@ -50,7 +51,7 @@ export function newCommand({ manager, config }: CommandDeps): CategorizedCommand
         return '✅ 已开启新会话';
       }
 
-      // 带参数 = 换工作区（= 换 agent 能读写的目录）：与 /workspace 同一权限面
+      // 带参数 = 换工作区（= 换 agent 能读写的目录）：只允许私聊 + 白名单
       const senderId = cmdCtx.message.senderId;
       const allowed = scope === 'c2c'
         && senderId !== undefined
@@ -69,6 +70,28 @@ export function newCommand({ manager, config }: CommandDeps): CategorizedCommand
       return `✅ 已开启新会话\n工作区: ${changed.title} · ${changed.path}`;
     },
   };
+}
+
+/** 换工作区失败文案（`/new <工作区>` 用，措辞与成功结果的第二行对应） */
+function describeChangeFailure(outcome: ChangeWorkspaceOutcome): string {
+  if (outcome.ok) return '';
+  switch (outcome.reason) {
+    case 'has-session': {
+      const id = outcome.sessionId ? `（\`#${shortId(outcome.sessionId)}\`）` : '';
+      return `⚠️ 这个聊天已经有会话${id}，先 \`/new\` 再换工作区。`;
+    }
+    case 'missing':
+      return `⚠️ 目录不存在: \`${outcome.path}\`\n换一个存在的目录，或直接给绝对路径。`;
+    case 'ambiguous':
+      return [
+        `⚠️ 有 ${outcome.matches.length} 个工作区匹配: ${outcome.matches.join('、')}`,
+        '用绝对路径: `/new D:\\项目\\目录`',
+      ].join('\n');
+    case 'not-found':
+      return `⚠️ 没有叫 \`${outcome.arg}\` 的工作区。\`/sessions all\` 看全部工作区`;
+    default:
+      return '⚠️ 工作区切换失败。';
+  }
 }
 
 /**
@@ -140,8 +163,6 @@ export function compactCommand({ manager }: CommandDeps): CategorizedCommand {
           return '⚠️ 当前无活跃会话';
         case 'busy':
           return '⚠️ 正在生成中，无法压缩';
-        case 'unavailable':
-          return '⚠️ 压缩能力不可用（当前会话的 agent preset 未加载 compaction 服务）';
         default:
           return `❌ 压缩失败: ${outcome.message ?? '未知错误'}`;
       }

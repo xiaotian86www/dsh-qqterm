@@ -37,8 +37,7 @@ export interface HostAdapter {
   /**
    * 将会话挂载到其 cwd 对应的工作区（侧边栏可见性）。
    *
-   * 全部 fail-soft：workspaceRegistry 未挂载（如 headless profile）→ debug；
-   * create/attach 失败或宿主接口演进（无 attachSession）→ warn，绝不抛出。
+   * 全部 fail-soft：create/attach 失败或宿主接口演进（无 attachSession）→ warn，绝不抛出。
    * `attachSession` 幂等，创建与恢复路径都可安全调用；升级后老会话自动补挂。
    *
    * 不传标题：工作区显示名交给宿主按目录名生成（一般规律，不再硬编码 'QQBot'）。
@@ -62,6 +61,14 @@ export interface HostAdapter {
    */
   sessionTitles(ids: readonly string[]): Promise<Map<string, string>>;
   /**
+   * 修改一个**仍然存活**的会话的标题（`sessionTitle.rename`）。
+   *
+   * 宿主把用户标题作为显式修订写进 `session/title` 事件，并固定它：之后自动
+   * 标题不再覆盖。冷会话（没有 live agent）没有可写的 session，方法返回
+   * `not-live`；宿主标题服务异常时返回 `failed`，绝不抛出。
+   */
+  renameSession(session: unknown, title: string): SessionRenameOutcome;
+  /**
    * 归档一个会话（`workspaceRegistry.archiveSession`）。
    *
    * 归档只把会话加进 registry 的全局归档集：Web 侧栏隐藏、聊天不再往它上面
@@ -72,10 +79,9 @@ export interface HostAdapter {
   /** 取消归档（幂等：未归档的 id 也按成功处理）。 */
   unarchiveSession(sessionId: string): Promise<SessionArchiveOutcome>;
   /**
-   * 当前归档集（宿主未挂载 registry / 版本不含归档能力时为空集）。
+   * 当前归档集（registry 里没有归档记录时为空集）。
    *
-   * registry 的状态在内存里，同步读取；每次调用都重新探测服务，避免插件启动
-   * 早于 dsh-workspace 注册服务时把「暂时没有」记成「永远没有」。
+   * registry 的状态在内存里，同步读取。
    */
   archivedSessionIds(): ReadonlySet<string>;
   /** 当前置顶集（最近置顶在前）；宿主无此能力时为空集 */
@@ -83,7 +89,7 @@ export interface HostAdapter {
   /**
    * 宿主的工作区列表（顺序即侧边栏顺序）。
    *
-   * 只读快照，registry 未挂载时返回空数组；`sessionIds` 是该工作区的会话记账。
+   * 只读快照，registry 为空时返回空数组；`sessionIds` 是该工作区的会话记账。
    */
   workspaceList(): WorkspaceInfo[];
   /**
@@ -119,8 +125,18 @@ export type SessionArchiveOutcome =
   | { ok: true }
   | {
     ok: false;
-    /** unavailable = 宿主没有归档能力；not-found = 会话不存在；busy = 有工作未停 */
-    reason: 'unavailable' | 'not-found' | 'busy' | 'failed';
+    /** not-found = 会话不存在；busy = 有工作未停 */
+    reason: 'not-found' | 'busy' | 'failed';
+    message?: string;
+  };
+
+/** 修改会话标题的结果（宿主错误已归一成可展示的文案） */
+export type SessionRenameOutcome =
+  | { ok: true; title: string }
+  | {
+    ok: false;
+    /** invalid = 标题被规范化成空；not-live = 会话已关闭 */
+    reason: 'invalid' | 'not-live' | 'failed';
     message?: string;
   };
 
@@ -203,26 +219,15 @@ interface SessionPersistenceLike {
   stat(id: string): Promise<{ header?: SessionHeaderLike } | undefined>;
 }
 
-/**
- * 取出可用的持久化服务；形态不匹配返回 undefined。
- *
- * 宿主服务是版本漂移点，必须探测方法是否存在再调用：直接调用缺失的方法会抛
- * `TypeError`，与「后端故障」混在一起，让调用方误以为求证过了。
- */
-function statCapablePersistence(ctx: Context): SessionPersistenceLike | undefined {
-  const persistence = safeGet(ctx, 'sessionPersistence') as SessionPersistenceLike | undefined;
-  return typeof persistence?.stat === 'function' ? persistence : undefined;
-}
-
 /** ctx.sessionQuery 的最小契约（只要列表与批量标题） */
 interface SessionQueryLike {
-  listSessions?(signal?: AbortSignal): Promise<readonly unknown[]>;
-  readTitleSnapshots?(ids: readonly string[]): Promise<readonly unknown[]>;
+  listSessions(signal?: AbortSignal): Promise<readonly unknown[]>;
+  readTitleSnapshots(ids: readonly string[]): Promise<readonly unknown[]>;
 }
 
-/** ctx.sessionPersistence 的列举契约（没有列举能力的后端返回空列表） */
-interface SessionListPersistenceLike {
-  list?(): Promise<readonly unknown[]>;
+/** ctx.sessionTitle 的最小写契约（只要 rename；读标题走 sessionQuery） */
+interface SessionTitleLike {
+  rename(session: unknown, title: string): { title?: unknown } | undefined;
 }
 
 /**
@@ -266,16 +271,6 @@ function collectTitles(results: readonly unknown[], sink: Map<string, string>): 
   }
 }
 
-/** 取出可用的 workspaceRegistry；形态不匹配返回 undefined（dsh-workspace 未挂载时无侧边栏） */
-function workspaceRegistry(ctx: Context): WorkspaceRegistryLike | undefined {
-  const registry = safeGet(ctx, 'workspaceRegistry') as WorkspaceRegistryLike | undefined;
-  if (!registry) return undefined;
-  // 工作区归属要 create；归档只要 archiveSession。任一可用就返回，由调用点自判
-  return typeof registry.create === 'function' || typeof registry.archiveSession === 'function'
-    ? registry
-    : undefined;
-}
-
 /** 模块级函数的动态 import 结果缓存（spec 变量路径绕开本地依赖类型检查） */
 const moduleCache = new Map<string, Record<string, unknown> | undefined>();
 
@@ -293,47 +288,36 @@ async function importModule(spec: string, logger?: AdapterLogger): Promise<Recor
 }
 
 export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAdapter {
-  const capabilities: string[] = [];
+  const host = ctx as unknown as {
+    sessionPersistence: SessionPersistenceLike;
+    sessionQuery: SessionQueryLike;
+    sessionTitle: SessionTitleLike;
+    workspaceRegistry: WorkspaceRegistryLike;
+    agentPresets: { serviceFor?(agent: unknown, name: string): unknown };
+  };
+  const persistence = host.sessionPersistence;
+  const query = host.sessionQuery;
+  const titleService = host.sessionTitle;
+  const registry = host.workspaceRegistry;
+  const presets = host.agentPresets;
 
-  // events 读取路径只有运行时才能确定，sessionEvents 内自适应
-  capabilities.push('sessionEvents(s自适应)');
+  const resolveFn: ((agent: { ctx: unknown }, name: string) => unknown | undefined) | undefined =
+    typeof presets.serviceFor === 'function'
+      ? (agent, name) => presets.serviceFor!(agent, name)
+      : undefined;
 
-  // 可能在插件启动后才注册，sessionExists/sessionHeader 内每次重新探测；此处仅记录启动时形态
-  capabilities.push(statCapablePersistence(ctx)
-    ? 'sessionPersistence.stat(可用)'
-    : 'sessionPersistence.stat(不可用，会话存在性判定降级)');
-  capabilities.push(workspaceRegistry(ctx)
-    ? 'workspaceRegistry.create(可用)'
-    : 'workspaceRegistry.create(不可用，侧边栏工作区归属降级)');
+  const capabilities: string[] = [
+    'sessionEvents(s自适应)',
+    'sessionPersistence.stat',
+    'workspaceRegistry',
+    'sessionQuery',
+    'sessionTitle.rename',
+    resolveFn ? 'serviceFor(presets实例方法)' : 'serviceFor(serviceForAgent动态)',
+  ];
 
-  // 会话列举/标题/归档都是「有就用、没有降级」的可选能力
-  const query = safeGet(ctx, 'sessionQuery') as SessionQueryLike | undefined;
-  capabilities.push(typeof query?.listSessions === 'function'
-    ? 'sessionQuery.listSessions(可用)'
-    : 'sessionQuery.listSessions(不可用，回退 persistence.list)');
-  capabilities.push(typeof query?.readTitleSnapshots === 'function'
-    ? 'sessionQuery.readTitleSnapshots(可用)'
-    : 'sessionQuery.readTitleSnapshots(不可用，会话列表无标题)');
-  const archiveProbe = workspaceRegistry(ctx);
-  capabilities.push(typeof archiveProbe?.archiveSession === 'function'
-    ? 'workspaceRegistry.archiveSession(可用，可归档会话)'
-    : 'workspaceRegistry.archiveSession(不可用，/sessions archive 降级只读)');
-
-  let resolveFn: ((agent: { ctx: unknown }, name: string) => unknown | undefined) | undefined;
-  const presets = safeGet(ctx, 'agentPresets') as
-    | { serviceFor?: (agent: unknown, name: string) => unknown }
-    | undefined;
-  if (presets && typeof presets.serviceFor === 'function') {
-    resolveFn = (agent, name) => presets.serviceFor!(agent, name);
-    capabilities.push('serviceFor(presets实例方法)');
-  } else {
-    capabilities.push('serviceFor(serviceForAgent动态)');
-  }
-
-  /** registry.list() 收窄成纯数据快照；任何异常都降级为空列表 */
+  /** registry.list() 收窄成纯数据快照；异常降级为空列表 */
   const workspaceList = (): WorkspaceInfo[] => {
-    const registry = workspaceRegistry(ctx);
-    if (typeof registry?.list !== 'function') return [];
+    if (typeof registry.list !== 'function') return [];
     try {
       return registry.list().flatMap((workspace) => {
         if (typeof workspace?.path !== 'string' || typeof workspace.id !== 'string') return [];
@@ -378,12 +362,10 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
     },
 
     globalService(name) {
-      return safeGet(ctx, name);
+      return (ctx as unknown as Record<string, unknown>)[name];
     },
 
     async sessionHeader(sessionId) {
-      const persistence = statCapablePersistence(ctx);
-      if (!persistence) return undefined;
       try {
         return (await persistence.stat(sessionId))?.header;
       } catch {
@@ -392,21 +374,13 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
     },
 
     async sessionExists(sessionId) {
-      const persistence = statCapablePersistence(ctx);
-      if (!persistence) return undefined;
       return (await persistence.stat(sessionId)) !== undefined;
     },
 
     async attachSessionToWorkspace(sessionId, cwd) {
-      const registry = workspaceRegistry(ctx);
-      if (!registry) {
-        // 未挂载 dsh-workspace（如 headless profile）→ 无侧边栏，属预期降级
-        logger?.debug?.(`host adapter: workspaceRegistry 未挂载，跳过会话 ${sessionId} 的工作区归属`);
-        return;
-      }
       try {
         if (typeof registry.create !== 'function') {
-          logger?.debug?.(`host adapter: workspaceRegistry 无 create，跳过会话 ${sessionId} 的工作区归属`);
+          logger?.warn?.(`host adapter: workspaceRegistry 无 create，跳过会话 ${sessionId} 的工作区归属`);
           return;
         }
         // 不传 title：宿主按目录最后一段生成显示名（一般规律）
@@ -425,7 +399,7 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
       }
     },
 
-    /** 宿主工作区快照（顺序即侧边栏顺序）；registry 未挂载时为空数组 */
+    /** 宿主工作区快照（顺序即侧边栏顺序） */
     workspaceList,
 
     defaultWorkspacePath() {
@@ -433,8 +407,8 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
       const auto = workspaceList().find((workspace) => workspace.title === DEFAULT_WORKSPACE_TITLE);
       if (auto) return auto.path;
 
-      // 2) 宿主 workingDirectory.defaultDirectory（默认 = dsh 启动目录）
-      const working = safeGet(ctx, 'workingDirectory') as { defaultDirectory?: unknown } | undefined;
+      // 2) workingDirectory.defaultDirectory（默认 = dsh 启动目录）；0.2.1 无服务声明，按可选读
+      const working = (ctx as unknown as { workingDirectory?: { defaultDirectory?: unknown } }).workingDirectory;
       if (typeof working?.defaultDirectory === 'string' && working.defaultDirectory !== '') {
         return working.defaultDirectory;
       }
@@ -443,13 +417,13 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
 
     sessionDirectory(session) {
       // workingDirectory.get(session) 覆盖运行期 cd；拿不到再退回 header.cwd
-      const working = safeGet(ctx, 'workingDirectory') as { get?: (target: unknown) => unknown } | undefined;
+      const working = (ctx as unknown as { workingDirectory?: { get?: (target: unknown) => unknown } }).workingDirectory;
       if (typeof working?.get === 'function') {
         try {
           const dir = working.get(session);
           if (typeof dir === 'string' && dir !== '') return dir;
         } catch {
-          // 服务形态差异（旧版本/未挂载）→ 走 header
+          // 服务形态差异 → 走 header
         }
       }
       const header = (session as { header?: { cwd?: unknown } } | null | undefined)?.header;
@@ -470,55 +444,47 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
     },
 
     async listSessions() {
-      const engine = safeGet(ctx, 'sessionQuery') as SessionQueryLike | undefined;
-      if (typeof engine?.listSessions === 'function') {
-        try {
-          return (await engine.listSessions())
-            .map((record) => hostSessionFrom(record, false))
-            .filter((info): info is HostSessionInfo => info !== undefined);
-        } catch (err) {
-          // 索引后端（sqlite）损坏时降级到持久化列举，别让会话列表整体不可用
-          logger?.warn?.(`host adapter: sessionQuery.listSessions 失败，回退 persistence.list: ${err instanceof Error ? err.message : String(err)}`);
-        }
+      try {
+        return (await query.listSessions())
+          .map((record) => hostSessionFrom(record, false))
+          .filter((info): info is HostSessionInfo => info !== undefined);
+      } catch (err) {
+        logger?.warn?.(`host adapter: sessionQuery.listSessions 失败: ${err instanceof Error ? err.message : String(err)}`);
+        return [];
       }
-
-      const persistence = safeGet(ctx, 'sessionPersistence') as SessionListPersistenceLike | undefined;
-      if (typeof persistence?.list !== 'function') return [];
-      return (await persistence.list())
-        .map((snapshot) => hostSessionFrom(snapshot, false))
-        .filter((info): info is HostSessionInfo => info !== undefined);
     },
 
     async sessionTitles(ids) {
       const titles = new Map<string, string>();
       if (ids.length === 0) return titles;
 
-      const engine = safeGet(ctx, 'sessionQuery') as SessionQueryLike | undefined;
-      if (typeof engine?.readTitleSnapshots !== 'function') return titles;
-
       try {
         // 标题要读日志（每会话一次完整读取），失败只影响该条，绝不影响列表本身
-        collectTitles(await engine.readTitleSnapshots(ids), titles);
+        collectTitles(await query.readTitleSnapshots(ids), titles);
       } catch (err) {
         logger?.warn?.(`host adapter: 批量读取会话标题失败: ${err instanceof Error ? err.message : String(err)}`);
       }
       return titles;
     },
 
-    async archiveSession(sessionId) {
-      const registry = workspaceRegistry(ctx);
-      if (typeof registry?.archiveSession !== 'function') {
-        logger?.warn?.('host adapter: workspaceRegistry.archiveSession 不可用，/sessions archive 无法执行');
-        return {
-          ok: false,
-          reason: 'unavailable',
-          message: '当前 profile 没装会话归档接口（web / desktop 自带）',
-        };
+    renameSession(session, title) {
+      try {
+        const accepted = titleService.rename(session, title);
+        const acceptedTitle = typeof accepted?.title === 'string' && accepted.title !== ''
+          ? accepted.title
+          : title;
+        logger?.debug?.(`host adapter: renamed session title: ${acceptedTitle}`);
+        return { ok: true, title: acceptedTitle };
+      } catch (err) {
+        return renameFailure(err);
       }
+    },
+
+    async archiveSession(sessionId) {
       try {
         // stopActivity：宿主先让 providers 停掉该会话的工作再写归档集，避免
         // 活跃会话被 session-active 拒绝；进程内的 agent 由 manager 先释放
-        await registry.archiveSession(sessionId, { stopActivity: true });
+        await registry.archiveSession!(sessionId, { stopActivity: true });
         logger?.debug?.(`host adapter: archived session ${sessionId}`);
         return { ok: true };
       } catch (err) {
@@ -527,17 +493,8 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
     },
 
     async unarchiveSession(sessionId) {
-      const registry = workspaceRegistry(ctx);
-      if (typeof registry?.unarchiveSession !== 'function') {
-        logger?.warn?.('host adapter: workspaceRegistry.unarchiveSession 不可用，/sessions unarchive 无法执行');
-        return {
-          ok: false,
-          reason: 'unavailable',
-          message: '当前 profile 没装会话归档接口（web / desktop 自带）',
-        };
-      }
       try {
-        await registry.unarchiveSession(sessionId);
+        await registry.unarchiveSession!(sessionId);
         logger?.debug?.(`host adapter: unarchived session ${sessionId}`);
         return { ok: true };
       } catch (err) {
@@ -546,12 +503,12 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
     },
 
     archivedSessionIds() {
-      const archived = workspaceRegistry(ctx)?.archivedSessionIds;
+      const archived = registry.archivedSessionIds;
       return new Set(Array.isArray(archived) ? archived : []);
     },
 
     pinnedSessionIds() {
-      const pinned = workspaceRegistry(ctx)?.pinnedSessionIds;
+      const pinned = registry.pinnedSessionIds;
       return new Set(Array.isArray(pinned) ? pinned : []);
     },
   };
@@ -582,6 +539,23 @@ async function migrateLegacyTitle(
 }
 
 /**
+ * 把标题服务抛出的错误归一成改名结果。
+ *
+ * 类名判定（不用 instanceof）与归档一致：宿主可能装了同一个包的另一个副本。
+ * 会话已关闭时宿主的报错文本不统一，按关键字识别成 `not-live`，让调用方给出
+ * 「先发一条消息再改名」这种可执行提示，而不是把原始英文抛给用户。
+ */
+function renameFailure(err: unknown): SessionRenameOutcome {
+  const name = err instanceof Error ? err.name : '';
+  const message = err instanceof Error ? err.message : String(err);
+  if (name === 'SessionTitleInvalidError') return { ok: false, reason: 'invalid', message };
+  if (/not\s+(?:live|active|open)|disposed|closed/i.test(message)) {
+    return { ok: false, reason: 'not-live', message };
+  }
+  return { ok: false, reason: 'failed', message };
+}
+
+/**
  * 把 registry 抛出的错误归一成归档结果。
  *
  * 识别按 `name` 而不是 instanceof：dsh-workspace 可能被宿主装成另一个副本，
@@ -601,15 +575,6 @@ function archiveFailure(
     return { ok: false, reason: 'busy', message: `会话仍在运行: ${message}` };
   }
   return { ok: false, reason: 'failed', message: `${verb === 'archive' ? '归档' : '取消归档'}失败: ${message}` };
-}
-
-/** ctx.get 的非抛出版本 */
-function safeGet(ctx: Context, name: string): unknown {
-  try {
-    return ctx.get(name) as unknown;
-  } catch {
-    return undefined;
-  }
 }
 
 /** 测试辅助：清空模块缓存 */

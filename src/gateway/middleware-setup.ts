@@ -82,7 +82,9 @@ export function setupMiddlewares(
   //      拼错的 /xxx 直接回「没有这个指令」，不再当成提问转发给大模型
   bot.use(rejectUnknownCommands({ commandNames: collectCommandNames(commandList) }));
 
-  // 7. 并发串行 + 消息合并（同 peer 排队，避免 session 冲突）
+  // 7. 入站派发串行（同 peer 短暂排队，避免并发创建会话 / 同时写 followup）
+  //    守卫只管到「消息交给宿主」为止，不等本轮 turn 结束：会话内的先后由宿主
+  //    inbox 的 next-turn 队列保证，跨会话因此互不阻塞（见 transport/inbound.ts）。
   bot.use(concurrencyGuard({
     strategy: 'merge',
     maxQueue: config.maxQueue,

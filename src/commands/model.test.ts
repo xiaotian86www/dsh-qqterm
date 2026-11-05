@@ -36,11 +36,17 @@ const MODELS: ModelEntry[] = [
 ];
 
 function makeManager(
-  options: { current?: ModelRoute; models?: ModelEntry[]; unchanged?: boolean } = {},
+  options: {
+    current?: ModelRoute;
+    models?: ModelEntry[];
+    unchanged?: boolean;
+    effort?: { options?: Array<{ id: string; name: string }>; current?: { id: string; name: string }; defaulted: boolean };
+  } = {},
 ) {
   return {
     getEffectiveModel: vi.fn(() => options.current),
     listAvailableModels: vi.fn(async () => options.models ?? MODELS),
+    getEffortView: vi.fn(async () => options.effort ?? { defaulted: true }),
     setModelOverride: vi.fn(async (_scope: unknown, _peer: unknown, route: ModelRoute) => ({
       ...route,
       ...(options.unchanged ? { unchanged: true } : {}),
@@ -129,6 +135,28 @@ describe('/model（查看）', () => {
     expect(text).toContain('**deepseek-official**');
     expect(text).toContain('show="/model deepseek-chat"');
     expect(text).not.toContain('deepseek-chat (deepseek-official/deepseek-chat)');
+  });
+
+  it('支持思考强度时在模型下面显示当前档位', async () => {
+    const text = await run(makeManager({
+      current: { provider: 'openrouter', model: 'deepseek-v4-flash' },
+      effort: { options: [{ id: 'max', name: 'Max' }], current: { id: 'max', name: 'Max' }, defaulted: false },
+    }));
+    expect(text).toContain('**思考强度**: 最高');
+    expect(text).not.toContain('**思考强度**: 最高（默认）');
+  });
+
+  it('未显式设置时标注为模型默认', async () => {
+    const text = await run(makeManager({
+      current: { provider: 'openrouter', model: 'deepseek-v4-flash' },
+      effort: { options: [{ id: 'high', name: 'High' }], current: { id: 'high', name: 'High' }, defaulted: true },
+    }));
+    expect(text).toContain('**思考强度**: 高（默认）');
+  });
+
+  it('模型不支持思考强度时不显示该行', async () => {
+    const text = await run(makeManager({ current: { provider: 'openrouter', model: 'deepseek-v4-flash' } }));
+    expect(text).not.toContain('思考强度');
   });
 });
 

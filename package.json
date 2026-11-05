@@ -60,10 +60,9 @@
     },
     "compatibility": {
       "dshReleases": {
-        "0.1.0-rc.8": "compatible",
-        "0.2.0-rc.2": "compatible"
+        "0.2.1-rc.5": "compatible"
       },
-      "note": "0.1.0-rc.8 为 CLI（dsh web）已验证：扫码/手动/解绑全流程、终端二维码与端内绑定页；0.2.0-rc.2 为 Desktop 内嵌运行时已验证：端内绑定页（settings.section 与侧栏）、HMR 重载收敛。客户端依赖 settings.section / sidebarRightTabs / sidebar.right.pane.tab 席位契约与 dsh.client 模块系统，宿主大版本升级后请重新验收席位行为。"
+      "note": "0.2.1-rc.5 为当前唯一验收版本：插件硬依赖 agents / llm / sessionController / agentDefaultModel / sessionProjections / sessionPersistence / sessionQuery / sessionTitle / workspaceRegistry / agentPresets / permissionPresets / compaction / tools / attachments / webServer（全部写入 inject），缺任一服务插件不激活；不再为精简 profile 做能力降级。客户端依赖 settings.section / sidebarRightTabs / sidebar.right.pane.tab 席位契约与 dsh.client 模块系统，宿主大版本升级后请重新验收席位行为。"
     }
   },
   "dependencies": {

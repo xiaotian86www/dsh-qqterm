@@ -5,13 +5,15 @@
  */
 import type { InlineKeyboard } from '@tencent-connect/qqbot-nodejs';
 import type { UserQuestion } from './question-channel.ts';
-import { shortSessionId } from '../shared/utils.ts';
+import { sessionReplyLink, sessionResumeLink, sessionSourceHeader } from '../transport/session-source.ts';
 import { BUTTONS_PER_ROW, buttonLabel, encodeButtonData } from './button-utils.ts';
 
-/** 渲染上下文：非当前会话要加 `[#id]` 标记和（无按钮时）回答链接 */
+/** 渲染上下文：非当前会话加来源行（id + 标题），无按钮时给回答 / 恢复链接 */
 export interface QuestionRenderContext {
   sessionId?: string;
   isCurrent?: boolean;
+  /** 会话标题（来源行用；宿主还没生成时用兜底名） */
+  title?: string;
 }
 
 /**
@@ -68,18 +70,19 @@ export function formatQuestion(
 ): string {
   const lines: string[] = [];
   const nonCurrent = context.sessionId !== undefined && context.isCurrent === false;
-  const tag = nonCurrent && context.sessionId !== undefined
-    ? `[#${shortSessionId(context.sessionId)}] `
-    : '';
 
-  if (question.header) lines.push(`${tag}**${question.header}**`);
+  // 非当前会话：来源行独占首行，与消息的标注格式保持一致（id + 标题，不带图标）
+  if (nonCurrent && context.sessionId !== undefined) {
+    lines.push(sessionSourceHeader(context.sessionId, context.title), '');
+  }
+
+  if (question.header) lines.push(`**${question.header}**`);
 
   const opts = question.options ?? [];
   const multi = question.multiSelect === true;
 
   // 问题行：多选标记前置，用户第一眼就知道作答方式
-  const body = multi ? `${question.question}（可多选）` : question.question;
-  lines.push(question.header ? body : `${tag}${body}`);
+  lines.push(multi ? `${question.question}（可多选）` : question.question);
 
   // 选项列表：保留完整 label + description（按钮 label 截断时 description 靠正文展示）
   opts.forEach((o, i) => {
@@ -92,8 +95,7 @@ export function formatQuestion(
     if (withButtons) {
       lines.push('> 👇 点击下方按钮选择');
     } else if (context.sessionId !== undefined) {
-      const short = shortSessionId(context.sessionId);
-      lines.push(`> 💡 回答这个会话 <qqbot-cmd-input text="/to #${short} " show="回答 #${short}"/>`);
+      lines.push(`> ${sessionReplyLink(context.sessionId, '回答')} · ${sessionResumeLink(context.sessionId)}`);
     }
   } else if (opts.length > 0) {
     lines.push('');

@@ -3,6 +3,17 @@
  */
 import type { Context } from '@deepseek-ai/cordis';
 import type { ChatScope, ReplyTarget } from '../types.ts';
+import type { EffortOption } from '../model/types.ts';
+
+export type { EffortOption } from '../model/types.ts';
+
+/** create / resume 传给宿主的 agentOptions（宿主 AgentOptions 的子集） */
+export interface AgentOptionsLike {
+  provider?: string;
+  model?: string;
+  /** 思考强度档位（宿主直接放进请求配置，缺省用 provider 默认值） */
+  reasoningEffort?: string;
+}
 
 /** AgentSetup hook 类型 */
 export type AgentSetup = (agentCtx: Context) => Promise<void> | void;
@@ -54,6 +65,8 @@ export interface DshAgent {
   readonly session: {
     readonly id: string;
     snapshotEvents(): readonly SessionEventLike[];
+    /** 最近一次请求头：读会话实际的 provider/model/思考强度 */
+    requestHeader?(): RequestHeaderLike | undefined;
   };
   cancel(cause: { kind: string }): void;
   followup(message: unknown): void;
@@ -80,7 +93,7 @@ export interface CompactionServiceLike {
 /** compact 操作结果 */
 export interface CompactOutcome {
   ok: boolean;
-  reason?: 'no-session' | 'busy' | 'unavailable' | 'failed';
+  reason?: 'no-session' | 'busy' | 'failed';
   shadowed?: number;
   tokens?: number;
   message?: string;
@@ -89,7 +102,7 @@ export interface CompactOutcome {
 /** preset 切换结果 */
 export interface PresetSwitchOutcome {
   ok: boolean;
-  reason?: 'unavailable' | 'unknown-preset' | 'broken' | 'failed';
+  reason?: 'unknown-preset' | 'broken' | 'failed';
   presetId?: string;
   /** true = 目标就是当前值，未写覆盖 */
   unchanged?: boolean;
@@ -104,6 +117,44 @@ export interface ModelSwitchOutcome {
   unchanged?: boolean;
 }
 
+/** 宿主请求头的精简视图（读会话实际用的选择） */
+export interface RequestHeaderLike {
+  config?: {
+    provider?: string;
+    model?: string;
+    reasoningEffort?: string;
+    [key: string]: unknown;
+  };
+  /** 哪些控制项是 adapter 默认值（不是用户选择） */
+  adapterDefaults?: {
+    reasoningEffort?: boolean;
+    [key: string]: unknown;
+  };
+}
+
+/** 思考强度视图（/reasoning、/model、/status 共用；来源是宿主的 modelSelection 状态） */
+export interface EffortView {
+  /** 模型支持的档位；undefined = 当前模型不支持思考强度（或宿主没给元数据） */
+  options?: EffortOption[];
+  /** 当前生效档位（会话选择合法时是它，否则模型默认值） */
+  current?: EffortOption;
+  /** true = 显示的是模型默认值（会话与部署都没有显式设置） */
+  defaulted: boolean;
+}
+
+/** 思考强度切换结果 */
+export interface EffortSwitchOutcome {
+  ok: boolean;
+  reason?: 'unsupported' | 'unknown-effort' | 'no' | 'failed';
+  /** 切换后生效的档位 id（恢复默认时为模型解析出的默认值） */
+  effort?: string;
+  /** true = 目标就是当前值，未改动会话 */
+  unchanged?: boolean;
+  /** reason=unknown-effort 时的可选项 */
+  options?: EffortOption[];
+  message?: string;
+}
+
 export interface DshAgentHandle {
   agent: DshAgent;
   dispose(): Promise<void>;
@@ -115,7 +166,7 @@ export interface DshAgentRegistry {
   /** 从持久化存储恢复 session */
   resume(options: {
     resumeSessionId: string;
-    agentOptions?: { provider?: string; model?: string };
+    agentOptions?: AgentOptionsLike;
     setup?: AgentSetup;
   }): Promise<DshAgentHandle>;
   /** 创建全新 session */
@@ -125,7 +176,7 @@ export interface DshAgentRegistry {
     seed?: readonly unknown[];
     /** 继承前缀长度（seeded fork 用，对齐宿官方 commands.fork） */
     inheritedEventCount?: number;
-    agentOptions?: { provider?: string; model?: string };
+    agentOptions?: AgentOptionsLike;
     setup?: AgentSetup;
   }): Promise<DshAgentHandle>;
 }
@@ -175,7 +226,7 @@ export interface PermissionPresetEntry {
 /** 权限预设切换结果 */
 export interface PermissionSwitchOutcome {
   ok: boolean;
-  reason?: 'unavailable' | 'unknown-preset' | 'no-session' | 'failed';
+  reason?: 'unknown-preset' | 'no-session' | 'failed';
   preset?: string;
   /** true = 目标就是当前预设，未写会话 */
   unchanged?: boolean;
@@ -270,6 +321,10 @@ export interface WorkspaceSession {
   archived: boolean;
   /** 所属工作区标题（分组列举时填充；归档页用来区分同名会话） */
   workspace?: string;
+  /** 所属工作区路径（默认持有列表按工作区分组用；未分组时为空） */
+  workspacePath?: string;
+  /** 所属工作区目录是否已不存在（分组标题行补 ⚠️ 用） */
+  workspaceMissing?: boolean;
 }
 
 /** 切换会话结果 */
@@ -300,11 +355,27 @@ export type SendToOutcome =
     message?: string;
   };
 
+/**
+ * 修改会话标题的结果。
+ *
+ * - no-session：当前聊天没有已获取的会话（或目标不在已获取集合里）；
+ * - invalid：标题规范化后为空；
+ * - not-live：会话已关闭，写不了日志；
+ * - failed：宿主读写失败。
+ */
+export type RenameSessionOutcome =
+  | { ok: true; title: string }
+  | {
+    ok: false;
+    reason: 'no-session' | 'invalid' | 'not-live' | 'failed';
+    message?: string;
+  };
+
 /** 归档 / 取消归档结果 */
 export interface ArchiveSessionOutcome {
   ok: boolean;
-  /** unavailable = 宿主没有归档接口；not-found = 会话不存在；busy = 有工作停不下来 */
-  reason?: 'unavailable' | 'not-found' | 'busy' | 'failed';
+  /** not-found = 会话不存在；busy = 有工作停不下来 */
+  reason?: 'not-found' | 'busy' | 'failed';
   message?: string;
   /** 因指向该会话而被改写的 per-chat 映射数（归档当前会话时 > 0） */
   remapped?: number;
@@ -312,7 +383,7 @@ export interface ArchiveSessionOutcome {
   alreadyArchived?: boolean;
 }
 
-/** 一个工作区的展示信息（`/workspace` 按标题 / 路径匹配用） */
+/** 一个工作区的展示信息（`/new <工作区>` 按标题 / 路径匹配用） */
 export interface WorkspaceInfo {
   /** 显示标题（宿主自动标题 = 目录名） */
   title: string;

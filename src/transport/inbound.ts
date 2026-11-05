@@ -113,15 +113,14 @@ export async function handleInbound(
   // ── 构建 UserMessage → followup ──
   const message = createQQUserMessage(agentBody);
 
+  // followup 写进宿主的 next-turn inbox：目标空闲时立刻开一轮，正在生成时排在
+  // 本轮之后由宿主按 turn 串行处理，不会打断当前这轮。
+  //
+  // 因此这里绝不能 await whenIdle()：concurrencyGuard 以 QQ 用户为键，处理函数
+  // 挂到本轮结束会把同一个人的所有消息串成一条队列——正在生成的会话会挡住另一个
+  // 空闲会话（多会话下表现为「消息发给空闲会话，却在排队」）。
   record.agent.followup(message);
   logger.info(`→ followup sent: key=${scope}:${peerId}`);
-
-  // 阻塞等待本轮 turn 收敛，避免后续消息在 turn 运行期间被 followup 打断
-  try {
-    await record.agent.whenIdle();
-  } catch (err) {
-    logger.warn(`whenIdle rejected: ${err instanceof Error ? err.message : String(err)}`);
-  }
 }
 
 // ══════════════════════════════════════════════════════════════

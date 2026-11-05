@@ -5,13 +5,15 @@
  */
 import type { InlineKeyboard } from '@tencent-connect/qqbot-nodejs';
 import type { ApprovalRequest } from './approval-channel.ts';
-import { shortSessionId } from '../shared/utils.ts';
+import { sessionSourceHeader } from '../transport/session-source.ts';
 import { encodeButtonData } from './button-utils.ts';
 
-/** 渲染上下文：非当前会话的审批要带 `[#id]` 标记 */
+/** 渲染上下文：非当前会话的审批带来源行（id + 标题） */
 export interface ApprovalRenderContext {
   sessionId?: string;
   isCurrent?: boolean;
+  /** 会话标题（来源行用；宿主还没生成时用兜底名） */
+  title?: string;
 }
 
 /** 把审批请求渲染成 QQ 文本（含被 gate 的命令回显） */
@@ -21,10 +23,12 @@ export function buildApprovalText(
   context: ApprovalRenderContext = {},
 ): string {
   const nonCurrent = context.sessionId !== undefined && context.isCurrent === false;
-  const tag = nonCurrent && context.sessionId !== undefined
-    ? ` [#${shortSessionId(context.sessionId)}]`
-    : '';
-  const lines: string[] = [`🔐 **执行审批**${tag}`, ''];
+  const lines: string[] = [];
+  // 与消息、提问同一套来源行：id + 标题，不带图标
+  if (nonCurrent && context.sessionId !== undefined) {
+    lines.push(sessionSourceHeader(context.sessionId, context.title), '');
+  }
+  lines.push('🔐 **执行审批**', '');
   lines.push(`🔧 工具: ${request.toolName}`);
   if (command) {
     lines.push('');

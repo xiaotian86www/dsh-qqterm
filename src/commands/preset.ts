@@ -61,8 +61,6 @@ export function presetCommand({ manager, config, logger }: CommandDeps): Categor
       const outcome = await manager.setPresetOverride(scope, peerId, args);
       if (!outcome.ok) {
         switch (outcome.reason) {
-          case 'unavailable':
-            return '⚠️ 当前部署不支持 agent preset（agentPresets 服务未注入）';
           case 'unknown-preset':
             return `⚠️ 未知 preset: ${args}`;
           case 'broken':

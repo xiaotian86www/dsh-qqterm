@@ -71,8 +71,34 @@ function createLogger(): Logger {
   return { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } as unknown as Logger;
 }
 
+/** inject 保证存在的宿主服务 */
+function hostServices() {
+  return {
+    llm: { listProviders: () => [{ id: 'p', name: 'p' }], listModels: async () => [], resolveModelInfo: async () => ({}) },
+    sessionProjections: { stateOf: () => undefined },
+    sessionController: {
+      selectModel: async (request: { provider: string; model: string; reasoningEffort?: string }) => ({
+        selected: {
+          provider: request.provider,
+          model: request.model,
+          ...(request.reasoningEffort !== undefined ? { reasoningEffort: request.reasoningEffort } : {}),
+        },
+      }),
+    },
+    agentDefaultModel: { currentSelection: () => ({ provider: 'p', model: 'm' }) },
+    sessionPersistence: { stat: async () => undefined },
+    sessionQuery: { listSessions: async () => [], readTitleSnapshots: async () => [] },
+    sessionTitle: { rename: () => ({}) },
+    workspaceRegistry: { list: () => [], create: async () => ({ path: '/', attachSession: async () => {} }) },
+    agentPresets: {},
+    compaction: {},
+  };
+}
+
 function createCtx(permissions?: PermissionPresetsLike): Context {
   return {
+    ...hostServices(),
+    permissionPresets: permissions,
     get: (name: string) => (name === 'permissionPresets' ? permissions : undefined),
     on: vi.fn(),
   } as unknown as Context;
@@ -118,16 +144,9 @@ describe('权限预设目录', () => {
   });
 
   it('宿主没有 optionOf 时只给 id', () => {
-    const { service } = fakePermissions({ optionOf: undefined });
-    const manager = createManager(service);
+    const { service } = fakePermissions({ optionOf: undefined });    const manager = createManager(service);
     expect(manager.listPermissionPresets().map((entry) => entry.id)).toEqual(['read-only', 'workspace-write', 'auto']);
     expect(manager.listPermissionPresets()[0]?.name).toBeUndefined();
-  });
-
-  it('服务未注入时目录为空、当前值不可用', () => {
-    const manager = createManager(undefined);
-    expect(manager.listPermissionPresets()).toEqual([]);
-    expect(manager.getPermissionPreset('c2c', PEER)).toBeUndefined();
   });
 });
 
@@ -228,12 +247,6 @@ describe('切换权限', () => {
     expect(outcome.ok).toBe(false);
     expect(outcome.reason).toBe('failed');
     expect(outcome.message).toContain('integration is closing');
-  });
-
-  it('服务未注入：unavailable', async () => {
-    const manager = createManager(undefined);
-    const outcome = await manager.setPermissionPreset('c2c', PEER, 'auto', { senderId: PEER, replyTarget: REPLY });
-    expect(outcome).toEqual({ ok: false, reason: 'unavailable' });
   });
 
   it('会话拉不起来时返回 failed，不把异常抛给命令层', async () => {

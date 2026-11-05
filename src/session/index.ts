@@ -6,6 +6,7 @@
 export { SessionManager } from './session-manager.ts';
 export type {
   AgentSetup,
+  AgentOptionsLike,
   SessionEventLike,
   DshAgent,
   DshAgentHandle,
@@ -15,6 +16,9 @@ export type {
   PresetEntry,
   PresetSwitchOutcome,
   ModelSwitchOutcome,
+  EffortOption,
+  EffortView,
+  EffortSwitchOutcome,
   PermissionPresetsLike,
   PermissionPresetEntry,
   PermissionSwitchOutcome,
@@ -27,6 +31,7 @@ export type {
   WorkspaceInfo,
   ChangeWorkspaceOutcome,
   SwitchSessionOutcome,
+  RenameSessionOutcome,
   ArchiveSessionOutcome,
   SendToOutcome,
 } from './types.ts';

@@ -1,11 +1,11 @@
 /**
  * 会话状态命令：/status
  *
- * 当前聊天会话的「现场」：会话 id 与生成状态、所在工作区、模型 / preset、
+ * 当前聊天会话的「现场」：会话标题与 id、生成状态、所在工作区、模型 / preset、
  * 消息数、上下文占用、累计 token。
  *
  * 与其它状态类命令的分工：
- *   - `/bot-status` 是插件最早的最小视图（会话 id / 模型 / preset / 消息数），保持原样；
+ *   - `/bot-status` 是最小视图（会话 / 模型 / preset / 消息数），与这里共用「会话」写法；
  *   - `/cost` 只看计费口径（累计 token 与缓存命中率）；
  *   - `/status` 是会话相关的完整状态，想知道「这个会话现在什么样」看它。
  */
@@ -13,7 +13,8 @@ import type { CommandDeps, CategorizedCommand } from './types.ts';
 import type { SessionContextUsage, SessionManager } from '../session/index.ts';
 import type { ChatScope } from '../types.ts';
 import { getScopePeer, sendMarkdownChunked } from '../shared/index.ts';
-import { shortId } from './sessions.ts';
+import { sessionTargetLabel, sessionTitleOf } from '../transport/session-source.ts';
+import { effortLabel } from '../model/effort-label.ts';
 
 /** 千分位（与 /cost 一致，避免不同环境的本地化分隔符） */
 function num(n: number): string {
@@ -43,10 +44,13 @@ async function renderStatus(
 
   const lines: string[] = ['### 📊 会话状态', ''];
 
-  // 会话：短 id + 是否正在生成
+  // 会话：标题 + 短 id + 是否正在生成（标题还没生成时只给 id）
   if (status.active && status.sessionId) {
     const running = record?.agent.status === 'running';
-    lines.push(`**会话**: \`#${shortId(status.sessionId)}\` · ${running ? '生成中' : '空闲'}`);
+    const title = record === undefined ? undefined : sessionTitleOf(record);
+    lines.push(
+      `**会话**: ${sessionTargetLabel(status.sessionId, title)} · ${running ? '生成中' : '空闲'}`,
+    );
   } else {
     lines.push('**会话**: 未建立（发一条消息即创建）');
   }
@@ -59,6 +63,11 @@ async function renderStatus(
   }
 
   lines.push(`**模型**: ${status.model ? `${status.provider}/${status.model}` : '宿主默认'}`);
+  // 思考强度跟着模型走：只在模型支持时显示
+  const effort = await manager.getEffortView(scope, peerId);
+  if (effort.current) {
+    lines.push(`**思考强度**: ${effortLabel(effort.current)}${effort.defaulted ? '（默认）' : ''}`);
+  }
   if (status.preset) lines.push(`**Preset**: ${status.preset}`);
 
   // 以下只在会话已建立时有意义

@@ -14,3 +14,16 @@ export interface ModelEntry {
   id: string;
   name?: string;
 }
+
+/** 思考强度档位（宿主 adapter 提供的元数据） */
+export interface EffortOption {
+  id: string;
+  name: string;
+  description?: string;
+}
+
+/** 某模型的思考强度元数据（档位 + 模型默认值） */
+export interface ReasoningInfo {
+  efforts: EffortOption[];
+  defaultEffort?: string;
+}

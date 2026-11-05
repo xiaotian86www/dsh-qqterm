@@ -69,6 +69,24 @@ function fakeHandle(id: string, cwd?: string): DshAgentHandle {
   return { agent: fakeAgent(id, cwd), dispose: vi.fn(async () => {}) };
 }
 
+/** inject 保证存在的宿主服务 */
+function hostServices() {
+  return {
+    llm: { listProviders: () => [{ id: 'p', name: 'p' }], listModels: async () => [], resolveModelInfo: async () => ({}) },
+    sessionProjections: { stateOf: () => undefined },
+    sessionController: {
+      selectModel: async (request: { provider: string; model: string; reasoningEffort?: string }) => ({
+        selected: {
+          provider: request.provider,
+          model: request.model,
+          ...(request.reasoningEffort !== undefined ? { reasoningEffort: request.reasoningEffort } : {}),
+        },
+      }),
+    },
+    agentDefaultModel: { currentSelection: () => ({ provider: 'p', model: 'm' }) },
+  };
+}
+
 function createRegistry() {
   const handles: DshAgentHandle[] = [];
   const registry = {
@@ -102,9 +120,11 @@ function createCtx(options: {
   archiveThrows?: 'WorkspaceUnknownSessionError' | 'WorkspaceActiveSessionError';
   /** 模拟宿主 workingDirectory 服务（默认工作目录 / 会话生效目录） */
   workingDirectory?: { defaultDirectory?: string; get?: (session: unknown) => string };
-  /** registry 里的工作区（`/workspace` 按标题匹配、`/sessions all` 分组用） */
+  /** registry 里的工作区（`/new <工作区>` 按标题匹配、`/sessions all` 分组用） */
   workspaces?: Array<{ id: string; path: string; title: string; sessionIds?: string[] }>;
   resume?: (sessionId: string) => Promise<DshAgentHandle>;
+  /** 模拟宿主 sessionTitle 服务（/rename 用） */
+  sessionTitle?: { rename: (session: unknown, title: string) => { title: string } };
 }): Context {
   const sessions = options.sessions ?? [];
   const byId = new Map(sessions.map((session) => [session.id, session]));
@@ -153,11 +173,27 @@ function createCtx(options: {
   registryStub = options.withRegistry === false ? undefined : registry;
 
   return {
+    ...hostServices(),
+    sessionPersistence: persistence,
+    sessionQuery: query ?? {
+      listSessions: async () => sessions.map((session) => ({ header: session, live: false })),
+      readTitleSnapshots: async () => [],
+    },
+    workingDirectory: options.workingDirectory,
+    workspaceRegistry: registryStub ?? {
+      list: () => [],
+      create: async (path: string) => ({ path, title: basename(path), attachSession: async () => {} }),
+    },
+    sessionTitle: options.sessionTitle ?? { rename: () => ({ title: '' }) },
+    agentPresets: {},
+    permissionPresets: { names: [], optionOf: () => undefined },
+    compaction: {},
     get: (name: string) => {
       if (name === 'sessionPersistence') return persistence;
       if (name === 'sessionQuery') return query;
       if (name === 'workspaceRegistry') return registryStub;
       if (name === 'workingDirectory') return options.workingDirectory;
+      if (name === 'sessionTitle') return options.sessionTitle;
       return undefined;
     },
     on: vi.fn(),
@@ -245,14 +281,6 @@ describe('listWorkspaceSessions', () => {
     ]);
   });
 
-  it('没有 sessionQuery 时回退 persistence.list（无标题）', async () => {
-    const ctx = createCtx({ sessions: [{ id: 'session-a', cwd: WORKSPACE(), createdAt: 1 }] });
-    const { manager } = createManager(ctx);
-    const entries = await manager.listWorkspaceSessions('c2c', PEER);
-    expect(entries).toHaveLength(1);
-    expect(entries[0]?.title).toBeUndefined();
-  });
-
   it('获取过的会话带 held / running 标记，未获取的为 false', async () => {
     const held = 'session-held';
     const ctx = createCtx({
@@ -317,11 +345,37 @@ describe('listHeldSessions', () => {
     await manager.switchSession('c2c', PEER, current, PEER, REPLY);
 
     const entries = await manager.listHeldSessions('c2c', PEER);
-    expect(entries.map((entry) => [entry.id, entry.current, entry.held, entry.workspace])).toEqual([
-      [current, true, true, 'repo'],
-      ['session-other', false, true, 'docs'],
+    expect(entries.map((entry) => [
+      entry.id,
+      entry.current,
+      entry.held,
+      entry.workspace,
+      entry.workspacePath,
+      entry.workspaceMissing,
+    ])).toEqual([
+      [current, true, true, 'repo', WORKSPACE(), false],
+      ['session-other', false, true, 'docs', other, false],
     ]);
     expect(entries[0]?.title).toContain('标题-');
+  });
+
+  it('工作区目录已不存在时标记 missing，并用目录名兜底标题', async () => {
+    const gone = join(env.home, 'gone-ws');
+    const ctx = createCtx({
+      withQuery: true,
+      sessions: [{ id: 'session-gone', cwd: gone, createdAt: 1 }],
+    });
+    const { manager } = createManager(ctx);
+
+    await manager.switchSession('c2c', PEER, 'session-gone', PEER, REPLY);
+    const entries = await manager.listHeldSessions('c2c', PEER);
+
+    expect(entries[0]).toMatchObject({
+      id: 'session-gone',
+      workspace: 'gone-ws',
+      workspacePath: gone,
+      workspaceMissing: true,
+    });
   });
 
   it('宿主列表暂时没有返回的持有会话也保留（用获取时间兜底）', async () => {
@@ -506,15 +560,6 @@ describe('archiveSession', () => {
     expect(persistedId()).toBe(id);
   });
 
-  it('宿主没有 workspaceRegistry 时降级为 unavailable', async () => {
-    const ctx = createCtx({ sessions: [{ id: 'session-x', cwd: WORKSPACE() }], withRegistry: false });
-    const { manager } = createManager(ctx);
-
-    const outcome = await manager.archiveSession('session-x');
-
-    expect(outcome.ok).toBe(false);
-    expect(outcome.reason).toBe('unavailable');
-  });
 });
 
 describe('工作区跟随会话', () => {
@@ -710,11 +755,13 @@ describe('changeChatWorkspace（换工作区）', () => {
     });
     const { manager } = createManager(ctx, registry);
     await manager.getOrCreate('c2c', PEER, PEER, REPLY);
-    expect((await manager.canChooseWorkspace('c2c', PEER)).canChoose).toBe(false);
+    expect(await manager.changeChatWorkspace('c2c', PEER, other)).toMatchObject({
+      ok: false,
+      reason: 'has-session',
+    });
 
     await manager.remove(); // = /new
 
-    expect((await manager.canChooseWorkspace('c2c', PEER)).canChoose).toBe(true);
     expect(await manager.changeChatWorkspace('c2c', PEER, other)).toMatchObject({ ok: true });
 
     await manager.getOrCreate('c2c', PEER, PEER, REPLY);
@@ -965,6 +1012,56 @@ describe('多会话：已获取集合 / /to / 切走不释放', () => {
   });
 });
 
+describe('会话改名', () => {
+  const TARGET = 'session-rename-target';
+
+  it('renameCurrentSession 把标题交给宿主 sessionTitle.rename', async () => {
+    const rename = vi.fn(() => ({ title: '修登录' }));
+    const ctx = createCtx({ sessionTitle: { rename } });
+    const { manager } = createManager(ctx);
+    const record = await manager.getOrCreate('c2c', PEER, PEER, REPLY);
+    expect(manager.hasCurrentSession()).toBe(true);
+
+    expect(manager.renameCurrentSession(' 修登录 ')).toEqual({ ok: true, title: '修登录' });
+    expect(rename).toHaveBeenCalledWith(record.agent.session, '修登录');
+  });
+
+  it('没有当前会话时返回 no-session，不碰宿主', async () => {
+    const rename = vi.fn(() => ({ title: 'x' }));
+    const ctx = createCtx({ sessionTitle: { rename } });
+    const { manager } = createManager(ctx);
+
+    expect(manager.renameCurrentSession('新名字')).toEqual({ ok: false, reason: 'no-session' });
+    expect(manager.hasCurrentSession()).toBe(false);
+    expect(rename).not.toHaveBeenCalled();
+  });
+
+  it('空白标题直接 invalid，不写日志', async () => {
+    const rename = vi.fn(() => ({ title: 'x' }));
+    const ctx = createCtx({ sessionTitle: { rename } });
+    const { manager } = createManager(ctx);
+    await manager.getOrCreate('c2c', PEER, PEER, REPLY);
+
+    expect(manager.renameCurrentSession('   ')).toMatchObject({ ok: false, reason: 'invalid' });
+    expect(rename).not.toHaveBeenCalled();
+  });
+
+  it('renameSession 按 id 改已获取会话；不在集合里时 no-session', async () => {
+    const rename = vi.fn(() => ({ title: '背景会话' }));
+    const targetAgent = fakeAgent(TARGET);
+    const { registry } = createRegistry();
+    registry.get.mockImplementation((sessionId: string) => (sessionId === TARGET ? targetAgent : undefined));
+    const ctx = createCtx({ sessionTitle: { rename } });
+    const { manager } = createManager(ctx, registry);
+    const sent = await manager.sendTo('c2c', PEER, PEER, TARGET, 'hi', REPLY);
+    expect(sent.ok).toBe(true);
+
+    expect(manager.renameSession(TARGET, '背景会话')).toEqual({ ok: true, title: '背景会话' });
+    expect(rename).toHaveBeenCalledWith(targetAgent.session, '背景会话');
+    expect(manager.renameSession('session-absent', 'x')).toEqual({ ok: false, reason: 'no-session' });
+  });
+});
+
 describe('unarchiveSession', () => {
   it('把 id 从归档集里去掉', async () => {
     const id = 'session-back';
@@ -977,12 +1074,4 @@ describe('unarchiveSession', () => {
     expect(archivedIds.has(id)).toBe(false);
   });
 
-  it('宿主没有归档能力时返回 unavailable', async () => {
-    const ctx = createCtx({ sessions: [], withRegistry: false });
-    const { manager } = createManager(ctx);
-
-    const outcome = await manager.unarchiveSession('session-x');
-
-    expect(outcome.reason).toBe('unavailable');
-  });
 });

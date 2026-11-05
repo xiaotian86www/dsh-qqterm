@@ -35,7 +35,7 @@
 ### 3.1 宿主依赖
 
 - `@deepseek-ai/*` 一律放 `peerDependencies`（由宿主安装副本解析），**禁止**加入 `dependencies`，也**禁止**打进客户端 bundle。
-- `inject` 只声明真正依赖的服务；服务缺失时插件应保持 inactive，不能抛错阻塞宿主。
+- `inject` 只声明真正依赖的服务；服务缺失时插件应保持 inactive，不能抛错阻塞宿主。本插件采用全硬依赖：凡是用到的 `ctx` 服务都写进 `inject`，运行时不再探测服务是否存在，也不写「能力不可用」的降级分支。
 - 不要 import 宿主包的私有深层路径；需要的能力优先走 `ctx` 服务或公开导出。
 - 版本号运行时从 `package.json` 读取（`src/shared/utils.ts`），不要另建版本常量。
 
@@ -44,7 +44,7 @@
 - `apply()` 必须快速返回：扫码、网关连接、长轮询等一律 `void …catch()`，**禁止 await 用户交互**（会阻塞 Host ready / Web URL 输出）。
 - 禁止在运行时写 `process.env`；凭据持久化只写 profile 的 `cordis.patch.yml`（会触发 HMR 重载）。
 - 未捕获的 rejection 在宿主是 fail-loud 致命错误，所有异步链必须有兜底 catch。
-- `export const name = 'im-qqbot'`、`inject = ['agents']`、bundle patch 里的 entry id `im-qqbot` 都是兼容契约；改动会让用户 profile 里按 id 写的配置覆盖失效。
+- `export const name = 'im-qqbot'`、bundle patch 里的 entry id `im-qqbot` 都是兼容契约；改动会让用户 profile 里按 id 写的配置覆盖失效。`inject` 随依赖增长而扩展（当前 15 项），只进不退。
 
 ### 3.3 客户端
 
@@ -56,8 +56,12 @@
 
 - 插件只处理 C2C 私聊：群消息在 accessPolicy 层被拦掉，代码里不再有群聊分支。按钮键盘只在 C2C 可用，发送失败必须保留文本回退（现有实现会降级并记 warn）。改问答/审批时在 C2C 验证按钮回退。
 - `ask_user_question` / `approval` 走宿主 waterfall 通道，不要再退回 `userQuestions.ask` 这类服务探测式实现。
-- 聊天会话 key 固定为 `qqbot:${appId}:chat`：全 bot 只有一个「当前会话」，任何 QQ 窗口共享它；已获取集合（普通消息 / `/sessions resume` / `/to` 实际拿到 agent 的会话）可以有多份，全部输出回 QQ，非当前带 `[#短id]`。`/sessions` 默认只列已持有会话（带 `生成中` / `空闲` 与当前 `✅`），`/sessions workspace` 看当前工作区、`/sessions all` 看全部；后两者只标 `📌`，不标当前。`/sessions resume` 与 `/new` 只改当前指针，切走不 dispose 旧会话；`/reset`（别名 `/clear`）会先停掉当前会话再开新的，`/reset all` 停掉全部已获取会话。`/stop` 只停当前会话，`/stop all` 停掉所有正在生成的已获取会话。没有映射即视为全新会话，会话 id 由 `mintSessionId()` 铸造。
+- 聊天会话 key 固定为 `qqbot:${appId}:chat`：全 bot 只有一个「当前会话」，任何 QQ 窗口共享它；已获取集合（普通消息 / `/sessions resume` / `/to` 实际拿到 agent 的会话）可以有多份，全部输出回 QQ，非当前会话的消息首行标 `` > `#短id` · 标题 ``、末行给「回复」「恢复」两个链接（长回复只在首片带标题、末片带链接；提问 / 审批用同一个首行，见 §4.12）。`/sessions` 默认按工作区分组列出已持有会话（组标题带路径，行带 `生成中` / `空闲` 与当前 `✅`），`/sessions workspace` 看当前工作区、`/sessions all` 看全部；后两者只标 `📌`，不标当前。`/sessions resume` 与 `/new` 只改当前指针，切走不 dispose 旧会话；`/reset`（别名 `/clear`）会先停掉当前会话再开新的，`/reset all` 停掉全部已获取会话。`/stop` 只停当前会话，`/stop all` 停掉所有正在生成的已获取会话。没有映射即视为全新会话，会话 id 由 `mintSessionId()` 铸造。
+- 会话名（标题）由宿主 `sessionTitle.rename` 写入 `session/title` 事件，写完即固定，自动标题不再覆盖。`/rename <新标题>` 只改当前会话（与聊天同一权限面，不限白名单）；`/sessions rename <序号|id> <新标题>` 改已打开的其他会话，沿用 `/sessions` 的私聊 + 白名单。两者都只接受 live session：冷会话提示先 `/sessions resume`，不要为了改名悄悄拉起会话。
+- 入站消息的 `source.kind` 必须是 `user`（`src/session/user-message.ts`）：宿主把「人类消息」作为一批能力的触发条件——会话标题（`dsh-session-title` 只对 `kind === 'user'` 排期，内置回退标题也走这条路）、最近提问时间、轮次大纲、replay 断点。自造 kind（如早期的 `qqbot`）会让这些能力静默失效，症状是所有新建会话停在「未命名会话」。宿主自带的外部通道（ACP / JSON-RPC SDK / headless）同样发 `{ kind: 'user' }`。
 - Markdown 输出按 `textChunkLimit` 分片，代码块/表格感知切分在 `src/transport/chunker.ts`，不要绕过。
+- 普通消息的入站处理在 `agent.followup()` 之后必须立刻返回：`concurrencyGuard` 以 QQ 用户为键，处理函数若 `await agent.whenIdle()` 会一直占着锁，正在生成的会话就把空闲会话的消息一起堵在队列里。会话内的先后由宿主 next-turn inbox 保证（`followup` 排在当前轮之后，不打断），跨会话必须互不阻塞。
+- 工具结果（成功与失败）只在 `showToolResults` 打开时推送到 QQ，默认一条都不发；失败消息按 §4.2 的两行格式给目标与原因，不是裸的「执行失败」。
 - 用户可见文案内联在 `src/` 对应模块（`locale/*.json` 只有插件 meta）；写法见 §4，注释与内部日志保持中文。
 
 ## 4. 用户可见文案格式规范
@@ -81,7 +85,7 @@
 | 语义 | 符号 | 位置 | 例 |
 |---|---|---|---|
 | 成功 / 已完成 | `✅` | 行首前缀 | `✅ 模型已切换: openrouter/deepseek-v4-flash` |
-| 失败 / 拒绝 | `❌` | 行首前缀 | `❌ 工具 \`bash\` 执行失败` |
+| 失败 / 拒绝 | `❌` | 行首前缀 | `❌ 工具 \`edit\` 执行失败: \`src/index.ts\`` |
 | 警示 / 降级 / 未达成 | `⚠️` | 行首前缀 | `⚠️ 目录不存在: \`D:\nope\`` |
 | 提示 / 引导 | 不占行首 | 句首或引用块内 | `> 💡 回复编号选择` |
 
@@ -100,7 +104,7 @@
 | 场景 | 图标 | 现有位置 |
 |---|---|---|
 | 指令总览 / 模型配置 | 🤖 | `/bot-help`、`/model` |
-| 会话 / 工作区 | 🗂 | `/sessions`、`/sessions all`、`/workspace` |
+| 会话 / 工作区 | 🗂 | `/sessions`、`/sessions all` |
 | 持有会话 | 📌 | `/sessions workspace`、`/sessions all`、归档候选的行尾 |
 | 归档 | 🗄 | `/sessions archived`、归档结果 |
 | 取消归档 | ♻️ | `unarchive` 结果 |
@@ -108,6 +112,7 @@
 | 会话状态 | 📊 | `/status`、`/bot-status` |
 | 权限预设 | 🛡️ | `/permission` |
 | agent preset | 🧩 | `/preset` |
+| 思考强度 | 🧠 | `/reasoning`、`/model`、`/status` |
 | 计费 | 💰 | `/cost` |
 | 审批 | 🔐 | 审批卡片 |
 | 工具调用 | 🔧 | 工具结果 |
@@ -124,12 +129,16 @@
 **视图型**（多字段 / 列表）：
 
 ```
-### 🗂 持有会话（2 个）
+### 🗂 持有会话（3 个）
 
 **repo** · `D:\repo`
 
 1. #3f2a9b1c · 修登录 · 生成中 · 3d 前 ✅
 2. #9d2c4410 · 写文档 · 空闲 · 5h 前
+
+**docs** · `D:\docs`
+
+3. #7b1e0022 · 补文档 · 空闲 · 2h 前
 
 归档 `/sessions archive <序号>` · `/sessions workspace` 看工作区
 ```
@@ -138,6 +147,7 @@
 - 标题后、区块之间各一个空行；结尾不留空行。
 - 字段行 `**字段**: 值`，字段名 2–4 字；值里的 id / 路径 / 命令 / 预设名用反引号。
 - 多字段视图字段之间不空行；分组小标题（如 `**通用能力**`）独占一行，后接条目。
+- 持有列表按工作区分组，组标题与 `/sessions all` 同一写法；序号跨组连续，`resume` / `archive` 的数字目标按这份列表解析。
 - 列表：有序 `1. `；无序行首 `· `；不嵌套，不用 `-` / `*`（QQ 渲染不稳，且与行内分隔符 ` · ` 撞脸）。
 - 分页：一页 10 条（`PAGE_SIZE`）；多页时页脚只放分页控件，写成 `上一页 · 第 1/2 页 · 下一页`，缺哪边就省略哪边；标题只写「是什么 + 多少个」，不重复页码，也不在控件里夹「还有 N 个」。
 - 批量结果：首行汇总（`🗄 已归档 3 个会话，1 个失败`），随后每行 `✅/⚠️ + 序号 + 标题 + id`，跳过项用 `· ` 单列。
@@ -247,21 +257,18 @@
     （@deepseek-ai/dsh-workspace）：web / desktop profile 自带，自建的最小 profile
     需要手动挂载。你可以检查 profile 配置，或者换一个 profile 再试。
 
-好  ⚠️ 归档失败: 当前 profile 没装会话归档接口（web / desktop 自带）
+好  ⚠️ 归档失败: 会话仍在运行（先 `/stop` 再归档）
 ```
 
 ```
-差  ### 🗂 工作区
-    **repo** · `D:\repo`
+差  ✅ 已开启新会话
+    工作区: repo · `D:\repo`
 
-    下一条消息会在这里开新会话。
-    换：`/workspace <名字|路径>`（`/sessions all` 看有哪些）
-    也可以先 `/new`，再 `/workspace <名字>`。
+    下一条消息会在这里开新会话。想换工作区的话，可以发 `/new <名字|路径>`，
+    也可以在 `/sessions all` 里看看有哪些工作区。
 
-好  ### 🗂 工作区
-    **repo** · `D:\repo`
-
-    下一条消息会在这里开新会话 · 换：`/workspace <名字|路径>`
+好  ✅ 已开启新会话
+    工作区: repo · `D:\repo`
 ```
 
 审稿只问两句：删掉这一行，用户会少知道什么**必要**信息？这一行是事实，还是劝说？
@@ -286,6 +293,28 @@ rg -n '注意|务必|强烈建议|建议您|也可以|另外' src/commands src/f
 ```
 
 三条命令零命中（或只剩 4.2 的例外）才算过。发现偏差当场改，不要在代码里攒「待统一」清单。
+
+### 4.12 非当前会话标记（消息 / 提问 / 审批）
+
+QQ 里只有一个聊天窗口，多个已获取会话的输出、提问、审批都回到这里。「这条是谁说的」只靠首尾两行标记交代，不靠图标、不靠语气。
+
+**首行**（独占一行，后接空行）：`` > `#短id` · 标题 ``
+
+- 短 id 必须包进行内代码，不要写成 `> #短id`：QQ 的 markdown 会把引用行里以 `#` 开头的内容当成标题，整行渲染成大字加粗。
+- 不带 emoji。`🗂` 是「会话列表」这类视图的领域图标（§4.3），来源行只是署名；加上它会和正文结论抢第一眼的注意力，也让人误以为是一条列表。
+- 标题取日志里最新一条 `session/title`（`sessionTitleOf`），取不到写 `未命名会话`，压到 20 字以内（`sourceTitle`）。
+- 非当前会话的提问、审批用同一个首行；正文里不再塞 `[#id]` 之类的行内标记（那是同一件事的第二种写法）。
+
+**末行**（独占一行，前面空行）：`> <回复> · <恢复>`
+
+- 两个都要：回复是 `/to #短id `（把消息发过去），恢复是 `/sessions resume #短id`（把当前指针切过去）。`show` 分别写 `回复` / `恢复`——id 已经在首行署名里，按钮上不重复。
+- 长回复只在首片带首行、末片带末行，中间片一律不带（`chunkDecoratedSessionMessage`）。
+- 提问无按钮时末行是 `回答` 与 `恢复`（`sessionReplyLink(id, '回答')`）；有按钮时只留按钮引导，不再给回答链接。
+- 流式只作用于「发起时是当前会话」的消息（`shouldStream`），QQ 流式接口是整段 update、改不了首行；生成中途切走当前会话，这一段仍会缺署名。要署名完整，等这一轮结束再切——不要为了补标记去动流式链路。
+
+**不套首行的情形**：会话内的状态提示（如提问超时）在非当前会话里要先给首行——它讲的是那条会话的事；而「这条没转发给当前会话」这类路由警告讲的是**当前这条消息**，不套首行，只在句子里带上 `#短id（标题）`（`sessionLabel`）。
+
+实现集中在 `src/transport/session-source.ts`（`sessionSourceHeader` / `sessionLinkRow`），出站、交付物提示、提问、审批共用，不要在别处另拼一套格式。
 
 ## 5. 构建 / 测试 / 调试
 

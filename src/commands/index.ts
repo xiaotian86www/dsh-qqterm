@@ -10,10 +10,11 @@
 import type { CommandDeps, CategorizedCommand } from './types.ts';
 import { newCommand, resetCommand, compactCommand } from './session.ts';
 import { sessionsCommand } from './sessions.ts';
+import { renameCommand } from './rename.ts';
 import { toCommand } from './to.ts';
-import { workspaceCommand } from './workspace.ts';
 import { lsCommand } from './ls.ts';
 import { modelCommand } from './model.ts';
+import { reasoningCommand } from './reasoning.ts';
 import { costCommand } from './cost.ts';
 import { sessionStatusCommand } from './session-status.ts';
 import { presetCommand } from './preset.ts';
@@ -33,10 +34,11 @@ export function buildCommandList(deps: CommandDeps): CategorizedCommand[] {
     resetCommand(deps),
     compactCommand(deps),
     sessionsCommand(deps),
+    renameCommand(deps),
     toCommand(deps),
-    workspaceCommand(deps),
     lsCommand(deps),
     modelCommand(deps),
+    reasoningCommand(deps),
     costCommand(deps),
     sessionStatusCommand(deps),
     presetCommand(deps),

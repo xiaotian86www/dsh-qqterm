@@ -8,18 +8,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { homedir } from 'node:os';
 import yaml from 'js-yaml';
-import type { ModelRoute, ModelEntry } from './types.ts';
-
-/** settings.yaml 中的 provider 配置结构 */
-interface SettingsProviderConfig {
-  models?: Array<{ id?: string; name?: string }>;
-  [key: string]: unknown;
-}
-
-/** settings.yaml 的 llm-pi-ai 段结构 */
-interface LlmPiAiSettings {
-  providers?: Record<string, SettingsProviderConfig>;
-}
+import type { ModelRoute } from './types.ts';
 
 export class SettingsReader {
   /** settings.yaml 缓存 */
@@ -40,40 +29,6 @@ export class SettingsReader {
       return { provider: defaultModel.provider, model: defaultModel.model };
     }
     return undefined;
-  }
-
-  /**
-   * 列出 settings.yaml 中配置的所有模型
-   */
-  readModels(): ModelEntry[] {
-    const settings = this.loadSettings();
-    if (!settings) return [];
-
-    const models: ModelEntry[] = [];
-    const llmPiAi = settings['llm-pi-ai'] as LlmPiAiSettings | undefined;
-
-    if (llmPiAi?.providers) {
-      for (const [providerName, providerConfig] of Object.entries(llmPiAi.providers)) {
-        if (Array.isArray(providerConfig?.models)) {
-          for (const m of providerConfig.models) {
-            if (m.id) {
-              models.push({ provider: providerName, id: m.id, name: m.name || undefined });
-            }
-          }
-        }
-      }
-    }
-
-    return models;
-  }
-
-  /**
-   * 列出 settings.yaml 中配置的 provider 名称
-   */
-  readProviders(): string[] {
-    const settings = this.loadSettings();
-    const llmPiAi = settings?.['llm-pi-ai'] as LlmPiAiSettings | undefined;
-    return llmPiAi?.providers ? Object.keys(llmPiAi.providers) : [];
   }
 
   private loadSettings(): Record<string, unknown> | null {

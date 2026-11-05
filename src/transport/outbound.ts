@@ -5,10 +5,10 @@
  * 事件解析归一化在 events.ts，路由按事件类型分发到私有方法。
  */
 import type { SessionManager, SessionRecord } from '../session/index.ts';
-import { shortSessionId } from '../shared/utils.ts';
 import type { ImQQBotConfig } from '../config.ts';
 import type { Logger } from '../types.ts';
 import { chunkMarkdownText } from './chunker.ts';
+import { chunkDecoratedSessionMessage, sessionTitleOf } from './session-source.ts';
 import { OutboundBuffer, type QQBotSender } from './outbound-buffer.ts';
 import { formatToolResult, type ToolsRegistryLike, type ToolResultData } from './tool-presenter.ts';
 import type { DeliverablesDelivererLike } from './deliverables.ts';
@@ -168,16 +168,13 @@ class OutboundRouter {
   private appendChunk(sessionId: string, record: SessionRecord, text: string): void {
     let buffer = this.buffers.get(sessionId);
     if (buffer === undefined) {
-      // 流式只给 current；非当前会话走静态消息，并给每一片加 `[#短id]`
-      const current = this.manager.isCurrentSession(sessionId);
-      const prefix = current ? '' : `[#${shortSessionId(sessionId)}] `;
+      // 流式只给 current；非当前会话走静态消息，来源头 / 回复链接在 sendNow 里加
       buffer = new OutboundBuffer(
         record,
         this.bot,
         this.config.textChunkLimit,
         this.logger,
         this.shouldStream(record),
-        prefix,
       );
       this.buffers.set(sessionId, buffer);
     }
@@ -195,8 +192,15 @@ class OutboundRouter {
   private onMessage(sessionId: string, record: SessionRecord, event: MessageEvent): void {
     const buffer = this.buffers.get(sessionId);
     if (buffer !== undefined && buffer.text.trim()) {
-      this.trackText(sessionId, this.enqueue(sessionId, () => buffer.flush()));
+      const text = buffer.text;
       this.buffers.delete(sessionId);
+      if (buffer.isStreaming) {
+        this.trackText(sessionId, this.enqueue(sessionId, () => buffer.flush()));
+      } else {
+        // 非当前会话：buffer 只负责累积，发送交给 sendNow 统一加来源头 / 回复链接
+        buffer.cancel();
+        this.trackText(sessionId, this.enqueue(sessionId, () => this.sendNow(record, text, 'sendMarkdown')));
+      }
       return;
     }
 
@@ -221,13 +225,13 @@ class OutboundRouter {
     this.toolCalls.set(event.callId, { name: event.name, args: event.arguments });
   }
 
-  /** 工具结果：错误始终发送，成功结果按开关 */
+  /** 工具结果：成功与失败都受 showToolResults 开关控制（失败消息里带目标与原因） */
   private onToolResult(record: SessionRecord, event: ToolResultEvent): void {
     const call = this.toolCalls.get(event.callId);
     this.toolCalls.delete(event.callId);
     if (call === undefined) return;
 
-    if (event.error === undefined && !this.config.showToolResults) return;
+    if (!this.config.showToolResults) return;
 
     const text = formatToolResult(
       call.name,
@@ -265,8 +269,14 @@ class OutboundRouter {
     // 文本 flush 可等待，保证回复先于交付文件到达用户
     let flushTask: Promise<void> = Promise.resolve();
     if (buffer !== undefined) {
-      if (buffer.text.trim()) {
-        flushTask = this.enqueue(sessionId, () => buffer.flush());
+      const text = buffer.text;
+      if (text.trim()) {
+        if (buffer.isStreaming) {
+          flushTask = this.enqueue(sessionId, () => buffer.flush());
+        } else {
+          buffer.cancel();
+          flushTask = this.enqueue(sessionId, () => this.sendNow(record, text, 'sendMarkdown'));
+        }
       } else {
         buffer.cancel();
       }
@@ -314,14 +324,23 @@ class OutboundRouter {
     return this.enqueue(record.sessionId, () => this.sendNow(record, text, tag));
   }
 
-  /** 在当前发送链内发送：非当前会话的每一片都带 `[#短id]` 前缀 */
+  /**
+   * 在当前发送链内发送：非当前会话整段加来源头，末尾补 `/to` 回复链接。
+   * 来源头只在首片、链接只在末片，避免长回复每片都重复标注。
+   */
   private async sendNow(record: SessionRecord, text: string, tag: string): Promise<void> {
     const current = this.manager.isCurrentSession(record.sessionId);
-    const prefix = current ? '' : `[#${shortSessionId(record.sessionId)}] `;
-    const chunks = chunkMarkdownText(text, this.config.textChunkLimit);
+    const chunks = current
+      ? chunkMarkdownText(text, this.config.textChunkLimit)
+      : chunkDecoratedSessionMessage(
+        text,
+        record.sessionId,
+        sessionTitleOf(record),
+        this.config.textChunkLimit,
+      );
     for (const chunk of chunks) {
       try {
-        await this.bot.sendMarkdown(record.replyTarget, `${prefix}${chunk}`);
+        await this.bot.sendMarkdown(record.replyTarget, chunk);
       } catch (err) {
         this.logger.error(`im-qqbot: ${tag} failed: ${err instanceof Error ? err.message : String(err)}`);
       }

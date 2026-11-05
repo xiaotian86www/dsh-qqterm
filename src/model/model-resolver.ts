@@ -15,14 +15,28 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type { ImQQBotConfig } from '../config.ts';
 import type { Logger } from '../types.ts';
-import type { ModelRoute, ModelEntry } from './types.ts';
+import type { ModelRoute, ModelEntry, EffortOption, ReasoningInfo } from './types.ts';
 import { PrefsStore } from './prefs-store.ts';
 import { SettingsReader } from './settings-reader.ts';
 
-/** ctx.llm 服务的最小接口（listProviders 同步，listModels 异步） */
+/** ctx.llm 服务的最小接口（listProviders 同步，listModels / resolveModelInfo 异步） */
 interface LlmServiceLike {
   listProviders(): Array<{ id: string; name: string }> | string[];
   listModels(providerId: string): Promise<readonly { id: string; name?: string }[]>;
+  /**
+   * 精确模型元数据（catalog 只是 advisory）。
+   *
+   * 思考强度只在 `reasoning` 段里，`listModels` 拿不到；宿主没挂 llm 服务或
+   * 该 provider 不提供元数据时为 undefined——此时按「不支持思考强度」处理。
+   */
+  resolveModelInfo?(providerId: string, model: string, signal?: AbortSignal): Promise<{
+    reasoning?: { efforts?: readonly EffortOption[]; defaultEffort?: string };
+  }>;
+}
+
+/** ctx.agentDefaultModel 的最小接口 */
+interface AgentDefaultModelLike {
+  currentSelection(): { provider: string; model: string; reasoningEffort?: string };
 }
 
 export class ModelResolver {
@@ -169,6 +183,47 @@ export class ModelResolver {
   }
 
   /**
+   * 模型支持的思考强度档位
+   *
+   * 宿主没挂 llm 服务、provider 不提供元数据、或模型本身不支持思考时返回
+   * undefined——调用方据此显示「不支持」，而不是猜一组档位。
+   */
+  async reasoningInfo(route: ModelRoute): Promise<ReasoningInfo | undefined> {
+    const llm = this.llm;
+    if (!llm.resolveModelInfo) return undefined;
+
+    try {
+      const info = await llm.resolveModelInfo(route.provider, route.model);
+      const raw = info?.reasoning?.efforts;
+      const efforts: EffortOption[] = [];
+      if (Array.isArray(raw)) {
+        for (const entry of raw) {
+          if (!entry || typeof entry.id !== 'string' || !entry.id) continue;
+          efforts.push({
+            id: entry.id,
+            name: typeof entry.name === 'string' && entry.name ? entry.name : entry.id,
+            ...(typeof entry.description === 'string' && entry.description
+              ? { description: entry.description }
+              : {}),
+          });
+        }
+      }
+      if (efforts.length === 0) return undefined;
+
+      const defaultEffort = info?.reasoning?.defaultEffort;
+      return {
+        efforts,
+        ...(typeof defaultEffort === 'string' && defaultEffort ? { defaultEffort } : {}),
+      };
+    } catch (err) {
+      this.logger?.debug(
+        `ModelResolver: ${route.provider}/${route.model} 思考强度元数据获取失败: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return undefined;
+    }
+  }
+
+  /**
    * 解析默认模型路由（不含 per-peer 偏好）
    *
    * 优先级：config 显式指定 > settings.yaml（只读） > 宿主 agentDefaultModel
@@ -191,100 +246,57 @@ export class ModelResolver {
   /**
    * 列出所有可用模型
    *
-   * 优先走 ctx.llm 服务动态发现，服务不可用或失败时回退 settings.yaml 静态配置。
+   * 走 ctx.llm 服务动态发现；单个 provider 失败只跳过该 provider。
    */
   async listModels(): Promise<ModelEntry[]> {
-    const llm = this.getLlmService();
-    if (!llm) return this.settings.readModels();
-
-    try {
-      const providers = llm.listProviders();
-      const entries: ModelEntry[] = [];
-      for (const provider of providers) {
-        const providerId = typeof provider === 'string' ? provider : provider.id;
-        try {
-          const models = await llm.listModels(providerId);
-          for (const model of models) {
-            entries.push({ provider: providerId, id: model.id, name: model.name });
-          }
-        } catch (err) {
-          // 单个 provider 失败，跳过
-          this.logger?.debug(
-            `ModelResolver: provider ${providerId} 模型列表获取失败: ${err instanceof Error ? err.message : String(err)}`,
-          );
+    const llm = this.llm;
+    const providers = llm.listProviders();
+    const entries: ModelEntry[] = [];
+    for (const provider of providers) {
+      const providerId = typeof provider === 'string' ? provider : provider.id;
+      try {
+        const models = await llm.listModels(providerId);
+        for (const model of models) {
+          entries.push({ provider: providerId, id: model.id, name: model.name });
         }
+      } catch (err) {
+        // 单个 provider 失败，跳过
+        this.logger?.debug(
+          `ModelResolver: provider ${providerId} 模型列表获取失败: ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
-      if (entries.length > 0) return entries;
-    } catch (err) {
-      this.logger?.warn(
-        `ModelResolver: 动态发现模型失败，回退 settings.yaml: ${err instanceof Error ? err.message : String(err)}`,
-      );
     }
-
-    return this.settings.readModels();
+    return entries;
   }
 
   /**
    * 列出可用 provider 名称
    */
   listProviders(): string[] {
-    const llm = this.getLlmService();
-    if (llm) {
-      const providers = llm.listProviders();
-      if (providers.length > 0) {
-        const first = providers[0];
-        if (typeof first === 'string') return providers as string[];
-        return (providers as Array<{ id: string; name: string }>).map((p) => p.id);
-      }
-    }
-
-    return this.settings.readProviders();
+    const providers = this.llm.listProviders();
+    const first = providers[0];
+    if (first === undefined) return [];
+    if (typeof first === 'string') return providers as string[];
+    return (providers as Array<{ id: string; name: string }>).map((p) => p.id);
   }
 
   // ── 私有方法 ──
 
+  /** 宿主部署默认选择（inject 保证存在） */
   private readFromHost(): ModelRoute | undefined {
-    try {
-      const agentDefaultModel = this.getService('agentDefaultModel') as
-        | { currentSelection(): { provider: string; model: string } }
-        | undefined;
-
-      if (agentDefaultModel && typeof agentDefaultModel.currentSelection === 'function') {
-        const selection = agentDefaultModel.currentSelection();
-        if (selection?.provider && selection?.model) {
-          return { provider: selection.provider, model: selection.model };
-        }
-      }
-    } catch (err) {
-      if (this.config.debug) {
-        this.logger?.debug(`ModelResolver: host service failed: ${err instanceof Error ? err.message : String(err)}`);
-      }
+    const selection = this.agentDefaultModel.currentSelection();
+    if (selection?.provider && selection?.model) {
+      return { provider: selection.provider, model: selection.model };
     }
     return undefined;
   }
 
-  /** 统一的 Cordis 服务访问（可选获取：服务未注入时静默返回 undefined，避免 Proxy 抛错） */
-  private getService(name: string): unknown {
-    try {
-      const ctxAny = this.ctx as unknown as { get?: (key: string) => unknown };
-      return typeof ctxAny.get === 'function' ? ctxAny.get(name) : undefined;
-    } catch {
-      return undefined;
-    }
+  /** ctx.llm 服务（inject 保证存在） */
+  private get llm(): LlmServiceLike {
+    return (this.ctx as unknown as { llm: LlmServiceLike }).llm;
   }
 
-  /** 获取 ctx.llm 服务（最小接口收窄，不可用时返回 undefined） */
-  private getLlmService(): LlmServiceLike | undefined {
-    try {
-      const llm = this.getService('llm') as LlmServiceLike | undefined;
-      if (llm && typeof llm.listProviders === 'function' && typeof llm.listModels === 'function') {
-        return llm;
-      }
-    } catch (err) {
-      this.logger?.warn(
-        `ModelResolver: ctx.llm 服务访问失败: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-    return undefined;
+  private get agentDefaultModel(): AgentDefaultModelLike {
+    return (this.ctx as unknown as { agentDefaultModel: AgentDefaultModelLike }).agentDefaultModel;
   }
 }

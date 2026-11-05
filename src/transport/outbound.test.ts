@@ -22,12 +22,16 @@ function createBot(session: StreamSessionLike): QQBotSender {
 
 const c2cTarget: ReplyTarget = { scope: 'c2c', targetId: 'user1', msgId: 'msg1' };
 
-function createRecord(target: ReplyTarget, sessionId = 'sess-qq'): SessionRecord {
+function createRecord(
+  target: ReplyTarget,
+  sessionId = 'sess-qq',
+  events: readonly { type?: string; data?: { title?: unknown } }[] = [],
+): SessionRecord {
   return {
     sessionKey: 'k',
     sessionId,
     replyTarget: target,
-    agent: {},
+    agent: { session: { id: sessionId, snapshotEvents: () => events } },
     handle: {},
     createdAt: 0,
     lastActiveAt: 0,
@@ -60,7 +64,7 @@ function setup(opts?: {
   const outbound = createOutboundHandler(
     manager, bot, opts?.config ?? createConfig(), createLogger(), undefined, opts?.deliverer,
   );
-  return { outbound, bot, session };
+  return { outbound, bot, session, record };
 }
 
 const delta = (attemptId: string, text: string) => ({ kind: 'text-delta' as const, attemptId, text });
@@ -191,7 +195,12 @@ describe('OutboundRouter.routeStreamFrame', () => {
 });
 
 describe('OutboundRouter: 多会话标记', () => {
-  it('非当前会话静态发送，每一片都带 [#短id]，且不启用流式', async () => {
+  const sourceOf = (id: string, title = '未命名会话'): string => `> \`#${id}\` · ${title}`;
+  const linksOf = (id: string): string =>
+    `> <qqbot-cmd-input text="/to #${id} " show="回复"/>`
+    + ` · <qqbot-cmd-input text="/sessions resume #${id}" show="恢复"/>`;
+
+  it('非当前会话：来源头和回复链接各占一行，正文不会被拼进标记', async () => {
     const { outbound, bot } = setup({ current: false });
 
     outbound.routeSessionEvent({ header: { id: 'sess-qq' } }, {
@@ -201,7 +210,51 @@ describe('OutboundRouter: 多会话标记', () => {
     await Promise.resolve();
 
     expect(bot.openStream).not.toHaveBeenCalled();
-    expect(bot.sendMarkdown).toHaveBeenCalledWith(c2cTarget, '[#sess-qq] hello');
+    expect(bot.sendMarkdown).toHaveBeenCalledWith(
+      c2cTarget,
+      `${sourceOf('sess-qq')}\n\nhello\n\n${linksOf('sess-qq')}`,
+    );
+  });
+
+  it('非当前会话的流式帧先累积，assistant/message 时统一标注后再发', async () => {
+    const { outbound, bot } = setup({ current: false });
+
+    outbound.routeStreamFrame('sess-qq', start('a1'));
+    outbound.routeStreamFrame('sess-qq', delta('a1', 'hello'));
+    await Promise.resolve();
+    expect(bot.sendMarkdown).not.toHaveBeenCalled();
+
+    outbound.routeSessionEvent({ header: { id: 'sess-qq' } }, {
+      type: 'assistant/message',
+      data: { message: { content: [{ type: 'text', text: 'hello' }] } },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(bot.sendMarkdown).toHaveBeenCalledWith(
+      c2cTarget,
+      `${sourceOf('sess-qq')}\n\nhello\n\n${linksOf('sess-qq')}`,
+    );
+  });
+
+  it('来源头带会话标题（取日志里最新的 session/title）', async () => {
+    const record = createRecord(c2cTarget, 'sess-qq', [
+      { type: 'session/title', data: { title: '旧标题' } },
+      { type: 'assistant/message', data: {} },
+      { type: 'session/title', data: { title: '修登录' } },
+    ]);
+    const { outbound, bot } = setup({ current: false, record });
+
+    outbound.routeSessionEvent({ header: { id: 'sess-qq' } }, {
+      type: 'assistant/message',
+      data: { message: { content: [{ type: 'text', text: 'hello' }] } },
+    });
+    await Promise.resolve();
+
+    expect(bot.sendMarkdown).toHaveBeenCalledWith(
+      c2cTarget,
+      `${sourceOf('sess-qq', '修登录')}\n\nhello\n\n${linksOf('sess-qq')}`,
+    );
   });
 
   it('当前会话不加标记', async () => {
@@ -217,6 +270,81 @@ describe('OutboundRouter: 多会话标记', () => {
   });
 });
 
+describe('OutboundRouter: 工具结果开关', () => {
+  const toolCall = (callId: string, name: string, args: unknown) => ({
+    type: 'tool/call',
+    data: { callId, name, arguments: JSON.stringify(args) },
+  });
+  const okResult = (callId: string, text: string) => ({
+    type: 'tool/result',
+    data: {
+      message: {
+        source: { callId },
+        content: [{ type: 'tool-result', content: [{ type: 'text', text }] }],
+      },
+    },
+  });
+  const errorResult = (callId: string, code: string, detail: string) => ({
+    type: 'tool/result',
+    data: {
+      message: {
+        source: { callId },
+        content: [{ type: 'tool-result', content: [{ type: 'text', text: `Error: ${detail}` }], isError: true }],
+      },
+      error: { name: 'FsError', code },
+    },
+  });
+  const session = { header: { id: 'sess-qq' } };
+
+  it('开关关闭：成功与失败都不发', async () => {
+    const { outbound, bot } = setup();
+
+    outbound.routeSessionEvent(session, toolCall('c1', 'read', { file_path: 'a.ts' }));
+    outbound.routeSessionEvent(session, okResult('c1', 'hello'));
+    outbound.routeSessionEvent(session, toolCall('c2', 'edit', { file_path: 'a.ts' }));
+    outbound.routeSessionEvent(session, errorResult('c2', 'FS_AMBIGUOUS_EDIT', 'matched 2 times'));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(bot.sendMarkdown).not.toHaveBeenCalled();
+  });
+
+  it('开关打开：失败带工具、目标与原因', async () => {
+    const { outbound, bot } = setup({ config: createConfig({ showToolResults: true }) });
+
+    outbound.routeSessionEvent(session, toolCall('c1', 'edit', { file_path: 'a.ts' }));
+    outbound.routeSessionEvent(session, errorResult('c1', 'FS_AMBIGUOUS_EDIT', 'matched 2 times'));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(bot.sendMarkdown).toHaveBeenCalledWith(
+      c2cTarget,
+      '❌ 工具 `edit` 执行失败: `a.ts`\n原因: `FsError: FS_AMBIGUOUS_EDIT` · matched 2 times',
+    );
+  });
+
+  it('开关打开：成功结果照旧展示', async () => {
+    const { outbound, bot } = setup({ config: createConfig({ showToolResults: true }) });
+
+    outbound.routeSessionEvent(session, toolCall('c1', 'read', { file_path: 'a.ts' }));
+    outbound.routeSessionEvent(session, okResult('c1', 'hello'));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(bot.sendMarkdown).toHaveBeenCalledWith(c2cTarget, '🔧 `read` 完成\nhello');
+  });
+
+  it('没记录到 tool/call 的结果直接丢弃（不猜工具名）', async () => {
+    const { outbound, bot } = setup({ config: createConfig({ showToolResults: true }) });
+
+    outbound.routeSessionEvent(session, errorResult('ghost', 'FS_AMBIGUOUS_EDIT', 'matched 2 times'));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(bot.sendMarkdown).not.toHaveBeenCalled();
+  });
+});
+
 describe('OutboundRouter: deliverables/presented', () => {
   beforeEach(() => { vi.useFakeTimers(); });
   afterEach(() => { vi.useRealTimers(); });
@@ -226,11 +354,10 @@ describe('OutboundRouter: deliverables/presented', () => {
     data: { turn: 1, callId, files },
   });
   const turnEnd = { type: 'turn/end', data: { reason: { kind: 'stop' } } };
-  const record = createRecord(c2cTarget);
 
   it('轮末投递声明的文件，且在文本之后', async () => {
     const deliver = vi.fn().mockResolvedValue(undefined);
-    const { outbound, bot } = setup({ deliverer: { deliver } });
+    const { outbound, bot, record } = setup({ deliverer: { deliver } });
 
     outbound.routeSessionEvent({ header: { id: 'sess-qq' } }, presentedEvent('c1', [{ path: '/tmp/report.xlsx' }]));
     outbound.routeSessionEvent({ header: { id: 'sess-qq' } }, {
@@ -251,7 +378,7 @@ describe('OutboundRouter: deliverables/presented', () => {
 
   it('同 callId 去重：事件重放不重复投递', async () => {
     const deliver = vi.fn().mockResolvedValue(undefined);
-    const { outbound } = setup({ deliverer: { deliver } });
+    const { outbound, record } = setup({ deliverer: { deliver } });
 
     outbound.routeSessionEvent({ header: { id: 'sess-qq' } }, presentedEvent('c1', [{ path: '/tmp/a.png' }]));
     outbound.routeSessionEvent({ header: { id: 'sess-qq' } }, presentedEvent('c1', [{ path: '/tmp/a.png' }]));

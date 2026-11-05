@@ -59,6 +59,8 @@ export interface ApprovalChannelManagerLike {
   getSessionRecord(scope: ChatScope, peerId: string): ApprovalSessionRecordLike | undefined;
   /** 目标是不是当前聊天接的会话；缺省按 true（非多会话部署） */
   isCurrentSession?(sessionId: string): boolean;
+  /** 会话标题（非当前会话的来源行用）；缺省时来源行只有 id */
+  sessionTitle?(sessionId: string): string | undefined;
 }
 
 export interface ApprovalChannelSenderLike {
@@ -234,10 +236,11 @@ export class ApprovalChannel {
     const command = commandOf(request);
     const nonce = randomUUID().slice(0, 8);
     const isCurrent = this.manager.isCurrentSession?.(sessionId) ?? true;
+    const title = this.manager.sessionTitle?.(sessionId);
     try {
       await this.sender.sendMarkdown(
         record.replyTarget,
-        buildApprovalText(request, command, { sessionId, isCurrent }),
+        buildApprovalText(request, command, { sessionId, isCurrent, title }),
         { keyboard: buildApprovalKeyboard(nonce, sessionId) },
       );
     } catch (err) {

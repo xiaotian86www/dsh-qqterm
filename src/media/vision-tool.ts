@@ -265,7 +265,7 @@ export function ensureVisionInputModal(vision: VisionConfig, logger: Logger): vo
   }
 }
 
-/** 注册 qqbot_describe_image 工具（服务缺失时优雅降级，不阻断插件启动） */
+/** 注册 qqbot_describe_image 工具 */
 export function registerDescribeImageTool(ctx: Context, vision: VisionConfig, logger: Logger): void {
   if (!vision.enabled) return;
   if (!vision.provider || !vision.model) {
@@ -273,13 +273,14 @@ export function registerDescribeImageTool(ctx: Context, vision: VisionConfig, lo
     return;
   }
 
-  const tools = ctx.get('tools') as ToolsRegistryLike | undefined;
-  const llm = ctx.get('llm') as LlmRuntimeLike | undefined;
-  const attachments = ctx.get('attachments') as AttachmentStoreLike | undefined;
-  if (!tools?.register || !llm?.stream || !attachments?.saveImage) {
-    logger.warn('im-qqbot: tools/llm/attachments 服务不可用，qqbot_describe_image 工具未注册');
-    return;
-  }
+  const host = ctx as unknown as {
+    tools: ToolsRegistryLike;
+    llm: LlmRuntimeLike;
+    attachments: AttachmentStoreLike;
+  };
+  const tools = host.tools;
+  const llm = host.llm;
+  const attachments = host.attachments;
 
   const definition = {
     name: DESCRIBE_IMAGE_TOOL_NAME,

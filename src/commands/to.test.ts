@@ -7,7 +7,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { SlashCommandHandlerContext } from '@tencent-connect/qqbot-nodejs';
 import { ConfigSchema, type ImQQBotConfig } from '../config.ts';
-import type { SessionManager, WorkspaceGroup, WorkspaceSession } from '../session/index.ts';
+import type { SessionManager, SessionRecord, WorkspaceGroup, WorkspaceSession } from '../session/index.ts';
 import type { Logger } from '../types.ts';
 import { toCommand } from './to.ts';
 
@@ -42,10 +42,12 @@ function makeManager(over: {
   groups?: WorkspaceGroup[];
   sendTo?: SendToResult;
   live?: boolean;
+  record?: SessionRecord;
 } = {}) {
   return {
     listWorkspaceGroups: vi.fn(async () => over.groups ?? groups()),
     hasLiveSession: vi.fn(() => over.live ?? true),
+    findBySessionId: vi.fn(() => over.record),
     sendTo: vi.fn(async () => over.sendTo ?? { ok: true, kind: 'sent', sessionId: TARGET }),
   } as unknown as SessionManager;
 }
@@ -73,7 +75,7 @@ describe('/to', () => {
 
     const text = await run(manager, '#3f2a9b1c 继续修登录');
 
-    expect(text).toBe('✅ 已发送到 #3f2a9b1c');
+    expect(text).toBe('✅ 已发送到「目标会话」 · `#3f2a9b1c`');
     expect(manager.sendTo).toHaveBeenCalledWith(
       'c2c',
       'user1',
@@ -86,12 +88,12 @@ describe('/to', () => {
 
   it('目标在等答案时回「已回答」，不冒充新 prompt', async () => {
     const manager = makeManager({ sendTo: { ok: true, kind: 'answered', sessionId: TARGET } });
-    expect(await run(manager, `#3f2a9b1c 2`)).toBe('✅ 已回答 #3f2a9b1c');
+    expect(await run(manager, `#3f2a9b1c 2`)).toBe('✅ 已回答「目标会话」 · `#3f2a9b1c`');
   });
 
   it('空文本 + 有待答问题时进入回答模式', async () => {
     const manager = makeManager({ sendTo: { ok: true, kind: 'answer-mode', sessionId: TARGET } });
-    expect(await run(manager, '#3f2a9b1c')).toBe('💡 请发送回答（#3f2a9b1c）');
+    expect(await run(manager, '#3f2a9b1c')).toBe('💡 请发送回答: 「目标会话」 · `#3f2a9b1c`');
     expect(manager.sendTo).toHaveBeenCalledWith(
       expect.anything(), expect.anything(), expect.anything(), TARGET, '',
       expect.anything(),
@@ -102,7 +104,20 @@ describe('/to', () => {
     const manager = makeManager({ sendTo: { ok: false, reason: 'not-running', sessionId: TARGET } });
     const text = await run(manager, `#3f2a9b1c hi`);
     expect(text).toContain('会话未运行');
+    expect(text).toContain('「目标会话」 · `#3f2a9b1c`');
     expect(text).toContain('/sessions resume #3f2a9b1c');
+  });
+
+  it('列表里没有、但有 live 会话时，名字从会话日志的标题取', async () => {
+    const manager = makeManager({
+      groups: groups([entry({ id: CURRENT })]),
+      record: {
+        sessionId: TARGET,
+        agent: { session: { snapshotEvents: () => [{ type: 'session/title', data: { title: '日志标题' } }] } },
+      } as unknown as SessionRecord,
+    });
+    const text = await run(manager, `${TARGET} hi`);
+    expect(text).toBe('✅ 已发送到「日志标题」 · `#3f2a9b1c`');
   });
 
   it('空文本且没有待答问题时提示用法', async () => {

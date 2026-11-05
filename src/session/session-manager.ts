@@ -27,10 +27,11 @@ import { createHostAdapter, type HostAdapter, type HostSessionInfo } from '../ho
 import { mkdirSync, statSync } from 'node:fs';
 import { basename, isAbsolute, resolve } from 'node:path';
 import { resolveAgentCwd } from '../shared/dirs.ts';
+import { sessionTitleOf } from '../transport/session-source.ts';
 import type { ChatScope, Logger, ReplyTarget } from '../types.ts';
 import type { ImQQBotConfig } from '../config.ts';
 import { ModelResolver } from '../model/model-resolver.ts';
-import type { ModelRoute, ModelEntry } from '../model/types.ts';
+import type { ModelRoute, ModelEntry, ReasoningInfo, EffortOption } from '../model/types.ts';
 import type { QuestionChannel } from '../features/question-channel.ts';
 import type { ApprovalChannel } from '../features/approval-channel.ts';
 import type {
@@ -43,6 +44,10 @@ import type {
   PresetEntry,
   PresetSwitchOutcome,
   ModelSwitchOutcome,
+  EffortView,
+  EffortSwitchOutcome,
+  AgentOptionsLike,
+  RequestHeaderLike,
   PermissionPresetsLike,
   PermissionPresetEntry,
   PermissionSwitchOutcome,
@@ -57,6 +62,7 @@ import type {
   WorkspaceInfo,
   ChangeWorkspaceOutcome,
   SwitchSessionOutcome,
+  RenameSessionOutcome,
   ArchiveSessionOutcome,
   SendToOutcome,
 } from './types.ts';
@@ -122,6 +128,53 @@ export function latestCompletedPrefixBoundary(events: readonly unknown[]): numbe
     if (next.seq !== undefined) boundary = next.seq;
   }
   return boundary;
+}
+
+/** 宿主 modelSelection projection 的状态（键 'modelSelection'） */
+interface SelectionState {
+  lastUsed?: HostSelection | null;
+  pending?: HostSelection | null;
+}
+
+/** 宿主 modelSelection 服务（sessionProjections）最小接口 */
+interface SessionProjectionsLike {
+  stateOf(session: unknown, key: string): SelectionState | undefined;
+}
+
+/** 宿主 sessionController 最小接口（只用到 selectModel） */
+interface SessionControllerLike {
+  selectModel(request: {
+    sessionId: string;
+    provider: string;
+    model: string;
+    reasoningEffort?: string;
+  }): Promise<{ selected: HostSelection }>;
+}
+
+/** 宿主 agentDefaultModel 最小接口 */
+interface AgentDefaultModelLike {
+  currentSelection(): HostSelection;
+}
+
+/** 会话在一次请求/选择里用的模型与思考强度 */
+interface HostSelection {
+  provider: string;
+  model: string;
+  reasoningEffort?: string;
+}
+
+/** projection / 请求头产物统一成 HostSelection */
+function toHostSelection(input: {
+  provider?: string;
+  model?: string;
+  reasoningEffort?: string;
+}): HostSelection | undefined {
+  if (!input.provider || !input.model) return undefined;
+  return {
+    provider: input.provider,
+    model: input.model,
+    ...(input.reasoningEffort !== undefined ? { reasoningEffort: String(input.reasoningEffort) } : {}),
+  };
 }
 
 export class SessionManager {
@@ -220,14 +273,10 @@ export class SessionManager {
   }
 
   /**
-   * 动态获取 agentPresets 服务（可选，未注入时返回 undefined）
+   * agentPresets 服务（已加入 inject，缺服务时插件不激活）
    */
-  private getPresetsService(): AgentPresetsLike | undefined {
-    try {
-      return this.ctx.get('agentPresets') as AgentPresetsLike | undefined;
-    } catch {
-      return undefined;
-    }
+  private getPresetsService(): AgentPresetsLike {
+    return (this.ctx as unknown as { agentPresets: AgentPresetsLike }).agentPresets;
   }
 
   /**
@@ -300,6 +349,201 @@ export class SessionManager {
   }
 
   /**
+   * 当前会话的思考强度视图（/reasoning、/model、/status 用）
+   *
+   * 只读宿主状态：会话自己的选择（projection 的 pending / 最近请求头）→
+   * 部署默认选择 → 模型默认值。这里不维护第二份偏好。
+   * 宿主拿不到元数据时 options 为 undefined：命令层据此显示「不支持」。
+   */
+  async getEffortView(scope: ChatScope, peerId: string): Promise<EffortView> {
+    const record = this.getSessionRecord(scope, peerId);
+    const selection = this.hostSelection(record?.agent);
+    const route = this.getEffectiveModel(scope, peerId)
+      ?? selection
+      ?? this.modelResolver.resolveDefault();
+    const reasoning = await this.modelResolver.reasoningInfo(route);
+    if (!reasoning || reasoning.efforts.length === 0) return { defaulted: true };
+
+    const selectedEffort = this.selectedEffortOf(selection, route);
+    const chosen = selectedEffort === undefined
+      ? undefined
+      : reasoning.efforts.find((option) => option.id === selectedEffort);
+    const current = chosen ?? this.modelDefault(reasoning);
+    return {
+      options: reasoning.efforts,
+      ...(current ? { current } : {}),
+      defaulted: chosen === undefined,
+    };
+  }
+
+  /**
+   * 切换思考强度
+   *
+   * 走宿主 `sessionController.selectModel`：当前会话下一轮生效，默认值由宿主
+   * 自己保存（新会话沿用）。`effort` 为 undefined 表示恢复模型默认值。
+   */
+  async selectEffort(
+    scope: ChatScope,
+    peerId: string,
+    effort: string | undefined,
+  ): Promise<EffortSwitchOutcome> {
+    const key = this.sessionKey();
+    const record = this.getSessionRecord(scope, peerId);
+    const selection = this.hostSelection(record?.agent);
+    const route = this.getEffectiveModel(scope, peerId)
+      ?? selection
+      ?? this.modelResolver.resolveDefault();
+    const reasoning = await this.modelResolver.reasoningInfo(route);
+    if (!reasoning) return { ok: false, reason: 'unsupported' };
+
+    const target = effort === undefined
+      ? undefined
+      : reasoning.efforts.find((option) => option.id === effort);
+    if (effort !== undefined && target === undefined) {
+      return { ok: false, reason: 'unknown-effort', options: reasoning.efforts };
+    }
+
+    const selectedEffort = this.selectedEffortOf(selection, route);
+    const current = selectedEffort === undefined
+      ? undefined
+      : reasoning.efforts.find((option) => option.id === selectedEffort);
+    // 未显式选择时「选中模型默认档位」不产生变化，不写宿主
+    const sameAsCurrent = target?.id === current?.id
+      || (target !== undefined && current === undefined && target.id === this.modelDefault(reasoning)?.id);
+    if (sameAsCurrent || (target === undefined && selectedEffort === undefined)) {
+      this.logger.debug(`reasoning effort skipped (already current): key=${key} → ${target?.id ?? 'model default'}`);
+      const shown = target ?? current;
+      return { ok: true, ...(shown ? { effort: shown.id } : {}), unchanged: true };
+    }
+
+    const applied = await this.applySelection(route, target?.id, record);
+    if (!applied.ok) return applied;
+
+    const display = applied.effort !== undefined
+      ? reasoning.efforts.find((option) => option.id === applied.effort) ?? this.modelDefault(reasoning)
+      : this.modelDefault(reasoning);
+    this.logger.info(`reasoning effort switched: key=${key} → ${display?.id ?? 'model default'}`);
+    return { ok: true, ...(display ? { effort: display.id } : {}) };
+  }
+
+  /**
+   * 把思考强度选择交给宿主 `sessionController`。
+   *
+   * `selectModel` 只对 live 会话生效：没有会话时如实拒绝，不保存任何本地状态。
+   */
+  private async applySelection(
+    route: ModelRoute,
+    effort: string | undefined,
+    record: SessionRecord | undefined,
+  ): Promise<{ ok: true; effort?: string } | EffortSwitchOutcome> {
+    if (!record) return { ok: false, reason: 'no' };
+
+    try {
+      const { selected } = await this.sessionController.selectModel({
+        sessionId: record.sessionId,
+        provider: route.provider,
+        model: route.model,
+        ...(effort !== undefined ? { reasoningEffort: effort } : {}),
+      });
+      return { ok: true, ...(selected.reasoningEffort !== undefined ? { effort: selected.reasoningEffort } : {}) };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`reasoning effort switch failed: ${message}`);
+      return { ok: false, reason: 'failed', message };
+    }
+  }
+
+  /**
+   * 会话当前选择：projection 待生效的选择 → 最近请求头（排除 adapter 默认）
+   * → 部署默认选择。都没有时返回 undefined。
+   */
+  private hostSelection(agent?: DshAgent): HostSelection | undefined {
+    if (agent) {
+      const state = this.selectionState(agent);
+      if (state?.pending) return toHostSelection(state.pending);
+
+      const header = this.requestHeader(agent);
+      if (header?.config?.provider && header.config.model) {
+        const effort = header.adapterDefaults?.reasoningEffort === true
+          ? undefined
+          : header.config.reasoningEffort;
+        return {
+          provider: header.config.provider,
+          model: header.config.model,
+          ...(effort !== undefined ? { reasoningEffort: String(effort) } : {}),
+        };
+      }
+
+      if (state?.lastUsed) return toHostSelection(state.lastUsed);
+    }
+    return this.defaultSelection();
+  }
+
+  /** 宿主的 modelSelection projection（未注册时返回 undefined） */
+  private selectionState(agent: DshAgent): SelectionState | undefined {
+    try {
+      const state = this.sessionProjections.stateOf(agent.session, 'modelSelection');
+      return state ?? undefined;
+    } catch (err) {
+      this.logger.debug(
+        `modelSelection projection unavailable: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return undefined;
+    }
+  }
+
+  /** 宿主最近一次请求头 */
+  private requestHeader(agent: DshAgent): RequestHeaderLike | undefined {
+    try {
+      return agent.session.requestHeader?.();
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** 部署默认选择（agentDefaultModel.currentSelection） */
+  private defaultSelection(): HostSelection | undefined {
+    const selection = this.agentDefaultModel.currentSelection();
+    return selection?.provider && selection.model ? toHostSelection(selection) : undefined;
+  }
+
+  /** 宿主选择里的档位，只有选择的就是当前路由时才算数 */
+  private selectedEffortOf(selection: HostSelection | undefined, route: ModelRoute): string | undefined {
+    if (!selection) return undefined;
+    if (selection.provider !== route.provider || selection.model !== route.model) return undefined;
+    return selection.reasoningEffort;
+  }
+
+  /** 模型默认档位：defaultEffort，没有时用第一项 */
+  private modelDefault(reasoning: ReasoningInfo): EffortOption | undefined {
+    if (reasoning.defaultEffort !== undefined) {
+      const hit = reasoning.efforts.find((option) => option.id === reasoning.defaultEffort);
+      if (hit) return hit;
+    }
+    return reasoning.efforts[0];
+  }
+
+  /** create / resume 的 agentOptions：路由 + 部署默认档位（模型不支持时不带） */
+  private async agentOptionsFor(
+    _key: string,
+    route: ModelRoute | undefined,
+  ): Promise<AgentOptionsLike | undefined> {
+    if (!route) return undefined;
+    const selection = this.hostSelection();
+    const effort = selection?.reasoningEffort !== undefined
+      && selection.provider === route.provider
+      && selection.model === route.model
+      ? selection.reasoningEffort
+      : undefined;
+    if (effort === undefined) return { ...route };
+
+    const reasoning = await this.modelResolver.reasoningInfo(route);
+    return reasoning?.efforts.some((option) => option.id === effort)
+      ? { ...route, reasoningEffort: effort }
+      : { ...route };
+  }
+
+  /**
    * 切换指定 peer 的 agent preset（per-peer 覆盖）
    *
    * 已开始的会话保持锁定（blank-session contract）：只持久化为新会话默认，
@@ -310,7 +554,6 @@ export class SessionManager {
 
     // 1. 校验 preset 存在 + 可加载（broken 拒绝）
     const presets = this.getPresetsService();
-    if (!presets) return { ok: false, reason: 'unavailable' };
     let resolved: { id: string; broken?: string };
     try {
       resolved = await presets.resolve(presetId);
@@ -350,23 +593,17 @@ export class SessionManager {
   // ── 权限预设（permission-presets，可选服务） ──
 
   /**
-   * 动态获取 permissionPresets 服务（可选，未注入时返回 undefined）
+   * permissionPresets 服务（已加入 inject，缺服务时插件不激活）
    *
-   * 它是「沙箱模式 + 审批策略」这一对旋钮的唯一写入口；宿主没有该服务时
-   * `/permission` 只能如实报不可用，不能自己改沙箱。
+   * 它是「沙箱模式 + 审批策略」这一对旋钮的唯一写入口。
    */
-  private getPermissionPresetsService(): PermissionPresetsLike | undefined {
-    try {
-      return this.ctx.get('permissionPresets') as PermissionPresetsLike | undefined;
-    } catch {
-      return undefined;
-    }
+  private getPermissionPresetsService(): PermissionPresetsLike {
+    return (this.ctx as unknown as { permissionPresets: PermissionPresetsLike }).permissionPresets;
   }
 
   /** 可切换的权限预设（含在线的 auto） */
   listPermissionPresets(): PermissionPresetEntry[] {
     const presets = this.getPermissionPresetsService();
-    if (!presets) return [];
     try {
       const names = Array.isArray(presets.names) ? presets.names : [];
       return names.map((name) => {
@@ -389,7 +626,6 @@ export class SessionManager {
    */
   getPermissionPreset(_scope: ChatScope, _peerId: string): string | undefined {
     const presets = this.getPermissionPresetsService();
-    if (!presets) return undefined;
 
     const record = this.currentRecord();
     if (record) {
@@ -422,7 +658,6 @@ export class SessionManager {
   ): Promise<PermissionSwitchOutcome> {
     const key = this.sessionKey();
     const presets = this.getPermissionPresetsService();
-    if (!presets) return { ok: false, reason: 'unavailable' };
     if (!presets.names.includes(preset)) return { ok: false, reason: 'unknown-preset' };
 
     // 可重入：目标就是当前预设时直接返回，避免无会话时为了「切换」再拉起一个会话
@@ -465,7 +700,7 @@ export class SessionManager {
    */
   private async rebuildSession(
     record: SessionRecord,
-    options: { route?: ModelRoute },
+    options: { route?: ModelRoute; agentOptions?: AgentOptionsLike },
   ): Promise<void> {
     const key = record.sessionKey;
     const oldId = record.sessionId;
@@ -489,6 +724,7 @@ export class SessionManager {
 
     const childId = SessionId(mintSessionId());
     const effectiveRoute = options.route ?? this.modelResolver.getEffectiveRoute(key);
+    const agentOptions = options.agentOptions ?? await this.agentOptionsFor(key, effectiveRoute);
     const composed = await this.composePreset(this.getEffectivePresetByKey(key));
     const created = await this.agents.create({
       sessionId: childId,
@@ -501,7 +737,7 @@ export class SessionManager {
         parentSession: oldId,
         ...(composed.agentPreset ? { agentPreset: composed.agentPreset } : {}),
       },
-      ...(effectiveRoute ? { agentOptions: effectiveRoute } : {}),
+      ...(agentOptions ? { agentOptions } : {}),
       ...(composed.setup ? { setup: composed.setup } : {}),
     });
 
@@ -549,6 +785,78 @@ export class SessionManager {
   /** 某个 sessionId 是不是当前聊天正在接的会话 */
   isCurrentSession(sessionId: string): boolean {
     return this.currentSessionId() === sessionId;
+  }
+
+  /**
+   * 会话标题（非当前会话的消息头 / 提问 / 审批共用）。
+   *
+   * 标题由宿主异步生成，取不到时返回 undefined，调用方用兜底名。
+   */
+  sessionTitle(sessionId: string): string | undefined {
+    const record = this.findBySessionId(sessionId);
+    return record === undefined ? undefined : sessionTitleOf(record);
+  }
+
+  /** 当前聊天有没有可操作的会话（已获取记录，或进程内仍活着的 agent） */
+  hasCurrentSession(): boolean {
+    const sessionId = this.currentSessionId();
+    if (sessionId === undefined) return false;
+    return this.currentRecord() !== undefined || this.agents.get(sessionId) !== undefined;
+  }
+
+  /**
+   * `/rename`：给当前会话改标题。
+   *
+   * 宿主的标题服务只接受**存活**的 session（它要往会话日志追加
+   * `session/title` 事件），所以这里先找已获取记录；记录不在但进程内还有
+   * live agent（Web / TUI 打开的同一会话）时也允许改名。冷会话返回
+   * `no-session`，由命令层提示先发一条消息。
+   */
+  renameCurrentSession(title: string): RenameSessionOutcome {
+    const record = this.currentRecord();
+    if (record) return this.renameRecord(record, title);
+
+    const sessionId = this.currentSessionId();
+    const live = sessionId === undefined ? undefined : this.agents.get(sessionId);
+    if (live === undefined) return { ok: false, reason: 'no-session' };
+    return this.renameLive(live.id, live.session, title);
+  }
+
+  /**
+   * 给指定会话改标题（`/sessions rename`）。
+   *
+   * 目标必须在已获取集合里，或至少有一个 live agent；冷会话不在这里静默
+   * resume——那是 `/sessions resume` 的职责。
+   */
+  renameSession(sessionId: string, title: string): RenameSessionOutcome {
+    const record = this.findBySessionId(sessionId);
+    if (record) return this.renameRecord(record, title);
+
+    const live = this.agents.get(sessionId);
+    if (live === undefined) return { ok: false, reason: 'no-session' };
+    return this.renameLive(sessionId, live.session, title);
+  }
+
+  private renameRecord(record: SessionRecord, title: string): RenameSessionOutcome {
+    return this.renameLive(record.sessionId, record.agent.session, title);
+  }
+
+  /** 统一入口：标题写入宿主日志 + 留痕；空标题在动宿主前就拒绝 */
+  private renameLive(
+    sessionId: string,
+    session: DshAgent['session'],
+    title: string,
+  ): RenameSessionOutcome {
+    const trimmed = title.trim();
+    if (trimmed === '') return { ok: false, reason: 'invalid', message: '新标题不能为空' };
+
+    const outcome = this.host.renameSession(session, trimmed);
+    if (outcome.ok) {
+      this.logger.info(`session renamed: sessionId=${sessionId} title=${outcome.title}`);
+    } else {
+      this.logger.warn(`session rename failed: sessionId=${sessionId} reason=${outcome.reason}${outcome.message ? ` err=${outcome.message}` : ''}`);
+    }
+    return outcome;
   }
 
   /** 已获取会话快照（出站 / 问答 / 审批共用） */
@@ -709,6 +1017,21 @@ export class SessionManager {
     return `qqbot:${this.config.appId}:chat`;
   }
 
+  /** 宿主会话控制服务（inject 保证存在） */
+  private get sessionController(): SessionControllerLike {
+    return (this.ctx as unknown as { sessionController: SessionControllerLike }).sessionController;
+  }
+
+  /** 宿主会话 projection 注册表（inject 保证存在） */
+  private get sessionProjections(): SessionProjectionsLike {
+    return (this.ctx as unknown as { sessionProjections: SessionProjectionsLike }).sessionProjections;
+  }
+
+  /** 宿主部署默认模型选择（inject 保证存在） */
+  private get agentDefaultModel(): AgentDefaultModelLike {
+    return (this.ctx as unknown as { agentDefaultModel: AgentDefaultModelLike }).agentDefaultModel;
+  }
+
   /** 把当前会话 id 落盘，后续（重启、切换、并发调用）一律以 prefs 为准 */
   private persistSessionId(sessionKey: string, sessionId: string): void {
     if (this.modelResolver.getSessionId(sessionKey) !== sessionId) {
@@ -838,9 +1161,10 @@ export class SessionManager {
       agentPreset = composed.agentPreset;
       try {
         const resumeRoute = this.modelResolver.getResumeRoute(key);
+        const resumeOptions = await this.agentOptionsFor(key, resumeRoute);
         const resumed = await this.agents.resume({
           resumeSessionId: sessionId,
-          ...(resumeRoute ? { agentOptions: resumeRoute } : {}),
+          ...(resumeOptions ? { agentOptions: resumeOptions } : {}),
           ...(composed.setup ? { setup: composed.setup } : {}),
         });
         agent = resumed.agent;
@@ -851,13 +1175,14 @@ export class SessionManager {
         if (!(await this.mayCreateAfterResumeFailure(key, sessionId, err))) throw err;
         sessionId = this.resolveCreateId(key, sessionId);
         mkdirSync(directory, { recursive: true });
+        const createOptions = await this.agentOptionsFor(key, route);
         const created = await this.agents.create({
           sessionId,
           meta: {
             cwd: directory,
             ...(agentPreset ? { agentPreset } : {}),
           },
-          ...(route ? { agentOptions: route } : {}),
+          ...(createOptions ? { agentOptions: createOptions } : {}),
           ...(composed.setup ? { setup: composed.setup } : {}),
         });
         agent = created.agent;
@@ -1233,6 +1558,8 @@ export class SessionManager {
       const workspace = directory === undefined
         ? undefined
         : workspaces.find((item) => samePath(item.path, directory));
+      const workspacePath = workspace?.path ?? directory;
+      const workspaceTitle = workspace?.title ?? (directory === undefined ? undefined : basename(directory));
       return {
         id: record.sessionId,
         ...(titles.has(record.sessionId) ? { title: titles.get(record.sessionId) } : {}),
@@ -1243,9 +1570,10 @@ export class SessionManager {
         running: record.agent.status === 'running',
         isSeeded: info?.isSeeded ?? false,
         archived: false,
-        ...(workspace !== undefined
-          ? { workspace: workspace.title }
-          : directory !== undefined ? { workspace: basename(directory) } : {}),
+        ...(workspaceTitle !== undefined ? { workspace: workspaceTitle } : {}),
+        ...(workspacePath !== undefined
+          ? { workspacePath, workspaceMissing: !isDirectory(workspacePath) }
+          : {}),
       };
     });
   }
@@ -1269,30 +1597,13 @@ export class SessionManager {
     return { title: basename(workspace), path: workspace, missing: !isDirectory(workspace) };
   }
 
-  /** 宿主工作区清单（`/workspace` 匹配与提示用）；registry 未挂载时为空数组 */
+  /** 宿主工作区清单（`/new <工作区>` 匹配用） */
   listWorkspaceInfos(): WorkspaceInfo[] {
     return this.host.workspaceList().map((item) => ({
       title: item.title,
       path: item.path,
       missing: !isDirectory(item.path),
     }));
-  }
-
-  /**
-   * 这个聊天的工作区还能不能改（= 还没有落盘的会话）。
-   *
-   * 会话的 cwd 在创建时写进 header，宿主没有改它的接口（`workingDirectory` 只读），
-   * 所以工作区只能在会话落盘**之前**选：`/new` 之后，或这个聊天从没说过话。
-   *
-   * @param scope 当前 chat 作用域
-   * @param peerId 当前 chat 的 peer id
-   */
-  async canChooseWorkspace(
-    _scope: ChatScope,
-    _peerId: string,
-  ): Promise<{ canChoose: boolean; sessionId?: string }> {
-    const blocked = await this.workspaceBlocker(this.sessionKey());
-    return blocked === undefined ? { canChoose: true } : { canChoose: false, sessionId: blocked };
   }
 
   /**
@@ -1333,7 +1644,7 @@ export class SessionManager {
    *
    * 只在会话还没落盘时生效：已有会话时改目录是静默无效的——resume 回来的会话
    * 以自己的 header.cwd 为准，紧接着 `rememberDirectory` 会把记录覆盖回去——所以
-   * 这里直接拒绝，由命令层给出「先 /new」的下一步。
+   * 这里直接拒绝，由调用方给出下一步。
    *
    * @param scope 当前 chat 作用域
    * @param peerId 当前 chat 的 peer id
@@ -1544,9 +1855,10 @@ export class SessionManager {
       agentPreset = composed.agentPreset;
       try {
         const resumeRoute = this.modelResolver.getResumeRoute(key);
+        const resumeOptions = await this.agentOptionsFor(key, resumeRoute);
         const resumed = await this.agents.resume({
           resumeSessionId: sessionId,
-          ...(resumeRoute ? { agentOptions: resumeRoute } : {}),
+          ...(resumeOptions ? { agentOptions: resumeOptions } : {}),
           ...(composed.setup ? { setup: composed.setup } : {}),
         });
         agent = resumed.agent;
@@ -1688,9 +2000,8 @@ export class SessionManager {
     }
     if (record.agent.status !== 'idle') return { ok: false, reason: 'busy' };
 
-    const compaction = (await this.host.serviceFor(record.agent, 'compaction')
-      ?? this.host.globalService('compaction')) as CompactionServiceLike | undefined;
-    if (!compaction) return { ok: false, reason: 'unavailable' };
+    const compaction = ((await this.host.serviceFor(record.agent, 'compaction'))
+      ?? (this.ctx as unknown as { compaction?: CompactionServiceLike }).compaction) as CompactionServiceLike;
 
     const route = this.modelResolver.getEffectiveRoute(key);
     const agentCtx = {

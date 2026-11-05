@@ -18,7 +18,8 @@ import type { QQBotSender } from '../transport/outbound-buffer.ts';
 import { QuestionChannel } from '../features/question-channel.ts';
 import { ApprovalChannel, type ApprovalChannelContext } from '../features/approval-channel.ts';
 import { decodeButtonData } from '../features/button-utils.ts';
-import { buildUserAgent, shortSessionId } from '../shared/index.ts';
+import { buildUserAgent } from '../shared/index.ts';
+import { decorateSessionMessage, sessionTitleOf } from '../transport/session-source.ts';
 import type { ImQQBotConfig } from '../config.ts';
 import type { Logger } from '../types.ts';
 import { setupMiddlewares } from './middleware-setup.ts';
@@ -80,13 +81,8 @@ export async function bootstrapGateway(
   });
 
   // ── 出站：dsh session/event → QQ 消息 ──
-  // 获取 tools 服务（工具结果结构化展示），可选
-  let toolsRegistry: ToolsRegistryLike | undefined;
-  try {
-    toolsRegistry = ctx.get('tools') as ToolsRegistryLike | undefined;
-  } catch {
-    toolsRegistry = undefined;
-  }
+  // tools 服务（工具结果结构化展示）
+  const toolsRegistry = (ctx as unknown as { tools?: ToolsRegistryLike }).tools;
 
   // 发送适配器：将 QQBot 实例适配为 QQBotSender（openStream 参数形态不同）。
   // sendMarkdown 统一做被动回复限额管控：同一 msgId 超限/过期时降级主动推送。
@@ -120,9 +116,9 @@ export async function bootstrapGateway(
     config,
     logger,
     (record) => manager.directoryForAgent(record.agent),
-    (record) => (manager.isCurrentSession(record.sessionId)
-      ? ''
-      : `[#${shortSessionId(record.sessionId)}] `),
+    (record, text) => (manager.isCurrentSession(record.sessionId)
+      ? text
+      : decorateSessionMessage(text, record.sessionId, sessionTitleOf(record))),
   );
 
   const outbound = createOutboundHandler(manager, sender, config, logger, toolsRegistry, deliverablesDeliverer);

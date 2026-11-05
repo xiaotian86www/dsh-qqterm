@@ -104,7 +104,7 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqbot/cordis.dev.yml
 | `processingTimeoutMs` | number | `1800000` | Processing timeout (ms), aborts the current LLM call |
 | `maxQueue` | number | `20` | Max concurrent queue length |
 | `askTimeoutMs` | number | `300000` | Question timeout (ms), default 5 min (ask_user_question) |
-| `showToolResults` | boolean | `false` | Show successful tool-call results (errors always shown) |
+| `showToolResults` | boolean | `false` | Show tool-call results, both success and failure |
 | `debug` | boolean | `false` | Debug mode |
 
 ### Chat session vs background sessions
@@ -113,8 +113,9 @@ The plugin separates two things: the **chat session** is the conversation the QQ
 and **background sessions** are the host's session logs.
 
 - There is exactly one *current* chat session: every private chat window reads and continues the same context.
-- Background sessions stay multiple: `/sessions` lists the sessions QQ holds, `/sessions workspace` shows the current workspace, and `/new` starts one. Sessions actually acquired by `/sessions resume` or `/to` stay in a runtime acquired set — their output, questions, and approvals still come back to QQ (non-current ones prefixed with `[#shortid]`).
+- Background sessions stay multiple: `/sessions` groups the sessions QQ holds by workspace by default, `/sessions workspace` shows the current workspace, and `/new` starts one. Sessions actually acquired by `/sessions resume` or `/to` stay in a runtime acquired set — their output, questions, and approvals still come back to QQ (messages from a non-current session get a source line `#shortid · title` above the body and a `/to` reply link at the end).
 - Sessions are never reclaimed by time: long-running tasks are never interrupted.
+- Queueing is per session: a message for an idle current session starts at once even while another session is generating, while several messages sent to the same session run one turn each, in order.
 
 When several private chats talk at once, the reply goes to the chat of the latest message.
 
@@ -158,20 +159,21 @@ When several private chats talk at once, the reply goes to the chat of the lates
 | `/new` | Start a new session (clear context); may take a workspace: `/new <workspace\|path>` |
 | `/reset` (alias `/clear`) | Stop the current session and start a new one in the same workspace; `/reset all` stops every acquired session |
 | `/compact` | Compact session history (replace old records with a summary) |
-| `/sessions` (alias `/session`) | Session management: list held sessions with status and current marker by default; `workspace` for the current workspace, `all` for everything |
+| `/sessions` (alias `/session`) | Session management: group held sessions by workspace with status and the current marker by default; `workspace` for the current workspace, `all` for everything |
+| `/rename` | Rename the current session (the title is pinned against automatic titles) |
 | `/to` | Send a message to a specific session, or answer its question |
-| `/workspace` | Workspace: view / switch (only right after `/new`) |
 | `/ls` | List the subdirectories of a directory; click a row to go deeper |
 | `/model` | View or switch model |
+| `/reasoning` (alias `/think`) | View or switch reasoning effort (levels depend on the model); `default` restores the model default |
 | `/preset` | View or switch agent preset (applies to new sessions) |
 | `/permission` | View or switch the permission preset (sandbox mode + approval policy, effective immediately; allowlisted users only) |
 | `/cost` | View token usage of the current session |
-| `/status` | View session status: workspace / model / context / tokens |
+| `/status` | View session status: session name and short id / workspace / model / reasoning effort / context / tokens |
 | `/stop` | Abort the current generation; `/stop all` aborts every acquired session that is generating |
 | `/bot-ping` | Network latency test (transport & processing time) |
 | `/bot-version` | View version info |
 | `/bot-me` | View your OpenID (for access allowlists) |
-| `/bot-status` | View current session status (brief; see `/status` for the full view) |
+| `/bot-status` | View current session status (brief: session name and short id / model / reasoning effort / preset / message count; see `/status` for the full view) |
 | `/bot-help` | View all commands |
 
 > A misspelled command (like `/modle` or `/sesions`) is no longer forwarded to the model as a prompt: the bot replies "no such command" and, when the intent is clear enough, offers the correct one as a clickable command. Only "slash + ASCII command name" counts as a command, so text like `/usr/local/bin` or `/今天` still goes to the model; the full-width `／` is equivalent to `/`, so it works straight from a Chinese IME.
@@ -185,17 +187,15 @@ A workspace is the host's durable grouping record for "one directory + the sessi
 - **The workspace follows the session**: `/sessions resume` moves this chat into that session's directory; a later `/new` stays in the same workspace, and it survives a restart (persisted in the `dirs` section of `~/.dsh-qqbot/model-prefs.json`).
 - **Titles come from directory names**: the plugin no longer names workspaces `QQBot`; the host derives the title from the last path segment. Legacy `QQBot` titles are migrated on the next attach (titles the user changed are left alone).
 
-### Switching workspace (`/workspace`)
+### Switching workspace (`/new <workspace>`)
 
-A workspace *is* the session's `cwd`. It is written into the session header when the session is created and the host exposes no API to change it, so switching workspace only takes effect **before a session is persisted**:
+A workspace *is* the session's `cwd`. It is written into the session header when the session is created and the host exposes no API to change it, so switching workspace only takes effect **before a session is persisted** — and the entry point is `/new` itself:
 
 | Usage | Description |
 |------|------|
-| `/new <name\|path>` | One step: start a new session in that workspace (the common case) |
-| `/workspace` | Show the current workspace (title / path / whether it can still change) |
-| `/workspace <name\|path>` | Switch workspace only, without starting a session (after `/new`) |
+| `/new <name\|path>` | One step: start a new session in that workspace |
+| `/ls` | Not sure about the path? List directories and click through |
 
-- There are only two moments: **right after `/new`**, or before this chat has ever talked. Once a session exists `/workspace` refuses and points at `/new <name|path>` — the directory is already in that session's header, and editing the record would not take effect (a resumed session keeps its own `cwd`).
 - A workspace is matched by **title**, **directory name** (case-insensitive, unique prefix), or an **absolute path**; the next message creates the session in the new directory and the workspace shows up in the host sidebar. A missing directory (or a file) is rejected without leaving a half-applied state, and `/new <path>` validates the target *before* touching the session, so a typo never costs you the current one.
 - Not sure how to spell the path? Use `/ls`: it lists the subdirectories of the current workspace and every row is clickable to go one level deeper. Rows always fill an absolute path, so descending never drifts.
 - Same permission surface as `/sessions`: **private chat + allowlist** (`access.c2cAllow`) only — switching workspace means changing the directories the agent may touch. A plain `/new` is unrestricted.
@@ -206,13 +206,14 @@ A workspace *is* the session's `cwd`. It is written into the session header when
 
 | Usage | Description |
 |------|------|
-| `/sessions` | List sessions acquired by QQ across workspaces, current first; each row shows `生成中` / `空闲`, and the current row ends with `✅`; if the current pointer is not in the acquired set, a `待恢复` line is added; 10 per page |
+| `/sessions` | List sessions acquired by QQ grouped by workspace, current first; group headers show the workspace path; each row shows `生成中` / `空闲`, and the current row ends with `✅`; if the current pointer is not in the acquired set, a `待恢复` line is added; indexes are continuous across groups; 10 per page |
 | `/sessions <page>` | Next page of the held list, e.g. `/sessions 2`; the footer shows `上一页 · 第 1/2 页 · 下一页` |
 | `/sessions workspace` | List unarchived sessions of **the current workspace** (newest first, 10 per page); only acquired sessions get a `📌` mark, with no current marker and no generation status |
 | `/sessions workspace <page>` | Next page of the workspace view; same footer format as the held list |
 | `/sessions all` | List every session grouped by workspace (pinned first inside a group); acquired sessions are marked `📌`, with no current marker; groups show no index, only short ids; 10 per page |
 | `/sessions all <page>` | Next page of the all-workspaces view; the workspace title of the first session on the page is repeated; same footer format |
 | `/sessions resume <index\|id>` | Rebind this chat to that session and continue its history (an archived target is unarchived on the way); the workspace follows; **indexes resolve against the held list only** |
+| `/sessions rename <index\|id> <title>` | Rename a session; the title is pinned against automatic titles. The target must already be open (use `/sessions resume` first) |
 | `/sessions archive <index\|id>[,<index\|id>…]` | Archive the session: hidden from this command and the Web sidebar, **on-disk log kept**, restorable at any time; separate multiple targets with commas (up to 10 per command); without targets it lists current-workspace candidates first, then held sessions from other workspaces (no indexes; use `page <page>` to page through them) |
 | `/sessions archived [page]` | List archived sessions; each row shows its short id and workspace and fills `/sessions unarchive <id>` into the input box |
 | `/sessions unarchive <id>[,<id>…]` | Restore the session to the regular list |
@@ -221,14 +222,14 @@ A workspace *is* the session's `cwd`. It is written into the session header when
 
 Notes:
 
-- **Handle rule**: every row shows an 8-char short id (like `#3f2a9b1c`; the `#` is optional) that works from any view; an **index only means a row of the `/sessions` held list**, and it stays continuous across pages. `workspace` / `all` / `archived` / the archive picker show no indexes.
+- **Handle rule**: every row shows an 8-char short id (like `#3f2a9b1c`; the `#` is optional) that works from any view; an **index only means a row of the `/sessions` held list**, and it stays continuous across groups and pages. `workspace` / `all` / `archived` / the archive picker show no indexes.
 - **Paging**: multi-page views use `上一页 · 第 1/2 页 · 下一页` in the footer, omitting the missing direction; the page number is not in the title and "N more" is not shown.
 - Status words appear only in the held list: `生成中` (agent running), `空闲` (held but idle); a current pointer that has not been acquired yet shows `待恢复`. Other views only mark acquired sessions with `📌` (QQ holds it), with no current marker and no status.
 - Private chat only, and the operator must be in the allowlist (`access.c2cAllow`) — titles and archive state touch other chats' data; with no allowlist configured the command is disabled (`/bot-me` shows your OpenID).
 - Archiving goes through the host `workspaceRegistry.archiveSession` and only writes the registry-global archive set — **no file is deleted**. This plugin offers no hard delete; clean up on disk from the Web side or by hand.
-- Archiving needs the host workspace registry (`@deepseek-ai/dsh-workspace`): the web / Desktop profiles ship it, while a minimal custom profile (just `dsh-base` + this plugin) must mount it explicitly, otherwise the command reports "no session archive API mounted".
+- Archiving goes through the host `workspaceRegistry.archiveSession`; `workspaceRegistry` is part of the plugin's `inject`, so a profile missing it keeps the plugin inactive rather than exposing a half-working command.
 - Archiving disposes the session's agent in this process; if it is the current session, the chat mapping is also repointed to a new session — an archived session is rejected by the host `agent/pre-step` gate, so a chat left bound to it would stop getting replies.
-- **Several sessions can stay live at once**: a session joins the acquired set when a normal message, `/sessions resume`, or `/to` actually gets its agent. Output, questions, and approvals from every acquired session go back to QQ; the current session is untagged, other sessions are prefixed with `[#shortid]`. The acquired set is runtime-only — after a restart only the current session is restored from `model-prefs.json`.
+- **Several sessions can stay live at once**: a session joins the acquired set when a normal message, `/sessions resume`, or `/to` actually gets its agent. Output, questions, and approvals from every acquired session go back to QQ; the current session is untagged, while messages from other sessions get a separate source line `#shortid · title` before the body and a `/to` reply link at the end. The acquired set is runtime-only — after a restart only the current session is restored from `model-prefs.json`.
 - **Switching does not release**: `/sessions resume` only moves the current pointer; the old session keeps running and its output keeps flowing to QQ. `/new` behaves the same. On unload the plugin disposes only the agents it created; borrowed Web/TUI agents are just dereferenced.
 - **Questions are routed per session**: the current session answers with plain text; buttons from other sessions carry the session id and work when clicked; questions without buttons append a `/to #id ` link. A plain message that did not come through a link is never forwarded to the current model — the user is told to use a button or `/to`.
 - The held list is ordered "current → other held (by acquisition time)"; the workspace view stays newest-first. The time column is the **creation time** (the host header stores no "last used" timestamp).
@@ -290,7 +291,7 @@ Resolution strategy: acquired record → in-process live agent → persisted res
 ## Design Principles
 
 - **Pure Cordis plugin** — follows the dsh "Plugins, not loop changes" principle
-- **Declarative dependencies** — `inject = ['agents']`, no direct coupling to other plugins
+- **Declarative dependencies** — `inject` lists every required service (sessions, models, workspaces, archiving, presets, tools, attachments, web server, and more); a missing service keeps the plugin inactive instead of degrading at runtime
 - **One current session + multiple acquired sessions** — every QQ window continues the same current session; sessions acquired via `/sessions resume` or `/to` stay live and keep sending their output to QQ
 - **Preset support** — mount presets (toolkits, prompts, etc.) via the `agent-presets` service
 - **Markdown output** — replies sent as Markdown with code-block/table-aware chunking

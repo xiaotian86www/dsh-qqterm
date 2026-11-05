@@ -38,11 +38,15 @@ function makeRecord(sessionKeyStr: string, scope: ChatScope = 'c2c'): QuestionSe
 function createManager(opts?: {
   findBySessionId?: (id: string) => QuestionSessionRecordLike | undefined;
   getSessionRecord?: (scope: ChatScope, peerId: string) => QuestionSessionRecordLike | undefined;
+  isCurrentSession?: (id: string) => boolean;
+  sessionTitle?: (id: string) => string | undefined;
 }) {
   return {
     findBySessionId: opts?.findBySessionId ?? (() => undefined),
     // 默认按 scope+peerId 派生 sessionKey 反查，与 startAsk 的 key 生成保持一致
     getSessionRecord: opts?.getSessionRecord ?? ((scope: ChatScope, peerId: string) => makeRecord(sessionKey(scope, peerId), scope)),
+    isCurrentSession: opts?.isCurrentSession ?? (() => true),
+    sessionTitle: opts?.sessionTitle ?? (() => undefined),
   };
 }
 
@@ -85,6 +89,30 @@ describe('formatQuestion', () => {
     const text = formatQuestion(q, false);
     expect(text).toContain('选哪些？（可多选）');
     expect(text).toContain('> 💡 回复多个编号即可多选（如 1,3）');
+  });
+
+  it('非当前会话：首行标来源（id + 标题），不再塞 [#id]', () => {
+    const text = formatQuestion(q2(), false, {
+      sessionId: 'session-04de1556-9c1f-4d6a-9b0e-1f2a3b4c5d6e',
+      isCurrent: false,
+      title: '修登录',
+    });
+    expect(text.startsWith('> `#04de1556` · 修登录\n\n')).toBe(true);
+    expect(text).not.toContain('[#');
+    expect(text).toContain('show="回答"');
+    expect(text).toContain('show="恢复"');
+  });
+
+  it('非当前会话带按钮时保留按钮引导行', () => {
+    const text = formatQuestion(q2(), true, { sessionId: 'session-04de1556', isCurrent: false, title: '修登录' });
+    expect(text.startsWith('> `#04de1556` · 修登录\n\n')).toBe(true);
+    expect(text).toContain('> 👇 点击下方按钮选择');
+  });
+
+  it('当前会话不标来源行', () => {
+    const text = formatQuestion(q2(), false, { sessionId: 'session-04de1556', isCurrent: true });
+    expect(text.startsWith('> `#')).toBe(false);
+    expect(text).not.toContain('[#');
   });
 });
 
@@ -490,5 +518,30 @@ describe('QuestionChannel.install routing（user-questions/request waterfall）'
     await sleep(10);
     ch.uninstall();
     await expect(p).rejects.toThrow('unloaded');
+  });
+});
+
+describe('非当前会话的标记', () => {
+  it('提问首行标来源（id + 标题），超时提示也带首行', async () => {
+    const sent: SentMessage[] = [];
+    const record = makeRecord(sessionKey('c2c', 'U1'));
+    (record as { sessionId?: string }).sessionId = 'session-04de1556-9c1f-4d6a-9b0e-1f2a3b4c5d6e';
+    const ch = new QuestionChannel(
+      createManager({
+        findBySessionId: () => record,
+        isCurrentSession: () => false,
+        sessionTitle: () => '修登录',
+      }),
+      createSender(sent),
+      { askTimeoutMs: 30 },
+      createLogger(),
+    );
+
+    const p = ch.askViaQQ(record, { questions: [q2()] });
+    await expect(p).rejects.toThrow('timed out');
+    await sleep(10);
+
+    expect(sent[0]!.text.startsWith('> `#04de1556` · 修登录\n\n')).toBe(true);
+    expect(sent[1]!.text).toBe('> `#04de1556` · 修登录\n\n⚠️ 提问已超时，未收到回答。');
   });
 });

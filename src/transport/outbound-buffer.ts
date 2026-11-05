@@ -33,8 +33,6 @@ export class OutboundBuffer {
   private readonly bot: QQBotSender;
   private readonly limit: number;
   private readonly logger: Logger;
-  /** 非当前会话的每片前缀（`[#短id] `）；流式只给 current，前缀为空 */
-  private readonly prefix: string;
 
   public constructor(
     record: SessionRecord,
@@ -42,16 +40,19 @@ export class OutboundBuffer {
     limit: number,
     logger: Logger,
     streamingEnabled: boolean,
-    prefix = '',
   ) {
     this.record = record;
     this.bot = bot;
     this.limit = limit;
     this.logger = logger;
-    this.prefix = prefix;
     this.writer = streamingEnabled
       ? new StreamingWriter({ bot, target: record.replyTarget, logger, throttleMs: STREAM_THROTTLE_MS })
       : null;
+  }
+
+  /** 是否走流式（仅当前会话）；false 时由出站路由统一加来源标注后静态发送 */
+  public get isStreaming(): boolean {
+    return this.writer !== null;
   }
 
   /** 追加文本增量 */
@@ -86,7 +87,7 @@ export class OutboundBuffer {
       // 降级：静态发送（writer 不存在 or 流式失败）
       const chunks = chunkMarkdownText(this.buffer, this.limit);
       for (const chunk of chunks) {
-        await this.bot.sendMarkdown(this.record.replyTarget, `${this.prefix}${chunk}`);
+        await this.bot.sendMarkdown(this.record.replyTarget, chunk);
       }
     } catch (err) {
       this.logger.error(`im-qqbot: flush failed: ${err instanceof Error ? err.message : String(err)}`);
