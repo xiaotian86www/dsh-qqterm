@@ -517,21 +517,27 @@ describe('OutboundRouter: deliverables/presented', () => {
     expect(bot.sendMarkdown).toHaveBeenCalledWith(c2cTarget, expect.stringContaining('429: {"type":"server_error"}'));
   });
 
-  it('非可重试失败给原因与 /retry 提示', async () => {
+  it('配置类失败只给原因，不再指向 /retry', async () => {
     const offer = vi.fn().mockResolvedValue(true);
     const record = { ...createRecord(c2cTarget), lastPrompt: '原文' } as unknown as SessionRecord;
     const { outbound, bot } = setup({ record, retryChannel: { offer } });
 
     outbound.routeSessionEvent({ header: { id: 'sess-qq' } }, {
       type: 'turn/end',
-      data: { reason: { kind: 'error', error: { code: 'AUTH', message: '401 unauthorized' } } },
+      data: {
+        reason: {
+          kind: 'error',
+          error: { code: 'NO_ADAPTER', message: 'no adapter registered for provider "opencode-go"' },
+        },
+      },
     });
     await vi.advanceTimersByTimeAsync(0);
     for (let i = 0; i < 4; i++) await Promise.resolve();
 
     expect(offer).not.toHaveBeenCalled();
-    expect(bot.sendMarkdown).toHaveBeenCalledWith(c2cTarget, expect.stringContaining('原因: `AUTH` · 401'));
-    expect(bot.sendMarkdown).toHaveBeenCalledWith(c2cTarget, expect.stringContaining('> 💡 发送 `/retry` 重跑上一条消息'));
+    expect(bot.sendMarkdown).toHaveBeenCalledWith(c2cTarget, expect.stringContaining('❌ 本轮失败'));
+    expect(bot.sendMarkdown).toHaveBeenCalledWith(c2cTarget, expect.stringContaining('原因: `NO_ADAPTER` · no adapter'));
+    expect(bot.sendMarkdown).not.toHaveBeenCalledWith(c2cTarget, expect.stringContaining('/retry'));
   });
 
   it('未提供投递器时静默跳过（老环境降级）', async () => {

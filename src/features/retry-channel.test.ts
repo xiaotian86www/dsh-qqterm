@@ -2,7 +2,7 @@
  * 轮次失败后的「重发 / 放弃」卡片。
  *
  * 回归点：失败时曾把宿主原始 code + JSON 抛给用户，且没有恢复入口；
- * 现在改成可重试失败挂两个按钮、不可重试失败给原因与 /retry。
+ * 现在改成可重试失败挂两个按钮，配置类失败只讲原因。
  */
 import { describe, it, expect, vi } from 'vitest';
 import type { InteractionEvent } from '@tencent-connect/qqbot-nodejs';

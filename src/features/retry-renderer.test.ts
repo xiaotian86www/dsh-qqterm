@@ -68,17 +68,17 @@ describe('formatRetryNotice', () => {
 });
 
 describe('formatTurnFailure', () => {
-  it('不可重试失败给两行，并指向 /retry', () => {
-    const text = formatTurnFailure({ code: 'AUTH', message: '401 unauthorized' }, true);
+  it('可重试失败降级文本时补一行 /retry', () => {
+    const text = formatTurnFailure({ code: 'RATE_LIMIT', message: '429: boom' }, true);
     expect(text.split('\n')[0]).toBe('❌ 本轮失败');
-    expect(text).toContain('原因: `AUTH` · 401');
+    expect(text).toContain('原因: `RATE_LIMIT` · 429: boom');
     expect(text).toContain('> 💡 发送 `/retry` 重跑上一条消息');
   });
 
-  it('原文已丢时不提 /retry', () => {
-    const text = formatTurnFailure({ code: 'AUTH', message: '401 unauthorized' }, false);
+  it('没有可重试原文时只给原因', () => {
+    const text = formatTurnFailure({ code: 'NO_ADAPTER', message: 'no adapter registered' }, false);
     expect(text).not.toContain('/retry');
-    expect(text).toContain('❌ 本轮失败');
+    expect(text).toBe('❌ 本轮失败\n原因: `NO_ADAPTER` · no adapter registered');
   });
 });
 
