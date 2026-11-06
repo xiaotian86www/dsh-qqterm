@@ -105,15 +105,20 @@ describe('resolveSessionTarget', () => {
     entry({ id: 'session-aaaaaaaa-3' }),
   ];
 
-  it('按序号取（1 起）', () => {
-    const result = resolveSessionTarget(entries, '2');
-    expect(result.ok && result.entry.id).toBe('session-bbbbbbbb-2');
+  it('按短 id 取，不再支持序号', () => {
+    expect(resolveSessionTarget(entries, '2').ok).toBe(false);
+    const byId = resolveSessionTarget(entries, '#bbbbbbbb');
+    expect(byId.ok && byId.entry.id).toBe('session-bbbbbbbb-2');
   });
 
-  it('序号越界给出范围提示', () => {
-    const result = resolveSessionTarget(entries, '9');
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toContain('超出范围');
+  it('纯数字目标按 id 前缀解析，短数字明确拒绝', () => {
+    const digitId = 'session-12345678-1111-2222-3333-444444444444';
+    const byDigits = resolveSessionTarget([entry({ id: digitId })], '12345678');
+    expect(byDigits.ok && byDigits.entry.id).toBe(digitId);
+
+    const short = resolveSessionTarget(entries, '9');
+    expect(short.ok).toBe(false);
+    if (!short.ok) expect(short.error).toContain('序号已移除');
   });
 
   it('唯一前缀命中', () => {
@@ -142,12 +147,12 @@ describe('resolveSessionTarget', () => {
     const list = [entry({ id: 'session-3f2a9b1c-1111-2222-3333-444444444444' })];
     expect(resolveSessionTarget(list, '3f2a9b1c').ok).toBe(true);
     expect(resolveSessionTarget(list, '#3f2a9b1c').ok).toBe(true);
-    // # 也能标在序号上
-    const byIndex = resolveSessionTarget(entries, '#2');
-    expect(byIndex.ok && byIndex.entry.id).toBe('session-bbbbbbbb-2');
+    // # 也能标在完整 id 上
+    const byFull = resolveSessionTarget(entries, '#session-bbbbbbbb-2');
+    expect(byFull.ok && byFull.entry.id).toBe('session-bbbbbbbb-2');
   });
 
-  it('全数字的短 id 不会被误判成序号', () => {
+  it('全数字的短 id 不会被当成页码或序号', () => {
     const id = 'session-12345678-1111-2222-3333-444444444444';
     const result = resolveSessionTarget([entry({ id })], '12345678');
     expect(result.ok && result.entry.id).toBe(id);
@@ -155,7 +160,7 @@ describe('resolveSessionTarget', () => {
 });
 
 describe('/sessions 持有视图', () => {
-  it('默认只列持有会话：按工作区分组，组内带状态与序号', async () => {
+  it('默认只列持有会话：按工作区分组，组内带状态，不编号', async () => {
     const manager = makeManager({
       listHeldSessions: vi.fn(async () => [
         entry({
@@ -184,10 +189,11 @@ describe('/sessions 持有视图', () => {
     expect(text).toContain('### 🗂 工作中会话（1 个工作区 · 2 个会话）');
     expect(text).toContain('**repo** · `/repo`');
     expect(text).not.toContain('未分组');
-    expect(text).toContain('1. #cccc1111 · 当前会话 · 生成中');
-    expect(text).toContain('2. #dddd2222 · 旧会话 · 空闲');
-    expect(text).toMatch(/<qqbot-cmd-input text="\/sessions resume #cccc1111" show="1\. #cccc1111 · 当前会话 · 生成中 · [^"]* ✅"\/>/);
-    expect(text).toContain('<qqbot-cmd-input text="/sessions resume #dddd2222" show="2. #dddd2222 · 旧会话');
+    expect(text).toContain('#cccc1111 · 当前会话 · 生成中');
+    expect(text).toContain('#dddd2222 · 旧会话 · 空闲');
+    expect(text).not.toMatch(/^\d+\. /m);
+    expect(text).toMatch(/<qqbot-cmd-input text="\/sessions resume #cccc1111" show="#cccc1111 · 当前会话 · 生成中 · [^"]* ✅"\/>/);
+    expect(text).toContain('<qqbot-cmd-input text="/sessions resume #dddd2222" show="#dddd2222 · 旧会话');
     // 默认视图只列持有集合，不把工作区里的非持有会话混进来
     expect(text).not.toContain('修复登录 bug');
   });
@@ -206,7 +212,7 @@ describe('/sessions 持有视图', () => {
     expect(text).not.toContain(' ✅');
   });
 
-  it('跨工作区的持有项按工作区分组，序号跨组连续', async () => {
+  it('跨工作区的持有项按工作区分组，行内不重复工作区名', async () => {
     const manager = makeManager({
       listHeldSessions: vi.fn(async () => [
         entry({
@@ -230,8 +236,8 @@ describe('/sessions 持有视图', () => {
     // 组标题与 /sessions all 同一写法，组之间空行；行内不再重复工作区后缀
     expect(text).toContain('**repo** · `/repo`');
     expect(text).toContain('**docs** · `/docs`');
-    expect(text).toContain('show="1. #aaaa1111 · 本区会话 · 空闲');
-    expect(text).toContain('show="2. #bbbb2222 · 别的项目 · 空闲');
+    expect(text).toContain('show="#aaaa1111 · 本区会话 · 空闲');
+    expect(text).toContain('show="#bbbb2222 · 别的项目 · 空闲');
     expect(text.indexOf('**repo**')).toBeLessThan(text.indexOf('**docs**'));
   });
 
@@ -266,7 +272,7 @@ describe('/sessions 持有视图', () => {
     expect(page1).not.toContain('show="恢复当前"');
   });
 
-  it('持有列表分页，序号跨页连续且可被 resume 解析', async () => {
+  it('持有列表分页，跨页行序连续且可用短 id 恢复', async () => {
     const many = Array.from({ length: 13 }, (_, i) => entry({
       id: `session-${String(i).padStart(8, '0')}`,
       held: true,
@@ -280,11 +286,11 @@ describe('/sessions 持有视图', () => {
 
     const page2 = await run(manager, '2');
     expect(page2).toContain('第 2/2 页');
-    expect(page2).toContain('11. #00000010 · 第11个');
+    expect(page2).toContain('#00000010 · 第11个');
     expect(page2).toContain('<qqbot-cmd-input text="/sessions 1" show="上一页"/> · 第 2/2 页');
     expect(page2).not.toContain('show="下一页"');
 
-    await run(manager, 'resume 11');
+    await run(manager, 'resume #00000010');
     expect(manager.switchSession).toHaveBeenCalledWith(
       'c2c',
       'user1',
@@ -331,7 +337,7 @@ describe('/sessions workspace（已移除）', () => {
 });
 
 describe('/sessions archived', () => {
-  it('只列已归档会话：不显示序号，按钮带短 id，并标出所属工作区', async () => {
+  it('只列已归档会话：不编号，按钮带短 id，并标出所属工作区', async () => {
     const archivedId = 'session-22222222-2222-2222-2222-222222222222';
     const manager = makeManager({
       listWorkspaceSessions: vi.fn(async () => [
@@ -344,7 +350,7 @@ describe('/sessions archived', () => {
 
     expect(text.startsWith('### 🗄 已归档（共 1 个')).toBe(true);
     expect(text).toContain('旧需求');
-    // 序号只对 /sessions 有效，归档页只用短 id；行尾补工作区
+    // 归档页只用短 id；行尾补工作区
     expect(text).toContain(`<qqbot-cmd-input text="/sessions unarchive #22222222" show="#22222222 · 旧需求`);
     expect(text).toContain('· repo');
     expect(text).not.toMatch(/^1\. /m);
@@ -402,7 +408,7 @@ describe('/sessions all', () => {
     expect(text).not.toContain('空闲');
   });
 
-  it('按工作区分组列出：组内不显示序号，只给短 id', async () => {
+  it('按工作区分组列出：只给短 id，不编号', async () => {
     const manager = makeManager({
       listWorkspaceGroups: vi.fn(async () => [
         {
@@ -428,7 +434,7 @@ describe('/sessions all', () => {
     expect(text).toContain('**dsh-qqbot**');
     expect(text).toContain('**default-workspace**');
     expect(text).toContain('⚠️ 目录不存在');
-    // 组内序号和命令解析顺序对不上，所以这里不编号
+    // 所有视图都只用短 id，不编号
     expect(text).not.toMatch(/^\d+\. /m);
     expect(text).toContain('<qqbot-cmd-input text="/sessions resume #aaa11111"');
     expect(text).toContain('<qqbot-cmd-input text="/sessions resume #bbb22222"');
@@ -485,7 +491,7 @@ describe('/sessions all', () => {
 });
 
 describe('/sessions resume', () => {
-  it('序号按持有列表解析，而不是工作区列表', async () => {
+  it('短 id 按持有列表解析，而不是工作区列表', async () => {
     const heldId = 'session-held01';
     const workspaceId = 'session-work01';
     const manager = makeManager({
@@ -493,7 +499,7 @@ describe('/sessions resume', () => {
       listHeldSessions: vi.fn(async () => [entry({ id: heldId, held: true, title: '持有里的' })]),
     });
 
-    const text = await run(manager, 'resume 1');
+    const text = await run(manager, 'resume #held01');
 
     expect(manager.switchSession).toHaveBeenCalledWith(
       'c2c',
@@ -524,9 +530,9 @@ describe('/sessions resume', () => {
     expect(text).toContain('已恢复会话');
   });
 
-  it('按序号恢复并带上回复目标', async () => {
+  it('按短 id 恢复并带上回复目标', async () => {
     const manager = makeManager();
-    const text = await run(manager, 'resume 1');
+    const text = await run(manager, 'resume #11111111');
 
     expect(manager.switchSession).toHaveBeenCalledWith(
       'c2c',
@@ -556,39 +562,39 @@ describe('/sessions resume', () => {
     const manager = makeManager({
       listWorkspaceSessions: vi.fn(async () => [entry({ current: true })]),
     });
-    expect(await run(manager, 'resume 1')).toBe('✅ 已是当前会话');
+    expect(await run(manager, 'resume #11111111')).toBe('✅ 已是当前会话');
     expect(manager.switchSession).not.toHaveBeenCalled();
   });
 
   it('会话不存在 / 被别的端占用 / 恢复失败各有明确文案', async () => {
     const missing = makeManager({ switchSession: vi.fn(async () => ({ ok: false, reason: 'not-found' })) });
-    expect(await run(missing, 'resume 1')).toContain('这个会话已不存在');
+    expect(await run(missing, 'resume #11111111')).toContain('这个会话已不存在');
 
     const locked = makeManager({ switchSession: vi.fn(async () => ({ ok: false, reason: 'locked' })) });
-    expect(await run(locked, 'resume 1')).toContain('正在别的客户端运行');
+    expect(await run(locked, 'resume #11111111')).toContain('正在别的客户端运行');
 
     const failed = makeManager({
       switchSession: vi.fn(async () => ({ ok: false, reason: 'failed', message: 'ownership taken' })),
     });
-    expect(await run(failed, 'resume 1')).toContain('ownership taken');
+    expect(await run(failed, 'resume #11111111')).toContain('ownership taken');
   });
 
   it('目标解析失败时首行带 ⚠️，并给返回列表的链接', async () => {
     const text = await run(makeManager(), 'resume 99');
 
-    expect(text.startsWith('⚠️ 序号 99 超出范围')).toBe(true);
+    expect(text.startsWith('⚠️ 序号已移除')).toBe(true);
     expect(text).toContain('<qqbot-cmd-input text="/sessions" show="查看会话"/>');
     expect(text.split('\n')).toHaveLength(1);
   });
 });
 
 describe('/sessions rename', () => {
-  it('序号按持有列表解析，标题原样交给 manager', async () => {
+  it('按短 id 改已持有会话，标题原样交给 manager', async () => {
     const manager = makeManager({
       listHeldSessions: vi.fn(async () => [entry({ id: 'session-held01', held: true })]),
     });
 
-    const text = await run(manager, 'rename 1 新的 会话名');
+    const text = await run(manager, 'rename #held01 新的 会话名');
 
     expect(manager.renameSession).toHaveBeenCalledWith('session-held01', '新的 会话名');
     expect(text).toBe('✅ 会话名已改为「改好的名字」 · `#held01`');
@@ -622,7 +628,7 @@ describe('/sessions rename', () => {
     expect(missingTarget).toContain('缺少目标');
     expect(missingTarget.split('\n')).toHaveLength(1);
 
-    const missingTitle = await run(manager, 'rename 1');
+    const missingTitle = await run(manager, 'rename #11111111');
     expect(missingTitle).toContain('缺少新标题');
     expect(missingTitle.split('\n')).toHaveLength(1);
     expect(manager.renameSession).not.toHaveBeenCalled();
@@ -631,26 +637,26 @@ describe('/sessions rename', () => {
   it('目标解析失败时给返回列表的链接', async () => {
     const text = await run(makeManager(), 'rename 99 新名字');
 
-    expect(text.startsWith('⚠️ 序号 99 超出范围')).toBe(true);
+    expect(text.startsWith('⚠️ 序号已移除')).toBe(true);
     expect(text).toContain('查看会话');
   });
 
   it('标题为空 / 已关闭 / 其它失败各有文案', async () => {
     const invalid = makeManager({ renameSession: vi.fn(() => ({ ok: false, reason: 'invalid' })) });
-    expect(await run(invalid, 'rename 1 x')).toBe('⚠️ 新标题不能为空');
+    expect(await run(invalid, 'rename #11111111 x')).toBe('⚠️ 新标题不能为空');
 
     const closed = makeManager({ renameSession: vi.fn(() => ({ ok: false, reason: 'not-live' })) });
-    expect(await run(closed, 'rename 1 x')).toContain('这个会话已关闭');
+    expect(await run(closed, 'rename #11111111 x')).toContain('这个会话已关闭');
 
     const failed = makeManager({
       renameSession: vi.fn(() => ({ ok: false, reason: 'failed', message: 'EIO' })),
     });
-    expect(await run(failed, 'rename 1 x')).toBe('❌ 改名失败: EIO');
+    expect(await run(failed, 'rename #11111111 x')).toBe('❌ 改名失败: EIO');
   });
 });
 
 describe('/sessions archive', () => {
-  it('序号按持有列表解析，归档的是持有会话', async () => {
+  it('按短 id 归档持有会话', async () => {
     const heldId = 'session-held01';
     const workspaceId = 'session-work01';
     const manager = makeManager({
@@ -658,7 +664,7 @@ describe('/sessions archive', () => {
       listHeldSessions: vi.fn(async () => [entry({ id: heldId, held: true, title: '持有里的' })]),
     });
 
-    const text = await run(manager, 'archive 1');
+    const text = await run(manager, 'archive #held01');
 
     expect(manager.archiveSession).toHaveBeenCalledWith(heldId);
     expect(text).toContain('持有里的');
@@ -680,14 +686,15 @@ describe('/sessions archive', () => {
   it('不带目标时给出可点击的归档候选', async () => {
     const manager = makeManager({
       listWorkspaceSessions: vi.fn(async () => [
-        entry({ id: 'session-aaaa0001', title: '甲', held: true }),
-        entry({ id: 'session-bbbb0002', title: '乙' }),
+        entry({ id: 'session-aaaa0001', title: '甲', held: true, workspace: 'repo', workspacePath: 'D:\\repo' }),
+        entry({ id: 'session-bbbb0002', title: '乙', workspace: 'repo', workspacePath: 'D:\\repo' }),
       ]),
     });
 
     const text = await run(manager, 'archive');
 
-    expect(text.startsWith('### 🗄 归档候选（2 个）')).toBe(true);
+    expect(text.startsWith('### 🗄 归档候选（1 个工作区 · 2 个会话）')).toBe(true);
+    expect(text).toContain('**repo** · `D:\\repo`');
     expect(text).toContain('<qqbot-cmd-input text="/sessions archive #aaaa0001" show="#aaaa0001 · 甲');
     expect(text).toContain('<qqbot-cmd-input text="/sessions archive #bbbb0002" show="#bbbb0002 · 乙');
     expect(text).toContain('· 📌');
@@ -697,26 +704,29 @@ describe('/sessions archive', () => {
     expect(manager.archiveSession).not.toHaveBeenCalled();
   });
 
-  it('候选跨工作区时补工作区标题，并保留返回入口', async () => {
+  it('候选按工作区分组，组标题带路径，组内不再重复工作区名', async () => {
     const manager = makeManager({
-      listWorkspaceSessions: vi.fn(async () => [entry({ id: 'session-cccc1111', title: '本区' })]),
+      listWorkspaceSessions: vi.fn(async () => [
+        entry({ id: 'session-cccc1111', title: '本区', workspace: 'repo', workspacePath: 'D:\\repo' }),
+      ]),
       listHeldSessions: vi.fn(async () => [
-        entry({ id: 'session-dddd2222', title: '别处', held: true, workspace: 'docs' }),
+        entry({ id: 'session-dddd2222', title: '别处', held: true, workspace: 'docs', workspacePath: 'D:\\docs' }),
       ]),
     });
 
     const text = await run(manager, 'archive');
 
-    expect(text).toContain('#dddd2222 · 别处');
-    expect(text).toContain('· docs');
+    expect(text).toContain('### 🗄 归档候选（2 个工作区 · 2 个会话）');
+    expect(text).toContain('**repo** · `D:\\repo`');
+    expect(text).toContain('**docs** · `D:\\docs`');
     // 本工作区候选排在其它工作区的持有会话前面
     expect(text.indexOf('#cccc1111')).toBeLessThan(text.indexOf('#dddd2222'));
-    // 工作区后缀在前，📌 仍是行尾
-    expect(text).toMatch(/#dddd2222 · 别处 · [^"]* · docs · 📌"/);
+    // 工作区由组标题交代，行内不再重复，📌 仍是行尾
+    expect(text).toMatch(/#dddd2222 · 别处 · [^"]* · 📌"/);
     expect(text).toContain('<qqbot-cmd-input text="/sessions" show="工作中会话"/>');
   });
 
-  it('候选超过一页时用 page 翻页，第二页仍是同一份候选', async () => {
+  it('候选超过一页时用页码翻页，第二页仍是同一份候选', async () => {
     const many = Array.from({ length: 13 }, (_, i) => entry({
       id: `session-${String(i).padStart(8, '0')}`,
       title: `第${i + 1}个`,
@@ -727,21 +737,21 @@ describe('/sessions archive', () => {
     });
 
     const page1 = await run(manager, 'archive');
-    expect(page1).toContain('归档候选（13 个）');
-    expect(page1).toContain('第 1/2 页 · <qqbot-cmd-input text="/sessions archive page 2" show="下一页"/>');
+    expect(page1).toContain('归档候选（1 个工作区 · 13 个会话）');
+    expect(page1).toContain('第 1/2 页 · <qqbot-cmd-input text="/sessions archive 2" show="下一页"/>');
     expect(page1).not.toContain('还有 3 个');
     // 不再把「还有 N 个」错误地指向全部会话
     expect(page1).not.toContain('全部会话');
 
-    const page2 = await run(manager, 'archive page 2');
+    const page2 = await run(manager, 'archive 2');
     expect(page2).toContain('第 2/2 页');
     expect(page2).toContain('#00000010 · 第11个');
-    expect(page2).toContain('<qqbot-cmd-input text="/sessions archive page 1" show="上一页"/> · 第 2/2 页');
+    expect(page2).toContain('<qqbot-cmd-input text="/sessions archive 1" show="上一页"/> · 第 2/2 页');
   });
 
   it('归档成功后给出可恢复提示', async () => {
     const manager = makeManager();
-    const text = await run(manager, 'archive 1');
+    const text = await run(manager, 'archive #11111111');
 
     expect(manager.archiveSession).toHaveBeenCalledWith(entry().id);
     expect(text).toContain('已归档「修复登录 bug」');
@@ -754,7 +764,7 @@ describe('/sessions archive', () => {
       listWorkspaceSessions: vi.fn(async () => [entry({ current: true })]),
       archiveSession: vi.fn(async () => ({ ok: true, remapped: 1 })),
     });
-    expect(await run(manager, 'archive 1')).toContain('当前聊天已切到新会话');
+    expect(await run(manager, 'archive #11111111')).toContain('当前聊天已切到新会话');
   });
 
   it('已经归档的会话不再重复写，并提示跳过', async () => {
@@ -774,7 +784,7 @@ describe('/sessions archive', () => {
     const manager = makeManager({
       archiveSession: vi.fn(async () => ({ ok: false, reason: 'busy', message: '会话仍在运行: generating' })),
     });
-    const text = await run(manager, 'archive 1');
+    const text = await run(manager, 'archive #11111111');
     // 忙碌是自解释的：只给一句原因，不把宿主原文贴给用户
     expect(text).toContain('⚠️ 归档失败: 该会话还有工作在运行，稍后再试');
     expect(text).toContain('<qqbot-cmd-input text="/sessions" show="查看会话"/>');
@@ -790,33 +800,33 @@ describe('/sessions archive', () => {
   it('英文逗号分隔批量归档，逐个执行并汇总', async () => {
     const manager = makeManager({
       listWorkspaceSessions: vi.fn(async () => [
-        entry({ id: 'session-one', title: '一' }),
-        entry({ id: 'session-two', title: '二' }),
-        entry({ id: 'session-three', title: '三' }),
+        entry({ id: 'session-aaaa0001', title: '一' }),
+        entry({ id: 'session-bbbb0002', title: '二' }),
+        entry({ id: 'session-cccc0003', title: '三' }),
       ]),
     });
 
-    const text = await run(manager, 'archive 1,2');
+    const text = await run(manager, 'archive #aaaa0001,#bbbb0002');
 
     expect(manager.archiveSession).toHaveBeenCalledTimes(2);
-    expect(manager.archiveSession).toHaveBeenNthCalledWith(1, 'session-one');
-    expect(manager.archiveSession).toHaveBeenNthCalledWith(2, 'session-two');
+    expect(manager.archiveSession).toHaveBeenNthCalledWith(1, 'session-aaaa0001');
+    expect(manager.archiveSession).toHaveBeenNthCalledWith(2, 'session-bbbb0002');
     expect(text).toContain('已归档 2 个会话');
     expect(text).toContain('✅ 1. 一');
     expect(text).toContain('✅ 2. 二');
     expect(text).toContain('<qqbot-cmd-input text="/sessions archived" show="查看已归档"/>');
-    expect(manager.archiveSession).not.toHaveBeenCalledWith('session-three');
+    expect(manager.archiveSession).not.toHaveBeenCalledWith('session-cccc0003');
   });
 
   it('全角逗号与 id 混用也能识别，重复目标只执行一次', async () => {
     const manager = makeManager({
       listWorkspaceSessions: vi.fn(async () => [
-        entry({ id: 'session-one', title: '一' }),
-        entry({ id: 'session-two', title: '二' }),
+        entry({ id: 'session-aaaa0001', title: '一' }),
+        entry({ id: 'session-bbbb0002', title: '二' }),
       ]),
     });
 
-    const text = await run(manager, 'archive 1，session-one,session-two');
+    const text = await run(manager, 'archive #aaaa0001，session-aaaa0001,session-bbbb0002');
 
     expect(manager.archiveSession).toHaveBeenCalledTimes(2);
     expect(text).toContain('已归档 2 个会话');
@@ -825,15 +835,15 @@ describe('/sessions archive', () => {
   it('批量里单个失败不影响其它，并在清单里标出原因', async () => {
     const manager = makeManager({
       listWorkspaceSessions: vi.fn(async () => [
-        entry({ id: 'session-ok', title: '好的' }),
-        entry({ id: 'session-busy', title: '忙的' }),
+        entry({ id: 'session-okkk0001', title: '好的' }),
+        entry({ id: 'session-busy0002', title: '忙的' }),
       ]),
-      archiveSession: vi.fn(async (id: string) => (id === 'session-busy'
+      archiveSession: vi.fn(async (id: string) => (id === 'session-busy0002'
         ? { ok: false, reason: 'busy', message: '会话仍在运行：generating' }
         : { ok: true })),
     });
 
-    const text = await run(manager, 'archive 1,2');
+    const text = await run(manager, 'archive #okkk0001,#busy0002');
 
     expect(text).toContain('已归档 1 个会话，1 个失败');
     expect(text).toContain('✅ 1. 好的');
@@ -844,33 +854,33 @@ describe('/sessions archive', () => {
   it('批量全部失败时首行用警告，不写成「已归档 0 个」', async () => {
     const manager = makeManager({
       listWorkspaceSessions: vi.fn(async () => [
-        entry({ id: 'session-one', title: '一' }),
-        entry({ id: 'session-two', title: '二' }),
+        entry({ id: 'session-aaaa0001', title: '一' }),
+        entry({ id: 'session-bbbb0002', title: '二' }),
       ]),
       archiveSession: vi.fn(async () => ({ ok: false, reason: 'busy', message: '会话仍在运行' })),
     });
 
-    const text = await run(manager, 'archive 1,2');
+    const text = await run(manager, 'archive #aaaa0001,#bbbb0002');
     expect(text.startsWith('⚠️ 2 个会话归档失败')).toBe(true);
     expect(text).not.toContain('已归档 0 个');
     expect(text).toContain('<qqbot-cmd-input text="/sessions" show="工作中会话"/>');
   });
 
-  it('部分序号越界时报告该条，其余照常执行', async () => {
+  it('部分目标无效时报告该条，其余照常执行', async () => {
     const manager = makeManager({
-      listWorkspaceSessions: vi.fn(async () => [entry({ id: 'session-one' })]),
+      listWorkspaceSessions: vi.fn(async () => [entry({ id: 'session-aaaa0001' })]),
     });
 
-    const text = await run(manager, 'archive 1,9');
+    const text = await run(manager, 'archive #aaaa0001,#nope0009');
 
     expect(manager.archiveSession).toHaveBeenCalledTimes(1);
-    expect(text).toContain('序号 9 超出范围');
+    expect(text).toContain('没有匹配的会话');
     expect(text).toContain('已归档 1 个会话');
   });
 
   it('一次超过 10 个目标时直接拒绝', async () => {
     const manager = makeManager();
-    const many = Array.from({ length: 11 }, (_, i) => String(i + 1)).join(',');
+    const many = Array.from({ length: 11 }, (_, i) => `#${String(i).padStart(8, '0')}`).join(',');
     const text = await run(manager, `archive ${many}`);
     expect(text).toContain('最多处理 10 个');
     expect(manager.archiveSession).not.toHaveBeenCalled();
@@ -892,7 +902,7 @@ describe('/sessions unarchive', () => {
     expect(text).toContain('<qqbot-cmd-input text="/sessions resume #22222222" show="继续会话"/>');
   });
 
-  it('序号只对应 /sessions 列表，归档页用序号会被明确拒绝', async () => {
+  it('序号已移除，纯短数字直接拒绝', async () => {
     const manager = makeManager({
       listWorkspaceSessions: vi.fn(async () => [
         entry({ id: 'session-cccc1111' }),
@@ -901,7 +911,7 @@ describe('/sessions unarchive', () => {
     });
     const text = await run(manager, 'unarchive 1');
     expect(manager.unarchiveSession).not.toHaveBeenCalled();
-    expect(text).toContain('序号只对应');
+    expect(text).toContain('序号已移除');
   });
 
   it('没有归档时说明用法', async () => {

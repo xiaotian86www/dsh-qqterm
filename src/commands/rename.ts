@@ -35,7 +35,7 @@ export function renameCommand({ manager }: CommandDeps): CategorizedCommand {
       '/rename <新标题>',
       '',
       '给当前会话改一个名字，改名后标题固定，不再被自动标题覆盖。',
-      '改别的会话用 `/sessions rename <序号|id> <新标题>`。',
+      '改别的会话用 `/sessions rename <id> <新标题>`。',
     ].join('\n'),
     handler: (cmdCtx) => {
       const raw = (cmdCtx.command?.raw ?? '').trim();
