@@ -2,15 +2,16 @@
  * ModelResolver — 统一的模型发现与路由解析
  *
  * 职责：
- *   1. 解析当前生效的默认模型路由
+ *   1. 解析新建会话的默认模型路由（核心默认值）
  *   2. 列出可用 providers 和模型
- *   3. 管理 per-peer 的模型偏好（委托 PrefsStore）
+ *   3. 按 sessionId 保存会话自己的模型 / preset 选择（委托 PrefsStore）
  *
- * 优先级（从高到低）：
- *   per-peer 偏好（~/.dsh-qqbot/model-prefs.json）
- *   > config 显式指定（cordis.yml 的 provider/model）
- *   > settings.yaml 的 agent-default-model（只读，作为默认兜底）
- *   > 宿主 agentDefaultModel 服务
+ * 默认值（从高到低）：
+ *   settings.yaml 的 agent-default-model（只读）
+ *   > 宿主 agentDefaultModel 服务（核心默认）
+ *   > deepseek-official/deepseek-v4-flash
+ *
+ * 会话自己的选择只对它自己的 sessionId 生效，新会话永远走上面的默认链。
  */
 import type { Context } from '@deepseek-ai/cordis';
 import type { ImQQBotConfig } from '../config.ts';
@@ -43,7 +44,6 @@ export class ModelResolver {
   private readonly prefs: PrefsStore;
   private readonly settings: SettingsReader;
   private readonly ctx: Context;
-  private readonly config: ImQQBotConfig;
   private readonly logger?: Logger;
 
   constructor(
@@ -52,7 +52,6 @@ export class ModelResolver {
     logger?: Logger,
   ) {
     this.ctx = ctx;
-    this.config = config;
     this.logger = logger;
     this.prefs = new PrefsStore(
       config.debug ? (msg) => this.logger?.debug(msg) : undefined,
@@ -62,54 +61,35 @@ export class ModelResolver {
   }
 
   /**
-   * 获取指定 sessionKey 的有效模型路由（create 用）
-   *
-   * 优先级：per-peer 偏好 > config 显式指定 > settings.yaml > 宿主服务
+   * 会话自己保存的模型路由（`/model` 切换时按 sessionId 写入）
    */
-  getEffectiveRoute(sessionKey: string): ModelRoute | undefined {
-    return this.prefs.getOverride(sessionKey) ?? this.resolveDefault();
+  getSessionModel(sessionId: string): ModelRoute | undefined {
+    return this.prefs.getOverride(sessionId);
+  }
+
+  /**
+   * 设置会话自己的模型路由并持久化（只影响这个会话）
+   */
+  setSessionModel(sessionId: string, route: ModelRoute): void {
+    this.prefs.setOverride(sessionId, route);
+  }
+
+  /**
+   * 清除会话自己的模型路由
+   */
+  clearSessionModel(sessionId: string): void {
+    this.prefs.clearOverride(sessionId);
   }
 
   /**
    * 获取 resume 时覆盖 session 的模型路由
    *
-   * 优先级：per-peer 偏好 > cordis.yml 显式配置 > 默认链（settings.yaml > host）
-   *
-   * 这里不返回 undefined，因为未装 installModelSelection，system-prompt 的
-   * {{model}} 变量直接读 agent.options.model——若无值会抛
-   * "prompt variable {{model}} has no value for this assembly"。
-   * 因此兜底到默认链，确保 agent.options.model 始终有值。
+   * 优先级：该会话自己的偏好 > 核心默认值。这里不返回 undefined，因为没装
+   * installModelSelection 时 system-prompt 的 {{model}} 变量直接读
+   * agent.options.model——无值会抛 "prompt variable {{model}} has no value"。
    */
-  getResumeRoute(sessionKey: string): ModelRoute | undefined {
-    const override = this.prefs.getOverride(sessionKey);
-    if (override) return override;
-
-    if (this.config.provider && this.config.model) {
-      return { provider: this.config.provider, model: this.config.model };
-    }
-
-    return this.resolveDefault();
-  }
-
-  /**
-   * 设置 per-peer 模型偏好并持久化到隔离文件
-   */
-  setOverride(sessionKey: string, route: ModelRoute): void {
-    this.prefs.setOverride(sessionKey, route);
-  }
-
-  /**
-   * 清除 per-peer 模型偏好并持久化
-   */
-  clearOverride(sessionKey: string): void {
-    this.prefs.clearOverride(sessionKey);
-  }
-
-  /**
-   * 是否存在指定 session 的模型偏好
-   */
-  hasOverride(sessionKey: string): boolean {
-    return this.prefs.hasOverride(sessionKey);
+  getResumeRoute(sessionId: string): ModelRoute {
+    return this.prefs.getOverride(sessionId) ?? this.resolveDefault();
   }
 
   /**
@@ -141,24 +121,24 @@ export class ModelResolver {
   }
 
   /**
-   * 获取指定 sessionKey 的 per-peer preset 覆盖
+   * 获取指定会话的 preset 覆盖（只在会话还没创建时存在）
    */
-  getPreset(sessionKey: string): string | undefined {
-    return this.prefs.getPreset(sessionKey);
+  getSessionPreset(sessionId: string): string | undefined {
+    return this.prefs.getPreset(sessionId);
   }
 
   /**
-   * 设置 per-peer preset 覆盖并持久化
+   * 设置指定会话的 preset（新会话创建前）并持久化
    */
-  setPreset(sessionKey: string, presetId: string): void {
-    this.prefs.setPreset(sessionKey, presetId);
+  setSessionPreset(sessionId: string, presetId: string): void {
+    this.prefs.setPreset(sessionId, presetId);
   }
 
   /**
-   * 清除 per-peer preset 覆盖并持久化
+   * 清除指定会话的 preset 并持久化
    */
-  clearPreset(sessionKey: string): boolean {
-    return this.prefs.clearPreset(sessionKey);
+  clearSessionPreset(sessionId: string): boolean {
+    return this.prefs.clearPreset(sessionId);
   }
 
   /**
@@ -224,16 +204,12 @@ export class ModelResolver {
   }
 
   /**
-   * 解析默认模型路由（不含 per-peer 偏好）
+   * 解析默认模型路由（新建会话一律用它）
    *
-   * 优先级：config 显式指定 > settings.yaml（只读） > 宿主 agentDefaultModel
+   * 优先级：settings.yaml（只读） > 宿主 agentDefaultModel（核心默认）。
    * 最终兜底 deepseek-official/deepseek-v4-flash，确保 {{model}} 变量始终有值。
    */
   resolveDefault(): ModelRoute {
-    if (this.config.provider && this.config.model) {
-      return { provider: this.config.provider, model: this.config.model };
-    }
-
     const fromSettings = this.settings.readDefaultRoute();
     if (fromSettings) return fromSettings;
 

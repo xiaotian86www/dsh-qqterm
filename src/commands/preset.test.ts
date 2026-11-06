@@ -36,10 +36,12 @@ interface StubOptions {
   presets?: PresetEntry[];
   /** 当前会话锁定的 preset（record.agentPreset） */
   recordPreset?: string;
-  /** 新会话将生效的 preset（per-peer 覆盖或 config） */
+  /** 新会话的待定 preset（没有活跃会话时才有） */
   effective?: string;
   /** 切换结果是否为「已经是当前值」 */
   unchanged?: boolean;
+  /** 切换目标是已开始的会话 */
+  sessionStarted?: boolean;
 }
 
 function makeManager(options: StubOptions = {}) {
@@ -48,13 +50,14 @@ function makeManager(options: StubOptions = {}) {
     getSessionRecord: vi.fn(() =>
       options.recordPreset === undefined ? undefined : ({ agentPreset: options.recordPreset } as never),
     ),
-    getEffectivePreset: vi.fn(() => options.effective),
+    getEffectivePreset: vi.fn(() => options.effective ?? options.recordPreset),
     setPresetOverride: vi.fn(async (_scope: unknown, _peer: unknown, id: string) => ({
-      ok: true,
-      presetId: id,
+      ...(options.sessionStarted ? { ok: false, reason: 'session-started' as const } : { ok: true, presetId: id }),
       ...(options.unchanged ? { unchanged: true } : {}),
     })),
-    clearPresetOverride: vi.fn(async () => ({ ok: true })),
+    clearPresetOverride: vi.fn(async () => ({
+      ...(options.sessionStarted ? { ok: false, reason: 'session-started' as const } : { ok: true }),
+    })),
   } as unknown as SessionManager;
 }
 
@@ -88,13 +91,13 @@ describe('/preset（查看）', () => {
     expect(text.split('✅')).toHaveLength(2);
   });
 
-  it('会话锁定的旧 preset 只作提示，标注的仍是新会话将生效的值', async () => {
-    const text = await run(makeManager({ recordPreset: 'alpha', effective: 'beta' }));
+  it('已开始的会话显示它锁定的 preset，并提示只能在新会话改', async () => {
+    const text = await run(makeManager({ recordPreset: 'alpha' }));
 
-    expect(text).toContain('**当前**: beta');
-    expect(text).toContain('当前会话仍使用 alpha，发送 /new 后切到 beta');
-    expect(text).toContain('text="/preset beta" show="/preset Beta (beta) ✅"');
-    expect(text).toContain('text="/preset alpha" show="/preset Alpha (alpha)"');
+    expect(text).toContain('**当前**: alpha');
+    expect(text).toContain('preset 只在 `/new` 之后、第一条消息之前可改');
+    expect(text).toContain('text="/preset alpha" show="/preset Alpha (alpha) ✅"');
+    expect(text).toContain('text="/preset beta" show="/preset Beta (beta)"');
   });
 
   it('没有当前 preset 时列表不标 ✅，无别名的项直接显示 id', async () => {
@@ -107,27 +110,33 @@ describe('/preset（查看）', () => {
 });
 
 describe('/preset（切换）', () => {
-  it('切换成功回显 preset id，并提示新会话生效', async () => {
+  it('切换成功回显 preset id，并提示下一条消息生效', async () => {
     const manager = makeManager({ effective: 'alpha' });
     const text = await run(manager, 'beta');
 
     expect(manager.setPresetOverride).toHaveBeenCalledWith('c2c', 'owner', 'beta');
-    expect(text).toBe('✅ preset 已切换: beta（新会话生效）');
+    expect(text).toBe('✅ preset 已切换: beta（下一条消息生效）');
   });
 
-  it('切到当前 preset 是可重入的，只回一行且提示会话锁定值', async () => {
-    const manager = makeManager({ recordPreset: 'alpha', effective: 'beta', unchanged: true });
+  it('切到当前待定 preset 是可重入的，只回一行', async () => {
+    const manager = makeManager({ effective: 'beta', unchanged: true });
     const text = await run(manager, 'beta');
 
-    expect(text).toContain('✅ 已是当前 preset: beta');
-    expect(text).toContain('当前会话仍使用 alpha，发送 /new 后切到 beta');
+    expect(text).toBe('✅ 已是当前 preset: beta');
   });
 
-  it('reset 清除覆盖，回到默认', async () => {
+  it('会话已开始时拒绝切换，提示只能在新会话改', async () => {
+    const manager = makeManager({ recordPreset: 'alpha', sessionStarted: true });
+    const text = await run(manager, 'beta');
+
+    expect(text).toBe('⚠️ 当前会话已开始，preset 只在 `/new` 之后、第一条消息之前可改');
+  });
+
+  it('reset 清除待定 preset，回到默认', async () => {
     const manager = makeManager({ effective: 'beta' });
     const text = await run(manager, 'reset');
 
     expect(manager.clearPresetOverride).toHaveBeenCalledWith('c2c', 'owner');
-    expect(text).toBe('✅ 已重置为默认 preset（新会话生效）');
+    expect(text).toBe('✅ 已重置为默认 preset（下一条消息生效）');
   });
 });

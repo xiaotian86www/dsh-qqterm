@@ -73,12 +73,6 @@ export interface ImQQBotConfig {
   appId: string;
   /** QQ Bot AppSecret */
   appSecret: string;
-  /** dsh LLM 提供商名称 */
-  provider?: string;
-  /** 模型名称 */
-  model?: string;
-  /** Agent preset id */
-  preset?: string;
   /** 私聊额外 system prompt */
   directPrompt?: string;
   /** 单条消息最大长度（QQ 限制约 5000 字符） */
@@ -120,9 +114,6 @@ export const AccessControlSchema: Schema<AccessControlConfig> = Schema.object({
 export const ConfigSchema: Schema<ImQQBotConfig> = Schema.object({
   appId: Schema.string().default('').description('QQ 机器人 AppID'),
   appSecret: Schema.string().default('').description('QQ 机器人 AppSecret'),
-  provider: Schema.string().description('LLM provider name'),
-  model: Schema.string().description('Model name'),
-  preset: Schema.string().description('Agent preset id'),
   directPrompt: Schema.string().description('私聊额外system prompt'),
   textChunkLimit: Schema.number().default(4500).description('单条消息最大字符数'),
   streaming: Schema.boolean().default(true).description('是否启用流式输出'),

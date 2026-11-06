@@ -18,11 +18,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Removed
 
+- **Removed the plugin's `provider` / `model` / `preset` options**: the default model and default preset are now decided by the host (the model default in dsh `settings.yaml` and the profile's default preset), and neither the settings panel nor the in-chat binding page shows them any more. Values still present in an existing profile are ignored.
+
 - **Removed the `/sessions workspace` view**: `/sessions` already groups the sessions QQ holds by workspace, so a second "current workspace only" view was a duplicate entry point. Use `/sessions all` to find sessions in other projects; the old command (including the `/sessions ws` alias and the paged form) now replies with a migration hint instead of a list, and the held list footer no longer links to it.
 
 - **Removed the `/workspace` command**: viewing and switching workspace is now handled entirely by `/new <workspace|path>` — a workspace *is* the session's `cwd`, it can only be chosen before a session is persisted, and that window is exactly right after `/new`; a separate "switch workspace without starting a session" command had no real use. `/status` still shows workspace info.
 
 ### Changed
+
+- **Model, preset and reasoning effort are now per-session, and new sessions take the core defaults**: `/new`, `/reset` and `/sessions resume` no longer carry a previous session's choices — a new session uses the host defaults (`settings.yaml` → host default model → `deepseek-official/deepseek-v4-flash`), while an existing session keeps its own model and preset and resumes with them. `/model` switches only the current session (forking, keeping history, and refusing when no session is active); `/preset` applies only between `/new` and the first message and is refused once the session has started; `/reasoning` restores the deployment default after switching so it does not leak into new sessions. Preferences keyed by chat in `~/.dsh-qqbot/model-prefs.json` no longer take effect.
 
 - **Session lists are no longer numbered, and archive paging takes a bare page number**: rows in `/sessions` and the archive picker now start directly with the 8-character short id, and `resume` / `rename` / `archive` only accept that id, never "row 3" — the lists are grouped by workspace and span pages, so indices drift from what is on screen. The archive picker's pager also moved from `/sessions archive page 2` to `/sessions archive 2`: a lone number means the page, and an index is rejected with a hint to use the short id.
 

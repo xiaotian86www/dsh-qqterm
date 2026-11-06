@@ -26,17 +26,12 @@ export function presetCommand({ manager, config, logger }: CommandDeps): Categor
           return '⚠️ 当前部署无可用的 agent preset';
         }
 
-        const effective = manager.getEffectivePreset(scope, peerId);
-        const locked = manager.getSessionRecord(scope, peerId)?.agentPreset;
-        // /preset 决定的是「新会话」的 preset：当前值取 effective，
-        // 已开始会话锁定的旧值只在下面单独说明。
-        const currentId = effective ?? locked;
+        // preset 跟着会话走：已开始的会话就是它锁定的值，未开始的会话显示待定值
+        const currentId = manager.getEffectivePreset(scope, peerId);
+        const started = manager.getSessionRecord(scope, peerId) !== undefined;
 
         const lines: string[] = ['### 🧩 Agent Preset', ''];
         lines.push(`**当前**: ${currentId ?? '默认'}`);
-        if (locked && currentId && locked !== currentId) {
-          lines.push(`当前会话仍使用 ${locked}，发送 /new 后切到 ${currentId}`);
-        }
         lines.push('', '**可用 preset（点击切换）:**');
         for (const p of presets) {
           const display = p.name ? `${p.name} (${p.id})` : p.id;
@@ -45,16 +40,26 @@ export function presetCommand({ manager, config, logger }: CommandDeps): Categor
           const suffix = isCurrent ? ' ✅' : '';
           lines.push(`<qqbot-cmd-input text="/preset ${p.id}" show="/preset ${display}${suffix}"/>`);
         }
-        lines.push('', '手动指定: `/preset <id>`，重置默认: `/preset reset`');
+        lines.push(
+          '',
+          started
+            ? 'preset 只在 `/new` 之后、第一条消息之前可改'
+            : '手动指定: `/preset <id>`，重置默认: `/preset reset`',
+        );
 
         await sendMarkdownChunked(cmdCtx, lines.join('\n'), config.textChunkLimit);
         return { kind: 'noop' as const };
       }
 
-      // reset / default：清除 per-peer 覆盖，回到默认
+      // reset / default：清除当前会话的待定 preset，回到默认
       if (args === 'reset' || args === 'default') {
         const outcome = await manager.clearPresetOverride(scope, peerId);
-        return outcome.ok ? '✅ 已重置为默认 preset（新会话生效）' : '❌ 重置失败';
+        if (!outcome.ok) {
+          return outcome.reason === 'session-started'
+            ? '⚠️ 当前会话已开始，preset 只在 `/new` 之后、第一条消息之前可改'
+            : `❌ 重置失败: ${outcome.message ?? '未知错误'}`;
+        }
+        return '✅ 已重置为默认 preset（下一条消息生效）';
       }
 
       // 切换到指定 preset
@@ -65,22 +70,17 @@ export function presetCommand({ manager, config, logger }: CommandDeps): Categor
             return `⚠️ 未知 preset: ${args}`;
           case 'broken':
             return `❌ preset ${args} 加载失败: ${outcome.message ?? '未知错误'}`;
+          case 'session-started':
+            return '⚠️ 当前会话已开始，preset 只在 `/new` 之后、第一条消息之前可改';
           default:
             return `❌ 切换失败: ${outcome.message ?? '未知错误'}`;
         }
       }
 
-      if (outcome.unchanged) {
-        const target = outcome.presetId ?? args;
-        const locked = manager.getSessionRecord(scope, peerId)?.agentPreset;
-        const lines = [`✅ 已是当前 preset: ${target}`];
-        if (locked && locked !== target) {
-          lines.push(`当前会话仍使用 ${locked}，发送 /new 后切到 ${target}`);
-        }
-        return lines.join('\n');
-      }
+      const target = outcome.presetId ?? args;
+      if (outcome.unchanged) return `✅ 已是当前 preset: ${target}`;
 
-      return `✅ preset 已切换: ${args}（新会话生效）`;
+      return `✅ preset 已切换: ${target}（下一条消息生效）`;
     },
   };
 }

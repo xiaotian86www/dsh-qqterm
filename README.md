@@ -95,9 +95,6 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqbot/cordis.dev.yml
 |------|------|--------|------|
 | `appId` | string | **必填** | QQ Bot AppID（或通过 `QQBOT_APPID` 环境变量） |
 | `appSecret` | string | **必填** | QQ Bot AppSecret（或通过 `QQBOT_SECRET` 环境变量） |
-| `provider` | string | `deepseek-official` | LLM 提供商名称 |
-| `model` | string | `deepseek-chat` | 模型名称 |
-| `preset` | string | - | Agent preset id |
 | `directPrompt` | string | - | 私聊额外 system prompt |
 | `textChunkLimit` | number | `4500` | 单条消息最大字符数 |
 | `streaming` | boolean | `true` | 是否启用流式输出 |
@@ -117,6 +114,16 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqbot/cordis.dev.yml
 - 排队只发生在同一个会话内部：当前会话空闲时消息立刻开跑，不会因为另一个会话正在生成而等待；同一会话连发多条则按顺序各跑一轮。
 
 多个私聊同时说话时，回复发给最后一条消息所在的私聊。
+
+### 模型、preset 与思考强度
+
+这三项都跟着**单个会话**走，新会话不继承上一个会话的选择：
+
+- 新会话（`/new`、第一条消息）用宿主核心默认值：`settings.yaml` → 宿主 agentDefaultModel → `deepseek-official/deepseek-v4-flash`。插件不再提供 `provider` / `model` / `preset` 配置项。
+- `/model` 只切当前会话（fork 保留历史）；没有活跃会话时拒绝，先发一条消息。
+- `/preset` 只在会话还没开始时有效（`/new` 之后、第一条消息之前），已开始直接拒绝。
+- `/reasoning` 只影响当前会话；插件会把宿主顺手写下的部署默认恢复原值。
+- 旧版本按聊天 key 存的偏好不再生效，存量会话恢复时回到它自己记录的值或核心默认。
 
 ### 访问控制（access）
 
@@ -182,7 +189,7 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqbot/cordis.dev.yml
 | `/ls` | 列出目录里的子目录，点条目逐层进入 |
 | `/model` | 查看或切换模型 |
 | `/reasoning`（别名 `/think`） | 查看或切换思考强度（档位由模型决定）；`default` 恢复模型默认 |
-| `/preset` | 查看或切换 agent preset（新会话生效） |
+| `/preset` | 查看或切换 agent preset（只对新会话有效） |
 | `/permission` | 查看或切换权限预设（沙箱模式 + 审批策略，当前会话立即生效；仅白名单可用） |
 | `/cost` | 查看当前会话的 token 消耗 |
 | `/status` | 查看会话状态：会话名与短 id / 工作区 / 模型 / 思考强度 / 上下文 / token |

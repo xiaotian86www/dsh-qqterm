@@ -24,13 +24,10 @@ export function modelCommand({ manager, config, logger }: CommandDeps): Categori
         const models = await manager.listAvailableModels();
 
         // 当前模型展示：别名 + provider；列表按 provider 分组后不必再重复完整路径
-        let currentDisplay = '宿主默认配置';
-        if (current) {
-          const matched = models.find((m) => m.provider === current.provider && m.id === current.model);
-          currentDisplay = matched
-            ? `${shortModelName(current.model, matched.name)} · ${current.provider}`
-            : `${current.provider}/${current.model}`;
-        }
+        const matched = models.find((m) => m.provider === current.provider && m.id === current.model);
+        const currentDisplay = matched
+          ? `${shortModelName(current.model, matched.name)} · ${current.provider}`
+          : `${current.provider}/${current.model}`;
 
         const lines: string[] = [
           '### 🤖 模型配置',
@@ -87,7 +84,7 @@ export function modelCommand({ manager, config, logger }: CommandDeps): Categori
       } else {
         // 仅指定 model 名，provider 从当前路由继承
         const current = manager.getEffectiveModel(scope, peerId);
-        provider = current?.provider ?? 'deepseek-official';
+        provider = current.provider;
         model = args;
       }
 
@@ -96,6 +93,9 @@ export function modelCommand({ manager, config, logger }: CommandDeps): Categori
       }
 
       const outcome = await manager.setModelOverride(scope, peerId, { provider, model });
+      if (outcome.reason === 'no-session') {
+        return '⚠️ 当前没有会话，先发一条消息再切换模型';
+      }
       if (outcome.unchanged) {
         return `✅ 已是当前模型: ${provider}/${model}`;
       }

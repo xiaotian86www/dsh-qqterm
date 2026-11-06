@@ -463,17 +463,47 @@ describe('切换类操作 — 可重入', () => {
     expect(new PrefsStore().getOverride(KEY)).toBeUndefined();
   });
 
-  it('模型：没有活跃会话时目标就是默认模型，也不写偏好', async () => {
+  it('preset：会话已开始后拒绝修改（只有新会话可设）', async () => {
+    const { registry } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
+    const manager = createManagerWithCtx(registry, presetsCtx());
+    await manager.getOrCreate('c2c', PEER, PEER, REPLY);
+
+    const outcome = await manager.setPresetOverride('c2c', PEER, 'beta');
+
+    expect(outcome).toEqual({ ok: false, reason: 'session-started' });
+  });
+
+  it('新会话不继承旧会话的模型与 preset', async () => {
+    const { registry } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
+    const manager = createManagerWithCtx(registry, presetsCtx());
+
+    // 新会话先设 preset，再发第一条消息让它创建
+    expect(await manager.setPresetOverride('c2c', PEER, 'beta')).toEqual({ ok: true, presetId: 'beta' });
+    const created = await manager.getOrCreate('c2c', PEER, PEER, REPLY);
+    expect(created.agentPreset).toBe('beta');
+    await manager.setModelOverride('c2c', PEER, { provider: 'p', model: 'other' });
+    expect(manager.getEffectiveModel('c2c', PEER)).toEqual({ provider: 'p', model: 'other' });
+
+    // 再 /new：模型回核心默认，preset 回默认，都不继承上一个会话
+    await manager.remove();
+    const fresh = await manager.getOrCreate('c2c', PEER, PEER, REPLY);
+
+    expect(fresh.sessionId).not.toBe(created.sessionId);
+    expect(manager.getEffectiveModel('c2c', PEER)).toEqual({ provider: 'p', model: 'm' });
+    expect(fresh.agentPreset).not.toBe('beta');
+  });
+
+  it('模型：没有活跃会话时拒绝切换，也不写偏好', async () => {
     const { registry } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
     const manager = createManager(registry);
 
     const outcome = await manager.setModelOverride('c2c', PEER, { provider: 'p', model: 'm' });
 
-    expect(outcome.unchanged).toBe(true);
+    expect(outcome.reason).toBe('no-session');
     expect(new PrefsStore().getOverride(KEY)).toBeUndefined();
   });
 
-  it('preset：目标就是当前生效值时不重复写覆盖', async () => {
+  it('preset：目标就是当前待定值时不重复写覆盖', async () => {
     const { registry } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
     const manager = createManagerWithCtx(registry, presetsCtx());
 
@@ -482,7 +512,10 @@ describe('切换类操作 — 可重入', () => {
 
     expect(first).toEqual({ ok: true, presetId: 'alpha' });
     expect(second).toEqual({ ok: true, presetId: 'alpha', unchanged: true });
-    expect(new PrefsStore().getPreset(KEY)).toBe('alpha');
+    // 待定 preset 按会话 id 存：/new 铸出来的那个
+    const sessionId = new PrefsStore().getSessionId(KEY);
+    expect(sessionId).toBeDefined();
+    expect(new PrefsStore().getPreset(sessionId!)).toBe('alpha');
   });
 });
 
@@ -581,7 +614,10 @@ function effortCtx(
       },
     },
     sessionProjections: { stateOf: () => state },
-    agentDefaultModel: { currentSelection: () => state.saved },
+    agentDefaultModel: {
+      currentSelection: () => state.saved,
+      saveSelection: async (next: HostSelectionState) => { state.saved = next; },
+    },
     sessionController: { selectModel },
   };
   const ctx = {
@@ -652,6 +688,19 @@ describe('思考强度 — 宿主选择与重建', () => {
     // 宿主下一轮请求嗅探的是 model/selection，不 fork：仍用同一个 agent
     await manager.getOrCreate('c2c', PEER, PEER, REPLY);
     expect(registry.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('改思考强度只影响当前会话：宿主顺手写的部署默认被恢复', async () => {
+    const { registry } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
+    const host = effortCtx(REASONING);
+    const manager = createManagerWithCtx(registry, host.ctx);
+    await manager.getOrCreate('c2c', PEER, PEER, REPLY);
+    const before = { ...host.state.saved };
+
+    await manager.selectEffort('c2c', PEER, 'max');
+
+    expect(host.state.saved).toEqual(before);
+    expect(await manager.getEffortView('c2c', PEER)).toMatchObject({ current: { id: 'max' } });
   });
 
   it('恢复默认交回模型默认档位，宿主选择里不再带 reasoningEffort', async () => {

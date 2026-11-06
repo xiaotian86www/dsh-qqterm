@@ -181,8 +181,6 @@ describe('绑定链路 × 真实 persist 落盘（#53 回归）', () => {
       streaming: false,
       showToolResults: true,
       debug: true,
-      provider: 'pi-ai',
-      model: 'deepseek-chat',
       directPrompt: '私聊提示词',
       access: { c2cMode: 'allowlist', c2cAllow: ['u1'] },
     })), res);
@@ -191,7 +189,7 @@ describe('绑定链路 × 真实 persist 落盘（#53 回归）', () => {
     const after = readFileSync(patchPath, 'utf8');
     for (const expected of [
       'streaming: false', 'showToolResults: true', 'debug: true',
-      "provider: pi-ai", 'directPrompt: 私聊提示词',
+      'directPrompt: 私聊提示词',
       'c2cMode: allowlist', 'c2cAllow:', '- u1',
     ]) {
       expect(after).toContain(expected);
@@ -205,6 +203,7 @@ describe('绑定链路 × 真实 persist 落盘（#53 回归）', () => {
     ['凭据字段', '{"appId":"hack","streaming":false}'],
     ['只读 cwd 字段', '{"cwd":"/tmp"}'],
     ['未知字段', '{"timeoutMs":100}'],
+    ['已移除的模型字段', '{"provider":"pi-ai","model":"deepseek-chat"}'],
     ['类型错误（streaming 传字符串）', '{"streaming":"yes"}'],
   ])('配置保存拒绝：%s → 400 且文件不变', async (_name, body) => {
     dir = mkdtempSync(join(tmpdir(), 'im-qqbot-bind-rej-'));

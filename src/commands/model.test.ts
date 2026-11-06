@@ -40,16 +40,19 @@ function makeManager(
     current?: ModelRoute;
     models?: ModelEntry[];
     unchanged?: boolean;
+    noSession?: boolean;
     effort?: { options?: Array<{ id: string; name: string }>; current?: { id: string; name: string }; defaulted: boolean };
   } = {},
 ) {
   return {
-    getEffectiveModel: vi.fn(() => options.current),
+    // getEffectiveModel 现在总是有值：没有会话偏好时回核心默认
+    getEffectiveModel: vi.fn(() => options.current ?? { provider: 'deepseek-official', model: 'deepseek-v4-flash' }),
     listAvailableModels: vi.fn(async () => options.models ?? MODELS),
     getEffortView: vi.fn(async () => options.effort ?? { defaulted: true }),
     setModelOverride: vi.fn(async (_scope: unknown, _peer: unknown, route: ModelRoute) => ({
       ...route,
       ...(options.unchanged ? { unchanged: true } : {}),
+      ...(options.noSession ? { reason: 'no-session' as const } : {}),
     })),
   } as unknown as SessionManager;
 }
@@ -89,9 +92,9 @@ describe('/model（查看）', () => {
     expect(text).toContain('**当前模型**: custom/my-model');
   });
 
-  it('未解析到模型时显示宿主默认配置', async () => {
-    const text = await run(makeManager({ current: undefined }));
-    expect(text).toContain('**当前模型**: 宿主默认配置');
+  it('没有会话偏好时显示核心默认路由', async () => {
+    const text = await run(makeManager({}));
+    expect(text).toContain('**当前模型**: DeepSeek V4 Flash · deepseek-official');
   });
 
   it('模型列表按 provider 分组，组内只显示短名', async () => {
@@ -187,5 +190,10 @@ describe('/model（切换）', () => {
       provider: 'openrouter',
       model: 'deepseek-v4-pro',
     });
+  });
+
+  it('没有活跃会话时拒绝切换，提示先发消息', async () => {
+    const text = await run(makeManager({ noSession: true }), 'openrouter/deepseek-v4-flash');
+    expect(text).toBe('⚠️ 当前没有会话，先发一条消息再切换模型');
   });
 });

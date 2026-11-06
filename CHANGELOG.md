@@ -18,11 +18,15 @@
 
 ### 移除
 
+- **移除插件配置里的 `provider` / `model` / `preset`**：默认模型与默认 preset 统一由宿主决定（dsh `settings.yaml` 的默认模型、profile 的默认 preset），插件设置面板与端内绑定页不再有这三项；已有 profile 里写着的这三项会被忽略。
+
 - **移除 `/sessions workspace` 视图**：`/sessions` 本身就按工作区分组列出已持有会话，单独再给一个「只看当前工作区」的视图是重复入口。找别的项目里的会话用 `/sessions all`；旧命令（含别名 `/sessions ws`、带页码写法）仍会回复一条迁移提示，不再渲染列表。持有列表页脚同步去掉「工作区会话」链接。
 
 - **移除 `/workspace` 命令**：查看和切换工作区统一由 `/new <工作区|路径>` 承担——工作区是会话的 `cwd`，只能在会话落盘之前确定，而这个窗口正好在 `/new` 之后；单独一条「只换工作区、不开会话」的命令没有实际使用场景。`/status` 照旧显示工作区信息。
 
 ### 行为变更
+
+- **模型、preset 与思考强度改为按会话隔离，新会话一律用核心默认值**：`/new`、`/reset` 与 `/sessions resume` 不再沿用上一个会话的选择——新会话取宿主默认（`settings.yaml` → 宿主默认模型 → `deepseek-official/deepseek-v4-flash`），已开的会话保留自己的模型与 preset，resume 回来仍是原样。`/model` 只切当前会话（fork 保留历史，没有活跃会话时拒绝）；`/preset` 只在 `/new` 之后、第一条消息之前可改，会话已开始就拒绝；`/reasoning` 改完把部署默认写回，不污染新会话。`~/.dsh-qqbot/model-prefs.json` 里旧的按聊天记录存的偏好不再生效。
 
 - **会话列表不再编号，归档候选翻页改用纯页码**：`/sessions` 与归档候选的行首只留 8 位短 id，`resume` / `rename` / `archive` 一律用短 id，不再接受「第几条」；列表按工作区分组、跨页，序号和实际行很容易对不上。归档候选翻页也从 `/sessions archive page 2` 写成 `/sessions archive 2`，只给页码就是翻页，给序号会提示改用短 id。
 

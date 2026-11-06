@@ -90,7 +90,6 @@ export interface BindRoutesOptions {
 /** 可经 UI 编辑的配置键（白名单：只收用户必要的字段，其余走 patch/env） */
 const EDITABLE_CONFIG_KEYS = new Set([
   'streaming', 'showToolResults', 'debug',
-  'provider', 'model', 'preset',
   'directPrompt',
   'access',
 ]);
@@ -100,9 +99,6 @@ const EDITABLE_CONFIG_SCHEMAS: Record<string, (value: unknown) => unknown> = {
   streaming: (v) => booleanSchema(v, 'streaming'),
   showToolResults: (v) => booleanSchema(v, 'showToolResults'),
   debug: (v) => booleanSchema(v, 'debug'),
-  provider: stringSchema('provider'),
-  model: stringSchema('model'),
-  preset: stringSchema('preset'),
   directPrompt: stringSchema('directPrompt'),
   access: (v) => AccessControlSchema(v as never),
 };

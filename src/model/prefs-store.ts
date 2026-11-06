@@ -22,10 +22,11 @@ type ErrorFn = (msg: string) => void;
 
 /** 隔离偏好文件结构 */
 interface PrefsFile {
+  /** sessionId → 该会话自己的模型路由（只影响这一个会话；新会话不读） */
   overrides: Record<string, ModelRoute>;
   /** sessionKey → 最新 sessionId（fork 后更新，用于重启后恢复到 fork 后的会话） */
   sessionIds: Record<string, string>;
-  /** sessionKey → preset id（per-peer preset 覆盖） */
+  /** sessionId → preset id（会话创建前的待定值，create 时消费） */
   presets: Record<string, string>;
   /** sessionKey → 该聊天当前所在的工作目录（换会话后跟着会话走，/new 保留） */
   dirs: Record<string, string>;
@@ -67,7 +68,7 @@ export class PrefsStore {
     this.load();
   }
 
-  // ── Override 操作 ──
+  // ── Override 操作（键是 sessionId：选择只属于那一个会话） ──
 
   getOverride(sessionKey: string): ModelRoute | undefined {
     return this.overrides.get(sessionKey);
@@ -118,7 +119,7 @@ export class PrefsStore {
     return [...this.sessionIds.entries()];
   }
 
-  // ── Preset 操作 ──
+  // ── Preset 操作（键是 sessionId：待定值只对那个新会话有效） ──
 
   getPreset(sessionKey: string): string | undefined {
     return this.presets.get(sessionKey);

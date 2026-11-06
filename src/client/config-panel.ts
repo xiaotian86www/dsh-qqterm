@@ -28,9 +28,6 @@ type ConfigWire = {
   streaming?: boolean;
   showToolResults?: boolean;
   debug?: boolean;
-  provider?: string;
-  model?: string;
-  preset?: string;
   directPrompt?: string;
   access?: AccessControlWire;
 };
@@ -353,20 +350,6 @@ export function ConfigPanel(props?: { bindPhase?: string }): ReactNode {
       label: '显示工具调用结果', checked: form.showToolResults ?? false,
       help: '在聊天中展示工具调用结果，含失败',
       onChange: (v) => { patch('showToolResults', v); },
-    }),
-
-    createElement('div', { className: 'imqb2-group-title' }, '模型'),
-    createElement(FieldRow, {
-      label: 'Provider', value: form.provider ?? '', placeholder: '留空继承宿主默认',
-      onChange: (v) => { patch('provider', v); },
-    }),
-    createElement(FieldRow, {
-      label: 'Model', value: form.model ?? '', placeholder: '留空继承宿主默认',
-      onChange: (v) => { patch('model', v); },
-    }),
-    createElement(FieldRow, {
-      label: 'Preset', value: form.preset ?? '', placeholder: 'Agent preset id',
-      onChange: (v) => { patch('preset', v); },
     }),
 
     createElement('div', { className: 'imqb2-group-title' }, '个性化提示词'),

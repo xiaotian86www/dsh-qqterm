@@ -102,7 +102,7 @@ export interface CompactOutcome {
 /** preset 切换结果 */
 export interface PresetSwitchOutcome {
   ok: boolean;
-  reason?: 'unknown-preset' | 'broken' | 'failed';
+  reason?: 'unknown-preset' | 'broken' | 'session-started' | 'failed';
   presetId?: string;
   /** true = 目标就是当前值，未写覆盖 */
   unchanged?: boolean;
@@ -115,6 +115,8 @@ export interface ModelSwitchOutcome {
   model: string;
   /** true = 目标就是当前模型，未写偏好、未 fork 会话 */
   unchanged?: boolean;
+  /** 没有活跃会话：切换没有作用对象 */
+  reason?: 'no-session';
 }
 
 /** 宿主请求头的精简视图（读会话实际用的选择） */
