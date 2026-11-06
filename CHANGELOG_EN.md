@@ -10,6 +10,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- **Added two collapsible custom-menu entries, `权限` (permission) and `思考` (reasoning)**: besides the existing four buttons (session status / session list / new session / compact), the private-chat menu now expands `权限` into `查看权限`, `仅可查看`, `工作区内修改`, `完全权限`, `自动审查`, and `思考` into `查看思考`, `关闭`, `低`, `高`, `最高`. Clicking a sub-item fills the matching command into the input box; permission and the current session are still validated by the command itself. Menu entries are claimed by name or by their sub-menu commands, so user-added buttons are still preserved, and `/bot-sync` now reports 6 top-level items.
+
 - **Added `/reasoning` (alias `/think`) reasoning effort**: the available levels come from the current model (DeepSeek: `off` / `low` / `high` / `max`); without an argument it lists the current level and clickable options, with an argument it switches immediately, and `/reasoning default` restores the model default. Reading and switching go through the host `sessionController` / `modelSelection`: the change applies to the session's next request and the host persists the default, so the plugin keeps no second copy of the preference. `sessionController`, `agentDefaultModel` and `sessionProjections` are now in the plugin's `inject`, so the plugin stays inactive when the host lacks them (requires dsh 0.2.1+). `/model`, `/status` and `/bot-status` show the current level, and the QQ command panel lists the command too.
 
 ### Removed
