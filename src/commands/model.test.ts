@@ -193,8 +193,8 @@ describe('/model（切换）', () => {
     });
   });
 
-  it('没有活跃会话时拒绝切换，提示先发消息', async () => {
+  it('没有活跃会话时拒绝切换，只报原因', async () => {
     const text = await run(makeManager({ noSession: true }), 'openrouter/deepseek-v4-flash');
-    expect(text).toBe('⚠️ 当前没有会话，先发一条消息再切换模型');
+    expect(text).toBe('⚠️ 当前没有会话');
   });
 });

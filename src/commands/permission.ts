@@ -82,7 +82,7 @@ export function permissionCommand({ manager, config, logger }: CommandDeps): Cat
       if (!outcome.ok) {
         switch (outcome.reason) {
           case 'unknown-preset':
-            return `⚠️ 未知权限预设: ${target}\n可用: ${entries.map((entry) => entry.id).join(', ')}`;
+            return `⚠️ 未知权限预设: ${target}`;
           case 'no-session':
             return '⚠️ 当前无活跃会话';
           default:

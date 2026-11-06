@@ -141,11 +141,10 @@ describe('/permission（切换）', () => {
     expect(text.split('\n')).toEqual(['✅ 权限已切换: 自动审查 (auto)', '⚠️ 不启用沙箱，每次工具调用先由模型预审（额外消耗 token）']);
   });
 
-  it('未知预设列出可用项，不写会话', async () => {
+  it('未知预设只报原因，不写会话', async () => {
     const manager = makeManager({ outcome: { ok: false, reason: 'unknown-preset' } });
     const text = await run(manager, 'nope');
-    expect(text).toContain('未知权限预设: nope');
-    expect(text).toContain('read-only, workspace-write, danger-full-access, auto');
+    expect(text).toBe('⚠️ 未知权限预设: nope');
   });
 
   it('reset 不再特殊处理，按未知预设拒绝', async () => {

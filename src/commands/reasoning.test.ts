@@ -100,9 +100,9 @@ describe('/reasoning（查看）', () => {
     expect(text).not.toContain('跟随模型');
   });
 
-  it('模型不支持思考强度时给出原因与下一步', async () => {
+  it('模型不支持思考强度时只报原因', async () => {
     const text = await run(makeManager({ view: { defaulted: true } }));
-    expect(text).toBe('⚠️ 当前模型不支持思考强度\n换一个模型试试: `/model`');
+    expect(text).toBe('⚠️ 当前模型不支持思考强度');
   });
 });
 
@@ -118,18 +118,17 @@ describe('/reasoning（切换）', () => {
     expect(await run(manager, 'high')).toBe('✅ 已是当前思考强度: 高 (high)');
   });
 
-  it('未知档位列出可选值', async () => {
+  it('未知档位只报原因，不列可选值', async () => {
     const text = await run(
       makeManager({ outcome: { ok: false, reason: 'unknown-effort', options: OPTIONS } }),
       'turbo',
     );
-    expect(text).toContain('⚠️ 不支持的档位: `turbo`');
-    expect(text).toContain('可选: 关闭 (off) · 低 (low) · 高 (high) · 最高 (max)');
+    expect(text).toBe('⚠️ 不支持的档位: `turbo`');
   });
 
-  it('模型不支持时与查看一致，给出换模型的下一步', async () => {
+  it('模型不支持时只报原因', async () => {
     const text = await run(makeManager({ outcome: { ok: false, reason: 'unsupported' } }), 'high');
-    expect(text).toBe('⚠️ 当前模型不支持思考强度\n换一个模型试试: `/model`');
+    expect(text).toBe('⚠️ 当前模型不支持思考强度');
   });
 
   it('没有会话时只回一句没有会话', async () => {

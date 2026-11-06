@@ -10,8 +10,8 @@ import { getScopePeer, sendMarkdownChunked } from '../shared/index.ts';
 import { effortLabel } from '../model/effort-label.ts';
 import type { EffortOption } from '../model/types.ts';
 
-/** 一行可选的「下一步」：当前模型不支持思考强度时给出口 */
-const UNSUPPORTED_HINT = '换一个模型试试: `/model`';
+/** 不支持思考强度时的原因（只报原因，不给下一步） */
+const UNSUPPORTED_REASON = '⚠️ 当前模型不支持思考强度';
 
 export function reasoningCommand({ manager, config, logger }: CommandDeps): CategorizedCommand {
   return {
@@ -31,7 +31,7 @@ export function reasoningCommand({ manager, config, logger }: CommandDeps): Cate
       // 无参数：一行现状 + 可点击的档位
       if (!args) {
         if (!view.options || view.options.length === 0) {
-          return `⚠️ 当前模型不支持思考强度\n${UNSUPPORTED_HINT}`;
+          return UNSUPPORTED_REASON;
         }
 
         const current = view.current;
@@ -54,14 +54,10 @@ export function reasoningCommand({ manager, config, logger }: CommandDeps): Cate
 
       if (!outcome.ok) {
         if (outcome.reason === 'unsupported') {
-          return `⚠️ 当前模型不支持思考强度\n${UNSUPPORTED_HINT}`;
+          return UNSUPPORTED_REASON;
         }
         if (outcome.reason === 'unknown-effort') {
-          const options = (outcome.options ?? []).map(optionLabel).join(' · ');
-          return [
-            `⚠️ 不支持的档位: \`${args}\``,
-            options ? `可选: ${options}` : UNSUPPORTED_HINT,
-          ].join('\n');
+          return `⚠️ 不支持的档位: \`${args}\``;
         }
         if (outcome.reason === 'no') {
           return '⚠️ 没有会话';
