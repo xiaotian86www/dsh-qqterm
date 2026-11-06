@@ -31,7 +31,7 @@ export function reasoningCommand({ manager, config, logger }: CommandDeps): Cate
 
       const view = await manager.getEffortView(scope, peerId);
 
-      // 无参数：当前档位 + 可点击的档位列表
+      // 无参数：一行现状 + 可点击的档位
       if (!args) {
         if (!view.options || view.options.length === 0) {
           return `⚠️ 当前模型不支持思考强度\n${UNSUPPORTED_HINT}`;
@@ -39,8 +39,8 @@ export function reasoningCommand({ manager, config, logger }: CommandDeps): Cate
 
         const current = view.current;
         const currentLine = current
-          ? `**当前**: ${effortLabel(current)}${view.defaulted ? '（跟随模型）' : ''} · \`${current.id}\``
-          : '**当前**: 跟随模型';
+          ? `当前: ${effortLabel(current)}${view.defaulted ? '（跟随模型）' : ''}`
+          : '当前: 跟随模型';
         const lines: string[] = ['### 🧠 思考强度', '', currentLine, ''];
 
         for (const option of view.options) {
@@ -49,8 +49,10 @@ export function reasoningCommand({ manager, config, logger }: CommandDeps): Cate
             `<qqbot-cmd-input text="/reasoning ${option.id}" show="/reasoning ${optionLabel(option)}${isCurrent ? ' ✅' : ''}"/>`,
           );
         }
+        lines.push(
+          `<qqbot-cmd-input text="/reasoning ${DEFAULT_ARG}" show="跟随模型${view.defaulted ? ' ✅' : ''}"/>`,
+        );
 
-        lines.push('', `跟随模型: \`/reasoning ${DEFAULT_ARG}\``);
         await sendMarkdownChunked(cmdCtx, lines.join('\n'), config.textChunkLimit);
         return { kind: 'noop' as const };
       }
@@ -81,11 +83,11 @@ export function reasoningCommand({ manager, config, logger }: CommandDeps): Cate
 
       if (target === undefined) {
         return outcome.unchanged
-          ? `✅ 已跟随模型: ${display ?? '—'}`
-          : `✅ 思考强度已跟随模型: ${display ?? '—'}（下一条消息生效）`;
+          ? `✅ 已是当前思考强度: ${display ?? '—'}`
+          : `✅ 思考强度已跟随模型: ${display ?? '—'}`;
       }
       if (outcome.unchanged) return `✅ 已是当前思考强度: ${display}`;
-      return `✅ 思考强度已切换: ${display}（下一条消息生效）`;
+      return `✅ 思考强度已切换: ${display}`;
     },
   };
 }

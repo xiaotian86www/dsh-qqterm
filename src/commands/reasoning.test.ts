@@ -83,21 +83,22 @@ describe('/reasoning（查看）', () => {
   it('显示当前档位、可点击的档位列表与跟随模型入口', async () => {
     const text = await run(makeManager());
     expect(text).toContain('### 🧠 思考强度');
-    expect(text).toContain('**当前**: 高（跟随模型） · `high`');
+    expect(text).toContain('当前: 高（跟随模型）');
     // 四档都给出可点击链接，当前档位行尾标 ✅
     expect(text).toContain('text="/reasoning off" show="/reasoning 关闭"');
     expect(text).toContain('text="/reasoning low" show="/reasoning 低"');
     expect(text).toContain('text="/reasoning high" show="/reasoning 高 ✅"');
     expect(text).toContain('text="/reasoning max" show="/reasoning 最高"');
-    expect(text).toContain('跟随模型: `/reasoning default`');
+    expect(text).toContain('text="/reasoning default" show="跟随模型 ✅"');
   });
 
   it('显式设置过时不再标「跟随模型」', async () => {
     const text = await run(makeManager({
       view: { options: OPTIONS, current: { id: 'max', name: 'Max' }, defaulted: false },
     }));
-    expect(text).toContain('**当前**: 最高 · `max`');
+    expect(text).toContain('当前: 最高');
     expect(text).not.toContain('（跟随模型）');
+    expect(text).toContain('show="跟随模型"');
   });
 
   it('模型不支持思考强度时给出原因与下一步', async () => {
@@ -111,9 +112,8 @@ describe('/reasoning（切换）', () => {
     const manager = makeManager({ outcome: { ok: true, effort: 'max' } });
     const text = await run(manager, 'max');
     expect(manager.selectEffort).toHaveBeenCalledWith('c2c', 'owner', 'max');
-    expect(text).toBe('✅ 思考强度已切换: 最高（下一条消息生效）');
+    expect(text).toBe('✅ 思考强度已切换: 最高');
   });
-
   it('目标就是当前档位时返回「已是当前」', async () => {
     const manager = makeManager({ outcome: { ok: true, effort: 'high', unchanged: true } });
     expect(await run(manager, 'high')).toBe('✅ 已是当前思考强度: 高');
@@ -123,12 +123,12 @@ describe('/reasoning（切换）', () => {
     const manager = makeManager({ outcome: { ok: true, effort: 'high' } });
     const text = await run(manager, 'default');
     expect(manager.selectEffort).toHaveBeenCalledWith('c2c', 'owner', undefined);
-    expect(text).toBe('✅ 思考强度已跟随模型: 高（下一条消息生效）');
+    expect(text).toBe('✅ 思考强度已跟随模型: 高');
   });
 
   it('已经跟随模型时只回一行', async () => {
     const manager = makeManager({ outcome: { ok: true, effort: 'high', unchanged: true } });
-    expect(await run(manager, 'default')).toBe('✅ 已跟随模型: 高');
+    expect(await run(manager, 'default')).toBe('✅ 已是当前思考强度: 高');
   });
 
   it('未知档位列出可选值', async () => {
