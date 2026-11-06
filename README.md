@@ -188,7 +188,7 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqbot/cordis.dev.yml
 | `/to` | 向指定会话发消息，或在它提问时提交答案 |
 | `/ls` | 列出目录里的子目录，点条目逐层进入 |
 | `/model` | 查看或切换当前会话的模型（下一轮生效） |
-| `/reasoning`（别名 `/think`） | 查看或切换当前会话的思考强度（档位由模型决定）；`default` 跟随模型 |
+| `/reasoning`（别名 `/think`） | 查看或切换当前会话的思考强度（档位由模型决定） |
 | `/preset` | 查看或切换全局 agent preset（对之后新建的会话生效） |
 | `/permission` | 查看或切换权限预设（沙箱模式 + 审批策略，当前会话立即生效；仅白名单可用） |
 | `/cost` | 查看当前会话的 token 消耗 |

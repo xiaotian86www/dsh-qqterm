@@ -10,9 +10,6 @@ import { getScopePeer, sendMarkdownChunked } from '../shared/index.ts';
 import { effortLabel } from '../model/effort-label.ts';
 import type { EffortOption } from '../model/types.ts';
 
-/** 交回模型自选的参数（与真实档位 id 不冲突） */
-const DEFAULT_ARG = 'default';
-
 /** 一行可选的「下一步」：当前模型不支持思考强度时给出口 */
 const UNSUPPORTED_HINT = '换一个模型试试: `/model`';
 
@@ -38,9 +35,7 @@ export function reasoningCommand({ manager, config, logger }: CommandDeps): Cate
         }
 
         const current = view.current;
-        const currentLine = current
-          ? `当前: ${effortLabel(current)}${view.defaulted ? '（跟随模型）' : ''}`
-          : '当前: 跟随模型';
+        const currentLine = current ? `当前: ${effortLabel(current)}` : '当前: —';
         const lines: string[] = ['### 🧠 思考强度', '', currentLine, ''];
 
         for (const option of view.options) {
@@ -49,17 +44,13 @@ export function reasoningCommand({ manager, config, logger }: CommandDeps): Cate
             `<qqbot-cmd-input text="/reasoning ${option.id}" show="/reasoning ${optionLabel(option)}${isCurrent ? ' ✅' : ''}"/>`,
           );
         }
-        lines.push(
-          `<qqbot-cmd-input text="/reasoning ${DEFAULT_ARG}" show="跟随模型${view.defaulted ? ' ✅' : ''}"/>`,
-        );
 
         await sendMarkdownChunked(cmdCtx, lines.join('\n'), config.textChunkLimit);
         return { kind: 'noop' as const };
       }
 
-      // 切换（default = 交回模型自选）
-      const target = args === DEFAULT_ARG ? undefined : args;
-      const outcome = await manager.selectEffort(scope, peerId, target);
+      // 切换
+      const outcome = await manager.selectEffort(scope, peerId, args);
 
       if (!outcome.ok) {
         if (outcome.reason === 'unsupported') {
@@ -81,11 +72,6 @@ export function reasoningCommand({ manager, config, logger }: CommandDeps): Cate
       const label = view.options?.find((option) => option.id === outcome.effort);
       const display = label ? effortLabel(label) : outcome.effort;
 
-      if (target === undefined) {
-        return outcome.unchanged
-          ? `✅ 已是当前思考强度: ${display ?? '—'}`
-          : `✅ 思考强度已跟随模型: ${display ?? '—'}`;
-      }
       if (outcome.unchanged) return `✅ 已是当前思考强度: ${display}`;
       return `✅ 思考强度已切换: ${display}`;
     },
