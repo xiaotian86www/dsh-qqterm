@@ -35,7 +35,7 @@ export function reasoningCommand({ manager, config, logger }: CommandDeps): Cate
         }
 
         const current = view.current;
-        const currentLine = current ? `当前: ${effortLabel(current)}` : '当前: —';
+        const currentLine = current ? `当前: ${optionLabel(current)}` : '当前: —';
         const lines: string[] = ['### 🧠 思考强度', '', currentLine, ''];
 
         for (const option of view.options) {
@@ -70,7 +70,7 @@ export function reasoningCommand({ manager, config, logger }: CommandDeps): Cate
       }
 
       const label = view.options?.find((option) => option.id === outcome.effort);
-      const display = label ? effortLabel(label) : outcome.effort;
+      const display = label ? optionLabel(label) : outcome.effort;
 
       if (outcome.unchanged) return `✅ 已是当前思考强度: ${display}`;
       return `✅ 思考强度已切换: ${display}`;
@@ -78,8 +78,8 @@ export function reasoningCommand({ manager, config, logger }: CommandDeps): Cate
   };
 }
 
-/** 档位在按钮/文案里的展示名（未知 id 用 id 兜底） */
+/** 档位在按钮/文案里的展示名：`高 (high)`，未知 id 直接用 id */
 function optionLabel(option: EffortOption): string {
   const label = effortLabel(option);
-  return label === option.id ? option.id : label;
+  return label === option.id ? option.id : `${label} (${option.id})`;
 }

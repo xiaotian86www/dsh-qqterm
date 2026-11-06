@@ -83,12 +83,12 @@ describe('/reasoning（查看）', () => {
   it('显示当前档位与可点击的档位列表', async () => {
     const text = await run(makeManager());
     expect(text).toContain('### 🧠 思考强度');
-    expect(text).toContain('当前: 高');
-    // 四档都给出可点击链接，当前档位行尾标 ✅
-    expect(text).toContain('text="/reasoning off" show="/reasoning 关闭"');
-    expect(text).toContain('text="/reasoning low" show="/reasoning 低"');
-    expect(text).toContain('text="/reasoning high" show="/reasoning 高 ✅"');
-    expect(text).toContain('text="/reasoning max" show="/reasoning 最高"');
+    expect(text).toContain('当前: 高 (high)');
+    // 四档都给出可点击链接（中文名 + 实际参数名），当前档位行尾标 ✅
+    expect(text).toContain('text="/reasoning off" show="/reasoning 关闭 (off)"');
+    expect(text).toContain('text="/reasoning low" show="/reasoning 低 (low)"');
+    expect(text).toContain('text="/reasoning high" show="/reasoning 高 (high) ✅"');
+    expect(text).toContain('text="/reasoning max" show="/reasoning 最高 (max)"');
     expect(text).not.toContain('跟随模型');
   });
 
@@ -111,11 +111,11 @@ describe('/reasoning（切换）', () => {
     const manager = makeManager({ outcome: { ok: true, effort: 'max' } });
     const text = await run(manager, 'max');
     expect(manager.selectEffort).toHaveBeenCalledWith('c2c', 'owner', 'max');
-    expect(text).toBe('✅ 思考强度已切换: 最高');
+    expect(text).toBe('✅ 思考强度已切换: 最高 (max)');
   });
   it('目标就是当前档位时返回「已是当前」', async () => {
     const manager = makeManager({ outcome: { ok: true, effort: 'high', unchanged: true } });
-    expect(await run(manager, 'high')).toBe('✅ 已是当前思考强度: 高');
+    expect(await run(manager, 'high')).toBe('✅ 已是当前思考强度: 高 (high)');
   });
 
   it('未知档位列出可选值', async () => {
@@ -124,7 +124,7 @@ describe('/reasoning（切换）', () => {
       'turbo',
     );
     expect(text).toContain('⚠️ 不支持的档位: `turbo`');
-    expect(text).toContain('可选: 关闭 · 低 · 高 · 最高');
+    expect(text).toContain('可选: 关闭 (off) · 低 (low) · 高 (high) · 最高 (max)');
   });
 
   it('模型不支持时与查看一致，给出换模型的下一步', async () => {
