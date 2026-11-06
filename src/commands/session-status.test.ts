@@ -187,11 +187,12 @@ describe('/status（有会话）', () => {
 });
 
 describe('/status（没有会话）', () => {
-  it('说明未建立，只给工作区与模型', async () => {
+  it('只说明未建立与工作区，不展示会话级字段', async () => {
     const text = await run(makeManager({ active: false }));
     expect(text).toContain('**会话**: 未建立');
     expect(text).toContain('**工作区**: repo · `D:\\repo`');
-    expect(text).toContain('**模型**: deepseek/deepseek-v4');
+    expect(text).not.toContain('**模型**:');
+    expect(text).not.toContain('**思考强度**:');
     expect(text).not.toContain('**Preset**:');
     expect(text).not.toContain('**消息**:');
   });

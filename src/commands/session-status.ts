@@ -62,15 +62,18 @@ async function renderStatus(
     lines.push(`**工作区**: ${workspace.title} · \`${workspace.path}\`${missing}`);
   }
 
-  if (status.model) {
-    lines.push(`**模型**: ${status.provider}/${status.model}`);
+  // 模型 / 思考强度 / preset 都是会话自己的状态：没有会话时不给默认值
+  if (status.active) {
+    if (status.model) {
+      lines.push(`**模型**: ${status.provider}/${status.model}`);
+    }
+    // 思考强度跟着模型走：只在模型支持时显示
+    const effort = await manager.getEffortView(scope, peerId);
+    if (effort.current) {
+      lines.push(`**思考强度**: ${effortLabel(effort.current)}`);
+    }
+    if (status.preset) lines.push(`**Preset**: ${status.preset}`);
   }
-  // 思考强度跟着模型走：只在模型支持时显示
-  const effort = await manager.getEffortView(scope, peerId);
-  if (effort.current) {
-    lines.push(`**思考强度**: ${effortLabel(effort.current)}`);
-  }
-  if (status.preset) lines.push(`**Preset**: ${status.preset}`);
 
   // 以下只在会话已建立时有意义
   if (status.active) {
