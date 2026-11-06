@@ -24,6 +24,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Changed
 
+- **Renamed the session views and unified how both count**: the `/sessions` title is now `工作中会话` (working sessions) instead of `持有会话`, and `/sessions all` is now `全部会话` (all sessions) instead of `全部工作区`; both titles read `X 个工作区 · Y 个会话` (previously only `all` showed a workspace count), and the footer links between them now read `工作中会话` and `全部会话`.
+
 - **Host services are now hard dependencies; capability fallbacks are gone**: `inject` lists every host service the plugin uses (sessions, models, workspaces, archiving, titles, queries, presets, permissions, tools, attachments, web server), and a missing service keeps the plugin inactive. Every "service not mounted → unavailable" probe has been removed, so `/sessions archive`, `/rename`, `/preset` and `/permission` no longer have half-working states. A minimal `dsh-base`-only profile must mount these services. `compaction` is the one exception: Web/Desktop mount it inside the agent preset scope rather than on the host, so it stays out of `inject`; `/compact` resolves the engine only from the current session's preset and answers a single line, `⚠️ 当前 preset 没有压缩能力`, when it is absent — without naming a specific preset, since any preset may lack the engine — instead of falling back to a host-plane engine.
 
 - **The reply / resume buttons under other sessions' messages no longer repeat the session id**: the id is already in the header line, so the button label now carries only the action. Clicking still fills `/to #shortid ` into the input box; the "answer" link on questions from other sessions follows the same rule.

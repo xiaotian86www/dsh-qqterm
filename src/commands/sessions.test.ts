@@ -181,7 +181,7 @@ describe('/sessions 持有视图', () => {
 
     const text = await run(manager, '');
 
-    expect(text).toContain('### 🗂 持有会话（2 个）');
+    expect(text).toContain('### 🗂 工作中会话（1 个工作区 · 2 个会话）');
     expect(text).toContain('**repo** · `/repo`');
     expect(text).not.toContain('未分组');
     expect(text).toContain('1. #cccc1111 · 当前会话 · 生成中');
@@ -297,10 +297,10 @@ describe('/sessions 持有视图', () => {
   it('没有持有会话时只留归档与全部两个入口', async () => {
     const manager = makeManager({ listHeldSessions: vi.fn(async () => []) });
     const text = await run(manager, '');
-    expect(text).toContain('持有会话（0 个）');
-    expect(text).toContain('还没有持有会话');
+    expect(text).toContain('工作中会话（0 个工作区 · 0 个会话）');
+    expect(text).toContain('还没有工作中会话');
     expect(text).toContain('<qqbot-cmd-input text="/sessions archive" show="归档"/>');
-    expect(text).toContain('<qqbot-cmd-input text="/sessions all" show="查看全部"/>');
+    expect(text).toContain('<qqbot-cmd-input text="/sessions all" show="全部会话"/>');
     expect(text).not.toContain('/sessions workspace');
   });
 
@@ -311,7 +311,7 @@ describe('/sessions 持有视图', () => {
       }),
     });
     const text = await run(manager, '');
-    expect(text).toContain('读取持有会话失败');
+    expect(text).toContain('读取工作中会话失败');
     expect(text).toContain('sqlite malformed');
   });
 });
@@ -320,7 +320,7 @@ describe('/sessions workspace（已移除）', () => {
   it('给出迁移指引，不再渲染工作区列表', async () => {
     const text = await run(makeManager(), 'workspace');
     expect(text).toContain('已移除');
-    expect(text).toContain('<qqbot-cmd-input text="/sessions all" show="查看全部工作区"/>');
+    expect(text).toContain('<qqbot-cmd-input text="/sessions all" show="全部会话"/>');
     expect(text).not.toContain('工作区会话（');
   });
 
@@ -351,7 +351,7 @@ describe('/sessions archived', () => {
     // 默认列表里的会话不该出现在归档页
     expect(text).not.toContain('cccc1111');
     // 底部的返回入口也是链接
-    expect(text).toContain('<qqbot-cmd-input text="/sessions" show="返回持有列表"/>');
+    expect(text).toContain('<qqbot-cmd-input text="/sessions" show="工作中会话"/>');
   });
 
   it('归档超过一页时给出下一页链接', async () => {
@@ -366,7 +366,7 @@ describe('/sessions archived', () => {
 
     const page2 = await run(manager, 'archived 2');
     expect(page2).toContain('<qqbot-cmd-input text="/sessions archived 1" show="上一页"/> · 第 2/2 页');
-    expect(page2).toContain('第 2/2 页\n\n<qqbot-cmd-input text="/sessions" show="返回持有列表"/>');
+    expect(page2).toContain('第 2/2 页\n\n<qqbot-cmd-input text="/sessions" show="工作中会话"/>');
   });
 
   it('没有归档时说明用法', async () => {
@@ -424,7 +424,7 @@ describe('/sessions all', () => {
 
     const text = await run(manager, 'all');
 
-    expect(text).toContain('全部工作区（2 个工作区 · 2 个未归档会话）');
+    expect(text).toContain('全部会话（2 个工作区 · 2 个会话）');
     expect(text).toContain('**dsh-qqbot**');
     expect(text).toContain('**default-workspace**');
     expect(text).toContain('⚠️ 目录不存在');
@@ -432,7 +432,7 @@ describe('/sessions all', () => {
     expect(text).not.toMatch(/^\d+\. /m);
     expect(text).toContain('<qqbot-cmd-input text="/sessions resume #aaa11111"');
     expect(text).toContain('<qqbot-cmd-input text="/sessions resume #bbb22222"');
-    expect(text).toContain('<qqbot-cmd-input text="/sessions" show="返回持有列表"/>');
+    expect(text).toContain('<qqbot-cmd-input text="/sessions" show="工作中会话"/>');
   });
 
   it('超过一页时按会话分页，页首仍重复所属工作区', async () => {
@@ -480,7 +480,7 @@ describe('/sessions all', () => {
 
   it('没有工作区会话时给出引导', async () => {
     const manager = makeManager({ listWorkspaceGroups: vi.fn(async () => []) });
-    expect(await run(manager, 'all')).toContain('还没有任何工作区会话');
+    expect(await run(manager, 'all')).toContain('还没有任何会话');
   });
 });
 
@@ -713,7 +713,7 @@ describe('/sessions archive', () => {
     expect(text.indexOf('#cccc1111')).toBeLessThan(text.indexOf('#dddd2222'));
     // 工作区后缀在前，📌 仍是行尾
     expect(text).toMatch(/#dddd2222 · 别处 · [^"]* · docs · 📌"/);
-    expect(text).toContain('<qqbot-cmd-input text="/sessions" show="返回持有列表"/>');
+    expect(text).toContain('<qqbot-cmd-input text="/sessions" show="工作中会话"/>');
   });
 
   it('候选超过一页时用 page 翻页，第二页仍是同一份候选', async () => {
@@ -730,8 +730,8 @@ describe('/sessions archive', () => {
     expect(page1).toContain('归档候选（13 个）');
     expect(page1).toContain('第 1/2 页 · <qqbot-cmd-input text="/sessions archive page 2" show="下一页"/>');
     expect(page1).not.toContain('还有 3 个');
-    // 不再把「还有 N 个」错误地指向全部工作区
-    expect(page1).not.toContain('查看全部');
+    // 不再把「还有 N 个」错误地指向全部会话
+    expect(page1).not.toContain('全部会话');
 
     const page2 = await run(manager, 'archive page 2');
     expect(page2).toContain('第 2/2 页');
@@ -853,7 +853,7 @@ describe('/sessions archive', () => {
     const text = await run(manager, 'archive 1,2');
     expect(text.startsWith('⚠️ 2 个会话归档失败')).toBe(true);
     expect(text).not.toContain('已归档 0 个');
-    expect(text).toContain('<qqbot-cmd-input text="/sessions" show="返回持有列表"/>');
+    expect(text).toContain('<qqbot-cmd-input text="/sessions" show="工作中会话"/>');
   });
 
   it('部分序号越界时报告该条，其余照常执行', async () => {
@@ -946,7 +946,7 @@ describe('/sessions unarchive', () => {
     expect(manager.unarchiveSession).toHaveBeenNthCalledWith(1, 'session-aaaa0001');
     expect(manager.unarchiveSession).toHaveBeenNthCalledWith(2, 'session-bbbb0002');
     expect(text).toContain('已取消归档 2 个会话');
-    expect(text).toContain('<qqbot-cmd-input text="/sessions" show="返回持有列表"/>');
+    expect(text).toContain('<qqbot-cmd-input text="/sessions" show="工作中会话"/>');
   });
 });
 

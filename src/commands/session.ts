@@ -88,7 +88,7 @@ function describeChangeFailure(outcome: ChangeWorkspaceOutcome): string {
         '用绝对路径: `/new D:\\项目\\目录`',
       ].join('\n');
     case 'not-found':
-      return `⚠️ 没有叫 \`${outcome.arg}\` 的工作区。\`/sessions all\` 看全部工作区`;
+      return `⚠️ 没有叫 \`${outcome.arg}\` 的工作区。\`/sessions all\` 看全部会话`;
     default:
       return '⚠️ 工作区切换失败。';
   }
