@@ -94,11 +94,13 @@ export function formatQuestion(
   });
 
   // 底部引导：用引用块（>）与正文区分
-  if (nonCurrent) {
+  if (nonCurrent && context.sessionId !== undefined) {
     lines.push('');
     if (withButtons) {
-      lines.push('> 👇 点击下方按钮选择');
-    } else if (context.sessionId !== undefined) {
+      // 按钮自带会话 id，点哪条卡片的按钮就答哪条；想改用编号回复得先带出
+      // /to，否则数字会落到当前会话。所以按钮版也留一个「回复」链接。
+      lines.push(`> 👇 点击下方按钮选择 · ${sessionReplyLink(context.sessionId, '回复')}`);
+    } else {
       lines.push(`> ${sessionReplyLink(context.sessionId, '回答')} · ${sessionResumeLink(context.sessionId)}`);
     }
   } else if (opts.length > 0) {
