@@ -90,7 +90,7 @@ describe('formatQuestion', () => {
   });
 
   it('uses button hint with emoji when withButtons', () => {
-    expect(formatQuestion(q2(), true)).toContain('> 👇 点击下方按钮选择');
+    expect(formatQuestion(q2(), true)).toContain('> 👇 点击下方按钮选择 · 或者直接回复');
   });
 
   it('prefixes multi-select marker and multi-pick hint', () => {
@@ -112,12 +112,12 @@ describe('formatQuestion', () => {
     expect(text).toContain('show="恢复"');
   });
 
-  it('非当前会话带按钮时保留按钮引导，并给回复链接带出 /to', () => {
+  it('非当前会话带按钮时文案与当前会话一致，只把「直接回复」换成链接', () => {
     const text = formatQuestion(q2(), true, { sessionId: 'session-04de1556', isCurrent: false, title: '修登录' });
     expect(text.startsWith('> `#04de1556` · 修登录\n\n')).toBe(true);
-    expect(text).toContain('> 👇 点击下方按钮选择 · ');
-    // 直接用编号回复会落到当前会话，所以给一个把 /to #id 填进输入框的链接
-    expect(text).toContain('<qqbot-cmd-input text="/to #04de1556 " show="回复"/>');
+    expect(text).toContain('> 👇 点击下方按钮选择 · 或者');
+    // 文案与当前会话卡片一致，只把「直接回复」换成链接：点它把 `/to #id ` 填进输入框
+    expect(text).toContain('<qqbot-cmd-input text="/to #04de1556 " show="直接回复"/>');
   });
 
   it('当前会话不标来源行', () => {
