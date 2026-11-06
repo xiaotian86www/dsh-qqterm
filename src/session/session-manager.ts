@@ -732,14 +732,14 @@ export class SessionManager {
     const presets = this.getPermissionPresetsService();
     if (!presets.names.includes(preset)) return { ok: false, reason: 'unknown-preset' };
 
-    // 可重入：目标就是当前预设时直接返回
+    const record = this.currentRecord(key);
+    if (!record) return { ok: false, reason: 'no-session' };
+
+    // 可重入：目标就是该会话当前的预设时直接返回
     if (this.getPermissionPreset(scope, peerId) === preset) {
       this.logger.debug(`permission switch skipped (already current): key=${key} preset=${preset}`);
       return { ok: true, preset, unchanged: true };
     }
-
-    const record = this.currentRecord(key);
-    if (!record) return { ok: false, reason: 'no-session' };
 
     try {
       presets.set(record.agent.session, preset);

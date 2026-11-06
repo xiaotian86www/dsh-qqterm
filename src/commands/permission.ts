@@ -54,7 +54,8 @@ export function permissionCommand({ manager, config, logger }: CommandDeps): Cat
         return '⚠️ 当前部署没有权限预设';
       }
 
-      const current = manager.getPermissionPreset(scope, peerId);
+      // 没有会话就不给「当前」：那只是宿主的部署默认值
+      const current = manager.hasCurrentSession() ? manager.getPermissionPreset(scope, peerId) : undefined;
 
       // 无参数：一行现状 + 可点击切换的预设
       if (!args) {

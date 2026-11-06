@@ -37,10 +37,12 @@ interface StubOptions {
   presets?: PermissionPresetEntry[];
   current?: string;
   outcome?: PermissionSwitchOutcome;
+  noSession?: boolean;
 }
 
 function makeManager(options: StubOptions = {}) {
   return {
+    hasCurrentSession: vi.fn(() => !options.noSession),
     listPermissionPresets: vi.fn(() => options.presets ?? PRESETS),
     getPermissionPreset: vi.fn(() => options.current),
     setPermissionPreset: vi.fn(async () => options.outcome ?? { ok: true, preset: 'auto' }),
@@ -107,6 +109,13 @@ describe('/permission（查看）', () => {
     const text = await run(makeManager({ current: undefined }));
     expect(text).not.toContain('当前:');
     expect(text).toContain('### 🛡️ 权限预设');
+  });
+
+  it('没有会话时也不显示当前行，不把部署默认值当当前', async () => {
+    const text = await run(makeManager({ noSession: true, current: 'auto' }));
+    expect(text).not.toContain('当前:');
+    expect(text).not.toContain('/permission 自动审查 (auto) · EXP ✅');
+    expect(text).toContain('text="/permission auto"');
   });
 
   it('部署没有配置权限预设时如实说没有', async () => {

@@ -544,6 +544,24 @@ describe('切换类操作 — 可重入', () => {
     expect(new PrefsStore().getSessionId(KEY)).toBeUndefined();
   });
 
+  it('权限：没有会话时目标等于默认值也拒绝，不误报已是当前', async () => {
+    const { registry } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
+    const ctx = {
+      ...hostCtxServices(),
+      on: vi.fn(),
+      permissionPresets: {
+        names: ['read-only'],
+        optionOf: () => undefined,
+        defaultPreset: 'read-only',
+      },
+    } as unknown as Context;
+    const manager = createManagerWithCtx(registry, ctx);
+
+    const outcome = await manager.setPermissionPreset('c2c', PEER, 'read-only');
+
+    expect(outcome).toEqual({ ok: false, reason: 'no-session' });
+  });
+
   it('preset：目标就是当前默认值时不重复写 settings', async () => {
     const { registry } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
     const ctx = presetsCtx();

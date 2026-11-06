@@ -188,13 +188,13 @@ describe('切换权限', () => {
     expect(set).not.toHaveBeenCalled();
   });
 
-  it('无活跃会话且已是默认预设：不为了切换拉起会话', async () => {
+  it('无活跃会话且已是默认预设：拒绝，不误报已是当前', async () => {
     const { service, set } = fakePermissions(); // defaultPreset = workspace-write
     const manager = createManager(service);
 
     const outcome = await manager.setPermissionPreset('c2c', PEER, 'workspace-write');
 
-    expect(outcome).toEqual({ ok: true, preset: 'workspace-write', unchanged: true });
+    expect(outcome).toEqual({ ok: false, reason: 'no-session' });
     expect(set).not.toHaveBeenCalled();
     expect(manager.getSessionRecord('c2c', PEER)).toBeUndefined();
   });
