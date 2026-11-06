@@ -367,11 +367,21 @@ export class SessionManager {
       return { ...route, unchanged: true };
     }
 
+    // 换模型时把当前的思考强度一起带过去（Web 端也传整份选择）。目标模型不支持的档位丢弃，
+    // 交给它的默认值；直接不传 effort 会被宿主当成「模型默认」，等于把用户选的档位清掉。
+    const effort = this.hostSelection(record.agent)?.reasoningEffort;
+    const keepEffort = effort === undefined
+      ? undefined
+      : (await this.modelResolver.reasoningInfo(route))?.efforts.some((option) => option.id === effort)
+        ? effort
+        : undefined;
+
     try {
       await this.sessionController.selectModel({
         sessionId: record.sessionId,
         provider: route.provider,
         model: route.model,
+        ...(keepEffort !== undefined ? { reasoningEffort: keepEffort } : {}),
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

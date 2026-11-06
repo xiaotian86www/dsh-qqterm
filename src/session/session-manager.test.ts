@@ -704,6 +704,36 @@ describe('思考强度 — 宿主选择与重建', () => {
     expect(registry.create).toHaveBeenCalledTimes(1);
   });
 
+  it('换模型时把当前档位带过去；目标模型不支持就交回它的默认', async () => {
+    const { registry } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
+    const host = effortCtx({
+      ...REASONING,
+      'p/m2': { efforts: EFFORTS },
+      'p/narrow': { efforts: [{ id: 'low', name: 'Low' }] },
+    });
+    const manager = createManagerWithCtx(registry, host.ctx);
+    await manager.getOrCreate('c2c', PEER, PEER, REPLY);
+    await manager.selectEffort('c2c', PEER, 'max');
+    host.selectModel.mockClear();
+
+    // 新模型同样支持 max：连档位一起传，宿主不会把它当成「模型默认」
+    await manager.setModelOverride('c2c', PEER, { provider: 'p', model: 'm2' });
+    expect(host.selectModel).toHaveBeenLastCalledWith({
+      sessionId: expect.any(String),
+      provider: 'p',
+      model: 'm2',
+      reasoningEffort: 'max',
+    });
+
+    // 新模型只有 low：丢弃档位，不拿一个不存在的选项去撞宿主
+    await manager.setModelOverride('c2c', PEER, { provider: 'p', model: 'narrow' });
+    expect(host.selectModel).toHaveBeenLastCalledWith({
+      sessionId: expect.any(String),
+      provider: 'p',
+      model: 'narrow',
+    });
+  });
+
   it('改思考强度按核心行为写入部署默认（不再写回旧值）', async () => {
     const { registry } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
     const host = effortCtx(REASONING);
