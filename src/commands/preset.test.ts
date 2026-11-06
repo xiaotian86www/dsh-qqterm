@@ -77,7 +77,7 @@ describe('/preset（查看）', () => {
   it('默认项带 ✅，链接仍指向真实切换命令', async () => {
     const text = await run(makeManager({ effective: 'beta' }));
 
-    expect(text).toContain('**默认**: beta');
+    expect(text).toContain('**全局**: beta');
     expect(text).toContain('text="/preset beta" show="/preset Beta (beta) ✅"');
     expect(text).toContain('text="/preset alpha" show="/preset Alpha (alpha)"');
     // 只有默认项带 ✅
@@ -88,7 +88,7 @@ describe('/preset（查看）', () => {
   it('没有默认值时按列表的 isDefault 标注，不重复显示 ✅', async () => {
     const text = await run(makeManager());
 
-    expect(text).toContain('**默认**: beta');
+    expect(text).toContain('**全局**: beta');
     expect(text).toContain('text="/preset beta" show="/preset Beta (beta) ✅"');
     expect(text.split('✅')).toHaveLength(2);
   });
@@ -99,7 +99,7 @@ describe('/preset（查看）', () => {
       presets: [{ id: 'alpha', name: 'Alpha' }, { id: 'beta', name: 'Beta' }, { id: 'gamma' }],
     }));
 
-    expect(text).toContain('**默认**: gamma');
+    expect(text).toContain('**全局**: gamma');
     expect(text).toContain('text="/preset gamma" show="/preset gamma ✅"');
     expect(text.split('✅')).toHaveLength(2);
   });
@@ -111,14 +111,14 @@ describe('/preset（切换）', () => {
     const text = await run(manager, 'beta');
 
     expect(manager.setPresetOverride).toHaveBeenCalledWith('c2c', 'owner', 'beta');
-    expect(text).toBe('✅ 默认 preset 已切换: beta（之后新建的会话生效）');
+    expect(text).toBe('✅ preset 已切换: beta（之后新建的会话生效）');
   });
 
   it('切到当前默认值是幂等的，只回一行', async () => {
     const manager = makeManager({ effective: 'beta', unchanged: true });
     const text = await run(manager, 'beta');
 
-    expect(text).toBe('✅ 已是默认 preset: beta');
+    expect(text).toBe('✅ 已是全局 preset: beta');
   });
 
   it('未知 preset 给警告', async () => {

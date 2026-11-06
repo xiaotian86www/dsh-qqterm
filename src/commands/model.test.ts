@@ -146,15 +146,16 @@ describe('/model（查看）', () => {
       effort: { options: [{ id: 'max', name: 'Max' }], current: { id: 'max', name: 'Max' }, defaulted: false },
     }));
     expect(text).toContain('**思考强度**: 最高');
-    expect(text).not.toContain('**思考强度**: 最高（默认）');
+    expect(text).not.toContain('（默认）');
   });
 
-  it('未显式设置时标注为模型默认', async () => {
+  it('未显式设置时也只显示档位，不标默认', async () => {
     const text = await run(makeManager({
       current: { provider: 'openrouter', model: 'deepseek-v4-flash' },
       effort: { options: [{ id: 'high', name: 'High' }], current: { id: 'high', name: 'High' }, defaulted: true },
     }));
-    expect(text).toContain('**思考强度**: 高（默认）');
+    expect(text).toContain('**思考强度**: 高');
+    expect(text).not.toContain('（默认）');
   });
 
   it('模型不支持思考强度时不显示该行', async () => {

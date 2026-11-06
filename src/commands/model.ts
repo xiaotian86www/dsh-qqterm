@@ -13,7 +13,7 @@ export function modelCommand({ manager, config, logger }: CommandDeps): Categori
     // 管理类指令：私聊可用，但仅限白名单用户（与 /preset 同构）
     scope: 'all',
     authorized: commandAllowlistAuth(config, logger),
-    description: '查看或切换模型（用法: /model [provider/model]）',
+    description: '查看或切换当前会话的模型（用法: /model [provider/model]）',
     handler: async (cmdCtx) => {
       const { scope, peerId } = getScopePeer(cmdCtx);
       const args = (cmdCtx.command?.raw ?? '').trim();
@@ -38,13 +38,11 @@ export function modelCommand({ manager, config, logger }: CommandDeps): Categori
         // 思考强度是模型配置的一部分：有档位才显示，免得给不支持思考的模型挂一行噪声
         const effort = await manager.getEffortView(scope, peerId);
         if (effort.current) {
-          lines.push(
-            `**思考强度**: ${effortLabel(effort.current)}${effort.defaulted ? '（默认）' : ''}`,
-          );
+          lines.push(`**思考强度**: ${effortLabel(effort.current)}`);
         }
 
         if (models.length > 0) {
-          lines.push('', '**可用模型（点击切换）:**');
+          lines.push('', '**可用模型**');
 
           // 参考 /sessions all：按 provider 分组，组标题承担 provider，行内只留短名
           const grouped = new Map<string, typeof models>();

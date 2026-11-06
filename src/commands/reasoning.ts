@@ -10,7 +10,7 @@ import { getScopePeer, sendMarkdownChunked } from '../shared/index.ts';
 import { effortLabel } from '../model/effort-label.ts';
 import type { EffortOption } from '../model/types.ts';
 
-/** 恢复默认档位的参数（与真实档位 id 不冲突） */
+/** 交回模型自选的参数（与真实档位 id 不冲突） */
 const DEFAULT_ARG = 'default';
 
 /** 一行可选的「下一步」：当前模型不支持思考强度时给出口 */
@@ -23,7 +23,7 @@ export function reasoningCommand({ manager, config, logger }: CommandDeps): Cate
     scope: 'all',
     // 管理类指令：与 /model 同一权限面
     authorized: commandAllowlistAuth(config, logger),
-    description: '查看或切换思考强度（用法: /reasoning [档位]）',
+    description: '查看或切换当前会话的思考强度（用法: /reasoning [档位]）',
     panelDesc: '切换思考强度',
     handler: async (cmdCtx) => {
       const { scope, peerId } = getScopePeer(cmdCtx);
@@ -39,8 +39,8 @@ export function reasoningCommand({ manager, config, logger }: CommandDeps): Cate
 
         const current = view.current;
         const currentLine = current
-          ? `**当前**: ${effortLabel(current)}${view.defaulted ? '（模型默认）' : ''} · \`${current.id}\``
-          : '**当前**: 模型默认';
+          ? `**当前**: ${effortLabel(current)}${view.defaulted ? '（跟随模型）' : ''} · \`${current.id}\``
+          : '**当前**: 跟随模型';
         const lines: string[] = ['### 🧠 思考强度', '', currentLine, ''];
 
         for (const option of view.options) {
@@ -50,12 +50,12 @@ export function reasoningCommand({ manager, config, logger }: CommandDeps): Cate
           );
         }
 
-        lines.push('', `恢复默认: \`/reasoning ${DEFAULT_ARG}\``);
+        lines.push('', `跟随模型: \`/reasoning ${DEFAULT_ARG}\``);
         await sendMarkdownChunked(cmdCtx, lines.join('\n'), config.textChunkLimit);
         return { kind: 'noop' as const };
       }
 
-      // 切换（default = 交回模型默认值）
+      // 切换（default = 交回模型自选）
       const target = args === DEFAULT_ARG ? undefined : args;
       const outcome = await manager.selectEffort(scope, peerId, target);
 
@@ -81,8 +81,8 @@ export function reasoningCommand({ manager, config, logger }: CommandDeps): Cate
 
       if (target === undefined) {
         return outcome.unchanged
-          ? `✅ 已是模型默认思考强度${display ? `: ${display}` : ''}`
-          : `✅ 思考强度已恢复默认${display ? `: ${display}` : ''}（下一条消息生效）`;
+          ? `✅ 已跟随模型: ${display ?? '—'}`
+          : `✅ 思考强度已跟随模型: ${display ?? '—'}（下一条消息生效）`;
       }
       if (outcome.unchanged) return `✅ 已是当前思考强度: ${display}`;
       return `✅ 思考强度已切换: ${display}（下一条消息生效）`;

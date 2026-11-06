@@ -43,11 +43,11 @@ function putItems(calls: Call[]): MenuItemPayload[] {
 }
 
 describe('MENU_ENTRIES', () => {
-  it('四个平铺按钮 + 权限 / 思考两个折叠项', () => {
+  it('四个平铺按钮 + 权限 / 思考强度两个折叠项', () => {
     expect(OUR_ITEMS.map((item) => item.name)).toEqual([
-      '会话状态', '会话列表', '创建会话', '压缩会话', '权限', '思考',
+      '会话状态', '会话列表', '创建会话', '压缩会话', '权限', '思考强度',
     ]);
-    expect(OUR_ITEMS.filter((item) => item.type === 'menu').map((item) => item.name)).toEqual(['权限', '思考']);
+    expect(OUR_ITEMS.filter((item) => item.type === 'menu').map((item) => item.name)).toEqual(['权限', '思考强度']);
   });
 
   it('权限子菜单列出查看与四个预设', () => {
@@ -61,8 +61,8 @@ describe('MENU_ENTRIES', () => {
     ]);
   });
 
-  it('思考子菜单列出查看与四个档位', () => {
-    const reasoning = OUR_ITEMS.find((item) => item.name === '思考');
+  it('思考强度子菜单列出查看与四个档位', () => {
+    const reasoning = OUR_ITEMS.find((item) => item.name === '思考强度');
     expect(reasoning?.sub_menu_items?.map((child) => child.send_message)).toEqual([
       '/reasoning',
       '/reasoning off',
