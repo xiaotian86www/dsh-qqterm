@@ -255,6 +255,13 @@ export interface SessionRecord {
   peerId: string;
   senderId: string;
   agentPreset?: string;
+  /**
+   * 最近一条用户消息的原文（agent 实际看到的 body）。
+   *
+   * 供 `/retry` 与失败卡片的「重发」用：宿主没有重跑已结束一轮的 API，
+   * 重发只能靠这段原文再开一轮。
+   */
+  lastPrompt?: string;
   /** 加入已获取集合的时间（运行期排序 / 排查用） */
   acquiredAt: number;
 }
@@ -370,6 +377,17 @@ export type RenameSessionOutcome =
     reason: 'no-session' | 'invalid' | 'not-live' | 'failed';
     message?: string;
   };
+
+/**
+ * 重发上一条用户消息的结果（`/retry` 与失败卡片共用）。
+ *
+ * - no-session：当前聊天没有已获取的会话；
+ * - no-prompt：没有记住原文（插件重启后、或这一轮还没收到过用户消息）；
+ * - failed：followup 抛错。
+ */
+export type RetryPromptOutcome =
+  | { ok: true; sessionId: string }
+  | { ok: false; reason: 'no-session' | 'no-prompt' | 'failed'; message?: string };
 
 /** 归档 / 取消归档结果 */
 export interface ArchiveSessionOutcome {

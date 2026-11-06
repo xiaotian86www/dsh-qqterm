@@ -111,6 +111,8 @@ export async function handleInbound(
   }
 
   // ── 构建 UserMessage → followup ──
+  // 原文留档：轮次失败后「重发」只能靠它再开一轮（宿主没有重跑已结束一轮的 API）
+  record.lastPrompt = agentBody;
   const message = createQQUserMessage(agentBody);
 
   // followup 写进宿主的 next-turn inbox：目标空闲时立刻开一轮，正在生成时排在

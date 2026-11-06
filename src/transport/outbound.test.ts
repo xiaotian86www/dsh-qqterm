@@ -53,6 +53,7 @@ function setup(opts?: {
   config?: ImQQBotConfig;
   deliverer?: { deliver: ReturnType<typeof vi.fn> };
   current?: boolean;
+  retryChannel?: { offer: ReturnType<typeof vi.fn> };
 }) {
   const session = createSession();
   const bot = createBot(session);
@@ -60,6 +61,7 @@ function setup(opts?: {
   const manager = {
     findBySessionId: vi.fn((id: string) => (id === 'sess-qq' ? record : undefined)),
     isCurrentSession: vi.fn(() => opts?.current ?? true),
+    ...(opts?.retryChannel !== undefined ? { retryChannel: opts.retryChannel } : {}),
   } as unknown as SessionManager;
   const outbound = createOutboundHandler(
     manager, bot, opts?.config ?? createConfig(), createLogger(), undefined, opts?.deliverer,
@@ -451,8 +453,85 @@ describe('OutboundRouter: deliverables/presented', () => {
     await Promise.resolve();
     await Promise.resolve();
 
+    expect(bot.sendMarkdown).toHaveBeenCalledWith(c2cTarget, expect.stringContaining('❌ 本轮失败'));
     expect(bot.sendMarkdown).toHaveBeenCalledWith(c2cTarget, expect.stringContaining('E_BROKEN'));
     expect(deliver).toHaveBeenCalledTimes(1);
+  });
+
+  it('可重试失败交给重发通道，不再直出原始 code + JSON', async () => {
+    const offer = vi.fn().mockResolvedValue(true);
+    const record = { ...createRecord(c2cTarget), lastPrompt: '原文' } as unknown as SessionRecord;
+    const { outbound, bot } = setup({ record, retryChannel: { offer } });
+
+    outbound.routeSessionEvent({ header: { id: 'sess-qq' } }, {
+      type: 'turn/end',
+      data: { reason: { kind: 'error', error: { code: 'RATE_LIMIT', message: '429: {"type":"server_error"}' } } },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+
+    expect(offer).toHaveBeenCalledWith(record, { code: 'RATE_LIMIT', message: '429: {"type":"server_error"}' }, 0);
+    expect(bot.sendMarkdown).not.toHaveBeenCalled();
+  });
+
+  it('llm/retry 的次数带进失败告知', async () => {
+    const offer = vi.fn().mockResolvedValue(true);
+    const record = { ...createRecord(c2cTarget), lastPrompt: '原文' } as unknown as SessionRecord;
+    const { outbound } = setup({ record, retryChannel: { offer } });
+    const session = { header: { id: 'sess-qq' } };
+
+    outbound.routeSessionEvent(session, { type: 'llm/retry', data: { retry: 1, provider: 'opencode-go' } });
+    outbound.routeSessionEvent(session, { type: 'llm/retry', data: { retry: 3, provider: 'opencode-go' } });
+    outbound.routeSessionEvent(session, {
+      type: 'turn/end',
+      data: { reason: { kind: 'error', error: { code: 'RATE_LIMIT', message: '429: boom' } } },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+
+    expect(offer.mock.calls[0]?.[2]).toBe(3);
+  });
+
+  it('第 4 次起每次重试都提示，前三次静默', async () => {
+    const record = { ...createRecord(c2cTarget), lastPrompt: '原文' } as unknown as SessionRecord;
+    const { outbound, bot } = setup({ record });
+    const session = { header: { id: 'sess-qq' } };
+    const retryEvent = (retry: number) => ({
+      type: 'llm/retry',
+      data: {
+        retry,
+        maxRetries: 10,
+        delayMs: 4000,
+        provider: 'opencode-go',
+        failure: { code: 'RATE_LIMIT', message: '429: {"type":"server_error"}' },
+      },
+    });
+
+    outbound.routeSessionEvent(session, retryEvent(3));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(bot.sendMarkdown).not.toHaveBeenCalled();
+
+    outbound.routeSessionEvent(session, retryEvent(4));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(bot.sendMarkdown).toHaveBeenCalledWith(c2cTarget, expect.stringContaining('⏳ 第 4/10 次重试 · 4.0s 后发起'));
+    expect(bot.sendMarkdown).toHaveBeenCalledWith(c2cTarget, expect.stringContaining('429: {"type":"server_error"}'));
+  });
+
+  it('非可重试失败给原因与 /retry 提示', async () => {
+    const offer = vi.fn().mockResolvedValue(true);
+    const record = { ...createRecord(c2cTarget), lastPrompt: '原文' } as unknown as SessionRecord;
+    const { outbound, bot } = setup({ record, retryChannel: { offer } });
+
+    outbound.routeSessionEvent({ header: { id: 'sess-qq' } }, {
+      type: 'turn/end',
+      data: { reason: { kind: 'error', error: { code: 'AUTH', message: '401 unauthorized' } } },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+
+    expect(offer).not.toHaveBeenCalled();
+    expect(bot.sendMarkdown).toHaveBeenCalledWith(c2cTarget, expect.stringContaining('原因: `AUTH` · 401'));
+    expect(bot.sendMarkdown).toHaveBeenCalledWith(c2cTarget, expect.stringContaining('> 💡 发送 `/retry` 重跑上一条消息'));
   });
 
   it('未提供投递器时静默跳过（老环境降级）', async () => {

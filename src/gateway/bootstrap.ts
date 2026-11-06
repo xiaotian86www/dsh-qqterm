@@ -17,6 +17,7 @@ import type { ToolsRegistryLike } from '../transport/tool-presenter.ts';
 import type { QQBotSender } from '../transport/outbound-buffer.ts';
 import { QuestionChannel } from '../features/question-channel.ts';
 import { ApprovalChannel, type ApprovalChannelContext } from '../features/approval-channel.ts';
+import { RetryChannel } from '../features/retry-channel.ts';
 import { decodeButtonData } from '../features/button-utils.ts';
 import { buildUserAgent } from '../shared/index.ts';
 import { decorateSessionMessage, sessionTitleOf } from '../transport/session-source.ts';
@@ -42,6 +43,7 @@ function dispatchInteraction(event: InteractionEvent, manager: SessionManager): 
   if (!button) return false;
   if (button.t === 'question') return manager.questionChannel?.handleInteraction(event) ?? false;
   if (button.t === 'approval') return manager.approvalChannel?.handleInteraction(event) ?? false;
+  if (button.t === 'retry') return manager.retryChannel?.handleInteraction(event) ?? false;
   return false;
 }
 
@@ -148,6 +150,10 @@ export async function bootstrapGateway(
   manager.approvalChannel = approvalChannel;
   approvalChannel.install(ctx as unknown as ApprovalChannelContext);
 
+  // ── 重发通道（轮次失败 → 「重发 / 放弃」卡片） ──
+  // 不 install：它不订阅宿主事件，只被 outbound 的失败告知与 interaction 分发调用
+  manager.retryChannel = new RetryChannel(manager, sender, config, logger);
+
   // ── 按钮点击回调（interaction）：统一分发到问答/审批通道 ──
   bot.on('interaction', async (_iCtx: unknown, event: InteractionEvent) => {
     // 只处理私聊互动：点击者以 user_openid 为准
@@ -194,7 +200,7 @@ export async function bootstrapGateway(
         });
     }
 
-    // 自定义菜单：单聊窗口底部的四个固定按钮（会话状态 / 会话列表 / 创建会话 / 压缩会话）
+    // 自定义菜单：单聊窗口底部的固定入口（四个按钮 + 权限 / 思考两个子菜单）
     if (config.menu?.autoSync ?? true) {
       void syncCommandMenu(bot.api, logger)
         .then((result: MenuSyncResult) => {

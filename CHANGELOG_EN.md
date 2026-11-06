@@ -14,6 +14,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 - **Added `/reasoning` (alias `/think`) reasoning effort**: the available levels come from the current model (DeepSeek: `off` / `low` / `high` / `max`); without an argument it lists the current level and clickable options, with an argument it switches immediately, and `/reasoning default` restores the model default. Reading and switching go through the host `sessionController` / `modelSelection`: the change applies to the session's next request and the host persists the default, so the plugin keeps no second copy of the preference. `sessionController`, `agentDefaultModel` and `sessionProjections` are now in the plugin's `inject`, so the plugin stays inactive when the host lacks them (requires dsh 0.2.1+). `/model`, `/status` and `/bot-status` show the current level, and the QQ command panel lists the command too.
 
+- **A failed turn can be resent in one tap, and retries report their progress**: when rate limiting or an overloaded upstream breaks a turn, the bot now sends a card — `⚠️ 上游服务异常，重试 N 次未成功` plus one `原因: ...` line — with `重发` and `放弃` buttons. Tapping `重发` runs the previous message again unchanged and answers `✅ 已重发上一条消息`; when the keyboard cannot be delivered it degrades to `发送 /retry 重跑上一条消息`, and the command works on its own too. From the 4th retry on, QQ shows `⏳ 第 N/10 次重试 · X.Xs 后发起` with the full upstream error text, so it is clear what is failing. The card is controlled by `retryOffer.enabled` and `retryOffer.timeoutMs` (on by default, valid for 10 minutes).
+
 ### Removed
 
 - **Removed the `/sessions workspace` view**: `/sessions` already groups the sessions QQ holds by workspace, so a second "current workspace only" view was a duplicate entry point. Use `/sessions all` to find sessions in other projects; the old command (including the `/sessions ws` alias and the paged form) now replies with a migration hint instead of a list, and the held list footer no longer links to it.
@@ -29,6 +31,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Every `/to` result now names the target session**: successes and failures both read `"title" · `#shortid``, for example `✅ 已发送到「修登录」 · `#3f2a9b1c``; "not running", "archived", "missing text", "belongs to another user" and "send failed" include the name too. When the target is not in the list, only the id is shown rather than inventing an "untitled session".
 
 ### Fixed
+
+- **Failure reports no longer dump raw error JSON on the user**: `⚠️ 本轮异常结束` followed by a bare `RATE_LIMIT: 429: {"type":"server_error",...}` stacked two machine messages, leaving the user with neither the cause nor a next step. Retryable failures now go through the resend card, non-retryable ones read `❌ 本轮失败` plus `原因: CODE · 原文`, and `STREAM_CLOSED` stays silent.
 
 - **No more "send a message" hints when there is no session**: `/status` now prints just `未建立` for the session line, and `/rename`, `/permission`, `/cost` and the empty `/sessions` views drop the "send a message and one will be created" guidance, stating only that no session exists. The hint was repetitive and added no information — on a first visit it read like the bot was nagging the user to speak.
 

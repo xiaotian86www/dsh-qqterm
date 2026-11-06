@@ -39,7 +39,15 @@ export interface ApprovalButtonData {
   n?: string;
 }
 
-export type ButtonData = QuestionButtonData | ApprovalButtonData;
+/** 轮次失败后的重发询问：s=会话 id，d=决策（重发 / 放弃） */
+export interface RetryButtonData {
+  t: 'retry';
+  /** 归属会话：多会话时按它找回待重发的原文 */
+  s?: string;
+  d: 'resend' | 'discard';
+}
+
+export type ButtonData = QuestionButtonData | ApprovalButtonData | RetryButtonData;
 
 /** 编码 button_data（JSON 字符串） */
 export function encodeButtonData(data: ButtonData): string {
@@ -50,7 +58,11 @@ export function encodeButtonData(data: ButtonData): string {
 export function decodeButtonData(raw: string): ButtonData | undefined {
   try {
     const parsed = JSON.parse(raw) as Partial<ButtonData>;
-    if (parsed !== null && typeof parsed === 'object' && (parsed.t === 'question' || parsed.t === 'approval')) {
+    if (
+      parsed !== null
+      && typeof parsed === 'object'
+      && (parsed.t === 'question' || parsed.t === 'approval' || parsed.t === 'retry')
+    ) {
       return parsed as ButtonData;
     }
   } catch {

@@ -56,8 +56,16 @@ export interface PanelConfig {
 
 /** 自定义菜单配置 */
 export interface MenuConfig {
-  /** 机器人就绪后是否自动把固定按钮同步到单聊自定义菜单 */
+  /** 机器人就绪后是否自动把固定入口同步到单聊自定义菜单 */
   autoSync: boolean;
+}
+
+/** 轮次失败后的重发询问配置 */
+export interface RetryOfferConfig {
+  /** 是否用「重发 / 放弃」卡片代替纯文本失败告知 */
+  enabled: boolean;
+  /** 卡片有效期(ms)，超时后按钮失效；0 = 永不过期 */
+  timeoutMs: number;
 }
 
 export interface ImQQBotConfig {
@@ -83,6 +91,8 @@ export interface ImQQBotConfig {
   processingTimeoutMs: number;
   /** 待答问题超时(ms)，超时自动拒绝并提示（ask_user_question） */
   askTimeoutMs: number;
+  /** 轮次失败后的重发询问 */
+  retryOffer: RetryOfferConfig;
   /** 访问控制 */
   access: AccessControlConfig;
   /** 是否展示工具调用结果（成功与失败都受此开关控制） */
@@ -119,6 +129,13 @@ export const ConfigSchema: Schema<ImQQBotConfig> = Schema.object({
   maxQueue: Schema.number().default(20).description('并发队列最大长度'),
   processingTimeoutMs: Schema.number().default(30 * 60 * 1000).description('处理超时(ms)，超时中断当前 LLM 调用'),
   askTimeoutMs: Schema.number().default(5 * 60 * 1000).description('待答问题超时(ms)，超时自动拒绝并提示'),
+  retryOffer: Schema.object({
+    enabled: Schema.boolean().default(true).description('轮次失败后是否用「重发 / 放弃」卡片询问'),
+    timeoutMs: Schema.number().default(10 * 60 * 1000).description('重发卡片有效期(ms)，超时后按钮失效，0=永不过期'),
+  }).default({
+    enabled: true,
+    timeoutMs: 10 * 60 * 1000,
+  }).description('失败重发询问配置'),
   access: AccessControlSchema.default({
     c2cMode: 'open',
     c2cAllow: [],

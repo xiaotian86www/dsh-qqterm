@@ -34,4 +34,5 @@ export type {
   RenameSessionOutcome,
   ArchiveSessionOutcome,
   SendToOutcome,
+  RetryPromptOutcome,
 } from './types.ts';

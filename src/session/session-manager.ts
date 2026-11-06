@@ -34,6 +34,7 @@ import { ModelResolver } from '../model/model-resolver.ts';
 import type { ModelRoute, ModelEntry, ReasoningInfo, EffortOption } from '../model/types.ts';
 import type { QuestionChannel } from '../features/question-channel.ts';
 import type { ApprovalChannel } from '../features/approval-channel.ts';
+import type { RetryChannel } from '../features/retry-channel.ts';
 import type {
   SessionEventLike,
   DshAgent,
@@ -65,6 +66,7 @@ import type {
   RenameSessionOutcome,
   ArchiveSessionOutcome,
   SendToOutcome,
+  RetryPromptOutcome,
 } from './types.ts';
 
 /** ManualCompactionError 各 code 的友好提示 */
@@ -200,6 +202,8 @@ export class SessionManager {
   public questionChannel?: QuestionChannel;
   /** 由 bootstrap 注入的审批通道（approval/request → QQ），会话释放时清理其待批审批 */
   public approvalChannel?: ApprovalChannel;
+  /** 由 bootstrap 注入的重发通道（失败卡片 → 「重发 / 放弃」），会话释放时清理其待确认卡片 */
+  public retryChannel?: RetryChannel;
 
   constructor(
     ctx: Context,
@@ -1427,6 +1431,8 @@ export class SessionManager {
     if (body === '') return { ok: false, reason: 'empty', sessionId };
 
     try {
+      // 原文留档：轮次失败后「重发」要用（宿主没有重跑已结束一轮的 API）
+      record.lastPrompt = body;
       record.agent.followup(createQQUserMessage(body));
     } catch (err) {
       const message = errorText(err);
@@ -1435,6 +1441,28 @@ export class SessionManager {
     }
     this.logger.info(`prompt sent via /to: sessionId=${sessionId}`);
     return { ok: true, kind: 'sent', sessionId };
+  }
+
+  /**
+   * 重发当前会话最近一条用户消息（`/retry` 与失败卡片的「重发」共用）。
+   *
+   * 宿主没有「重跑已结束一轮」的 API：只能靠记住的原文再开一轮，历史里因此会
+   * 多出一条相同的用户消息——这是换取「不重打原文就能再试一次」的既定代价。
+   */
+  public retryLastPrompt(scope: ChatScope, peerId: string): RetryPromptOutcome {
+    const record = this.getSessionRecord(scope, peerId);
+    if (!record) return { ok: false, reason: 'no-session' };
+    const prompt = record.lastPrompt;
+    if (prompt === undefined || prompt.trim() === '') return { ok: false, reason: 'no-prompt' };
+    try {
+      record.agent.followup(createQQUserMessage(prompt));
+    } catch (err) {
+      const message = errorText(err);
+      this.logger.warn(`/retry followup failed: sessionId=${record.sessionId} err=${message}`);
+      return { ok: false, reason: 'failed', message };
+    }
+    this.logger.info(`prompt resent: sessionId=${record.sessionId}`);
+    return { ok: true, sessionId: record.sessionId };
   }
 
   /**
@@ -1974,10 +2002,11 @@ export class SessionManager {
     }
   }
 
-  /** 释放会话时统一清理其待答问题/待批审批，避免 pending 悬挂泄漏 */
+  /** 释放会话时统一清理其待答问题/待批审批/待确认重发，避免 pending 悬挂泄漏 */
   private cancelPendingFor(sessionId: string): void {
     this.questionChannel?.cancelPending(sessionId);
     this.approvalChannel?.cancelPending(sessionId);
+    this.retryChannel?.cancelPending(sessionId);
   }
 
   /**

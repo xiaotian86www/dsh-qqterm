@@ -13,6 +13,12 @@ import { OutboundBuffer, type QQBotSender } from './outbound-buffer.ts';
 import { formatToolResult, type ToolsRegistryLike, type ToolResultData } from './tool-presenter.ts';
 import type { DeliverablesDelivererLike } from './deliverables.ts';
 import {
+  RETRY_NOTICE_AFTER,
+  RETRYABLE_FAILURE_CODES,
+  formatRetryNotice,
+  formatTurnFailure,
+} from '../features/retry-renderer.ts';
+import {
   parseEvent,
   extractTurnError,
   type ChunkEvent,
@@ -23,6 +29,7 @@ import {
   type DeliverablesPresentedEvent,
   type PresentedFileRef,
   type RawSessionEvent,
+  type RetryEvent,
   type StreamDelta,
 } from './events.ts';
 
@@ -76,6 +83,8 @@ class OutboundRouter {
   private readonly pendingText = new Map<string, Promise<void>>();
   /** 每会话发送链：同一会话的分片连续发送，不与别的会话交错 */
   private readonly sendChains = new Map<string, Promise<void>>();
+  /** 每会话本轮的重试次数（llm/retry 事件喂，turn/end 消费） */
+  private readonly retryCounts = new Map<string, RetryEvent>();
   private readonly manager: SessionManager;
   private readonly bot: QQBotSender;
   private readonly config: ImQQBotConfig;
@@ -103,6 +112,18 @@ class OutboundRouter {
   public route(session: SessionLike, raw: RawSessionEvent): void {
     const event = parseEvent(raw);
     if (event === undefined) return;
+
+    // 重试事件：计数 + 第 4 次起每条都告诉用户还在等（前三次静默，避免刷屏）
+    if (event.type === 'llm/retry') {
+      this.retryCounts.set(session.header.id, event);
+      if (event.retry > RETRY_NOTICE_AFTER) {
+        const record = this.manager.findBySessionId(session.header.id);
+        if (record !== undefined) {
+          void this.send(record, formatRetryNotice(event), 'sendRetryNotice');
+        }
+      }
+      return;
+    }
 
     const record = this.manager.findBySessionId(session.header.id);
     if (record === undefined) return;
@@ -291,16 +312,36 @@ class OutboundRouter {
     this.pendingText.delete(sessionId);
 
     const failure = extractTurnError(event.reason);
+    const retries = this.retryCounts.get(sessionId)?.retry ?? 0;
+    this.retryCounts.delete(sessionId);
     void this.enqueue(sessionId, async () => {
       await Promise.all([flushTask, pending]);
       if (failure !== undefined && !SILENT_TURN_ERROR_CODES.has(failure.code)) {
-        await this.sendNow(record, `⚠️ 本轮异常结束\n\`${failure.code}\`: ${failure.message}`, 'sendTurnEndError');
+        await this.reportFailure(record, failure, retries);
       }
       if (files.length > 0 && this.deliverer !== undefined) {
         await this.deliverer.deliver(record, files);
       }
       this.logger.debug(`im-qqbot: turn/end sessionId=${sessionId}`);
     });
+  }
+
+  /**
+   * 轮次失败告知：可重试错误优先挂「重发 / 放弃」卡片，其余给「原因 + 下一步」。
+   *
+   * 宿主 raw 里是错误码 + JSON，直出对用户没有可执行信息（旧实现就是原样转）。
+   */
+  private async reportFailure(
+    record: SessionRecord,
+    failure: { code: string; message: string },
+    retries: number,
+  ): Promise<void> {
+    const channel = this.manager.retryChannel;
+    if (channel !== undefined && RETRYABLE_FAILURE_CODES.has(failure.code)) {
+      if (await channel.offer(record, failure, retries)) return;
+    }
+    const canRetry = (record.lastPrompt ?? '').trim() !== '';
+    await this.sendNow(record, formatTurnFailure(failure, canRetry), 'sendTurnEndError');
   }
 
   /**
