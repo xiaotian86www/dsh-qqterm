@@ -253,6 +253,22 @@ describe('listWorkspaceSessions', () => {
     expect(entries[0]?.title).toContain('标题-');
   });
 
+  it('条目带工作区字段：归档候选按它分组，缺了会全落进「未分组」', async () => {
+    const ctx = createCtx({
+      withQuery: true,
+      sessions: [{ id: 'session-a', cwd: WORKSPACE(), createdAt: 1 }],
+      workspaces: [{ id: 'ws-1', path: WORKSPACE(), title: 'repo' }],
+    });
+    const { manager } = createManager(ctx);
+
+    const entries = await manager.listWorkspaceSessions('c2c', PEER);
+
+    const slashed = (value: string): string => value.replace(/\\/g, '/').toLowerCase();
+    expect(entries[0]?.workspace).toBe('repo');
+    expect(slashed(entries[0]?.workspacePath ?? '')).toBe(slashed(WORKSPACE()));
+    expect(entries[0]?.workspaceMissing).toBe(false);
+  });
+
   it('Windows 路径大小写差异不影响过滤', async () => {
     const ctx = createCtx({
       sessions: [{ id: 'session-a', cwd: WORKSPACE().toUpperCase(), createdAt: 1 }],

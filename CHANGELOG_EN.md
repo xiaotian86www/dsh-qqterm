@@ -38,6 +38,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- **Archive candidates no longer all land in "未分组" (ungrouped)**: the candidate list for `/sessions archive` comes from the current workspace's session list, which never filled in workspace fields, so grouping collapsed everything into a single "未分组" group. Entries now carry the workspace name, path, and whether the directory still exists; candidates group by the real workspace with the current one first.
 - **Failure reports no longer dump raw error JSON on the user**: `⚠️ 本轮异常结束` followed by a bare `RATE_LIMIT: 429: {"type":"server_error",...}` stacked two machine messages, leaving the user with neither the cause nor a next step. Retryable failures now go through the resend card, non-retryable ones read `❌ 本轮失败` plus `原因: CODE · 原文`, and `STREAM_CLOSED` stays silent. Configuration failures such as `NO_ADAPTER` or `AUTH` — where resending would produce the same result — state only the cause and no longer add a `/retry` next step.
 
 - **No more "send a message" hints when there is no session**: `/status` now prints just `未建立` for the session line, and `/rename`, `/permission`, `/cost` and the empty `/sessions` views drop the "send a message and one will be created" guidance, stating only that no session exists. The hint was repetitive and added no information — on a first visit it read like the bot was nagging the user to speak.
