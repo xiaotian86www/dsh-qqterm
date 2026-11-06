@@ -76,13 +76,17 @@ export function formatQuestion(
     lines.push(sessionSourceHeader(context.sessionId, context.title), '');
   }
 
-  if (question.header) lines.push(`**${question.header}**`);
+  // 标题行：与其他视图一样先给「图标 + 是什么」，避免整条消息看起来像模型正文；
+  // header 是宿主给的主题，有就拿来当标题，没有就用通用的。
+  const header = question.header?.trim();
+  lines.push(`### ❓ ${header ? header : '需要你的回答'}`, '');
 
   const opts = question.options ?? [];
   const multi = question.multiSelect === true;
 
   // 问题行：多选标记前置，用户第一眼就知道作答方式
-  lines.push(multi ? `${question.question}（可多选）` : question.question);
+  const body = question.question.trim();
+  lines.push(multi ? `${body}（可多选）` : body);
 
   // 选项列表：保留完整 label + description（按钮 label 截断时 description 靠正文展示）
   opts.forEach((o, i) => {

@@ -74,10 +74,19 @@ describe('formatQuestion', () => {
       options: [{ label: 'A', description: '描述A' }, { label: 'B' }],
     };
     const text = formatQuestion(q, false);
+    expect(text.startsWith('### ❓ 需要你的回答\n\n选哪个？')).toBe(true);
     expect(text).toContain('1. A · 描述A');
     expect(text).toContain('2. B');
     expect(text).toContain('> 💡 回复编号选择');
     expect(text).toContain('直接输入你的想法');
+  });
+
+  it('有 header 时用它当标题，问题开头的空行被去掉', () => {
+    const q: UserQuestion = { id: 'q', header: '登录方式', question: '\n\n用哪个账号？', options: [{ label: 'A' }] };
+    const text = formatQuestion(q, true);
+
+    expect(text.startsWith('### ❓ 登录方式\n\n用哪个账号？')).toBe(true);
+    expect(text).not.toContain('**登录方式**');
   });
 
   it('uses button hint with emoji when withButtons', () => {
