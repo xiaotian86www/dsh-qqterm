@@ -48,21 +48,36 @@ const corrupt = (id: string): Error => new Error(`EIO: corrupt session log for "
  */
 /** inject 保证存在的宿主服务：测试底座一并提供 */
 function hostCtxServices() {
+  // 宿主把模型选择记进会话（model/selection projection）：测试替身同样记住，
+  // 否则 /model 切换后 getEffectiveModel 读不到新值。
+  const selections = new Map<string, { provider: string; model: string; reasoningEffort?: string }>();
   return {
     llm: {
       listProviders: () => [{ id: 'p', name: 'p' }],
       listModels: async () => [],
       resolveModelInfo: async () => ({}),
     },
-    sessionProjections: { stateOf: () => undefined },
+    sessionProjections: {
+      stateOf: (session: { id?: string } | undefined) => {
+        const selected = session?.id === undefined ? undefined : selections.get(session.id);
+        return selected === undefined ? undefined : { lastUsed: selected };
+      },
+    },
     sessionController: {
-      selectModel: async (request: { provider: string; model: string; reasoningEffort?: string }) => ({
-        selected: {
+      selectModel: async (request: {
+        sessionId: string;
+        provider: string;
+        model: string;
+        reasoningEffort?: string;
+      }) => {
+        const selected = {
           provider: request.provider,
           model: request.model,
           ...(request.reasoningEffort !== undefined ? { reasoningEffort: request.reasoningEffort } : {}),
-        },
-      }),
+        };
+        selections.set(request.sessionId, selected);
+        return { selected };
+      },
     },
     agentDefaultModel: { currentSelection: () => ({ provider: 'p', model: 'm' }) },
     sessionPersistence: { stat: async () => undefined },
@@ -448,7 +463,7 @@ describe('切换类操作 — 可重入', () => {
     } as unknown as Context;
   }
 
-  it('模型：目标就是当前模型时不写偏好、不 fork', async () => {
+  it('模型：目标就是当前模型时不写选择、不 fork', async () => {
     const { registry } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
     const manager = createManager(registry);
     const record = await manager.getOrCreate('c2c', PEER, PEER, REPLY);
@@ -460,7 +475,6 @@ describe('切换类操作 — 可重入', () => {
     expect(outcome).toEqual({ provider: 'p', model: 'm', unchanged: true });
     expect(registry.create).not.toHaveBeenCalled();
     expect(manager.getSessionRecord('c2c', PEER)?.sessionId).toBe(before);
-    expect(new PrefsStore().getOverride(KEY)).toBeUndefined();
   });
 
   it('preset：会话已开始后拒绝修改（只有新会话可设）', async () => {
@@ -493,14 +507,14 @@ describe('切换类操作 — 可重入', () => {
     expect(fresh.agentPreset).not.toBe('beta');
   });
 
-  it('模型：没有活跃会话时拒绝切换，也不写偏好', async () => {
+  it('模型：没有活跃会话时拒绝切换，也不写任何状态', async () => {
     const { registry } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
     const manager = createManager(registry);
 
     const outcome = await manager.setModelOverride('c2c', PEER, { provider: 'p', model: 'm' });
 
     expect(outcome.reason).toBe('no-session');
-    expect(new PrefsStore().getOverride(KEY)).toBeUndefined();
+    expect(new PrefsStore().getSessionId(KEY)).toBeUndefined();
   });
 
   it('preset：目标就是当前待定值时不重复写覆盖', async () => {
@@ -690,16 +704,16 @@ describe('思考强度 — 宿主选择与重建', () => {
     expect(registry.create).toHaveBeenCalledTimes(1);
   });
 
-  it('改思考强度只影响当前会话：宿主顺手写的部署默认被恢复', async () => {
+  it('改思考强度按核心行为写入部署默认（不再写回旧值）', async () => {
     const { registry } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
     const host = effortCtx(REASONING);
     const manager = createManagerWithCtx(registry, host.ctx);
     await manager.getOrCreate('c2c', PEER, PEER, REPLY);
-    const before = { ...host.state.saved };
 
     await manager.selectEffort('c2c', PEER, 'max');
 
-    expect(host.state.saved).toEqual(before);
+    // 宿主 selectModel 自带 saveSelection：部署默认跟着变，插件不再恢复
+    expect(host.state.saved).toEqual({ provider: 'p', model: 'm', reasoningEffort: 'max' });
     expect(await manager.getEffortView('c2c', PEER)).toMatchObject({ current: { id: 'max' } });
   });
 

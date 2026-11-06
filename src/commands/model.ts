@@ -96,10 +96,13 @@ export function modelCommand({ manager, config, logger }: CommandDeps): Categori
       if (outcome.reason === 'no-session') {
         return '⚠️ 当前没有会话，先发一条消息再切换模型';
       }
+      if (outcome.reason === 'failed') {
+        return `❌ 模型切换失败: ${outcome.message ?? '未知错误'}`;
+      }
       if (outcome.unchanged) {
         return `✅ 已是当前模型: ${provider}/${model}`;
       }
-      return `✅ 模型已切换: ${provider}/${model}（立即生效）`;
+      return `✅ 模型已切换: ${provider}/${model}（下一条消息生效）`;
     },
   };
 }

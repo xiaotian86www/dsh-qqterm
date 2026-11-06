@@ -4,14 +4,15 @@
  * 职责：
  *   1. 解析新建会话的默认模型路由（核心默认值）
  *   2. 列出可用 providers 和模型
- *   3. 按 sessionId 保存会话自己的模型 / preset 选择（委托 PrefsStore）
+ *   3. 保存「新会话创建前」的 preset（按 sessionId，创建时消费）
  *
  * 默认值（从高到低）：
  *   settings.yaml 的 agent-default-model（只读）
  *   > 宿主 agentDefaultModel 服务（核心默认）
  *   > deepseek-official/deepseek-v4-flash
  *
- * 会话自己的选择只对它自己的 sessionId 生效，新会话永远走上面的默认链。
+ * 模型选择本身由宿主记录在会话里（`model/selection`），插件不另存一份，
+ * 新会话自然走上面的默认链。
  */
 import type { Context } from '@deepseek-ai/cordis';
 import type { ImQQBotConfig } from '../config.ts';
@@ -61,46 +62,14 @@ export class ModelResolver {
   }
 
   /**
-   * 会话自己保存的模型路由（`/model` 切换时按 sessionId 写入）
-   */
-  getSessionModel(sessionId: string): ModelRoute | undefined {
-    return this.prefs.getOverride(sessionId);
-  }
-
-  /**
-   * 设置会话自己的模型路由并持久化（只影响这个会话）
-   */
-  setSessionModel(sessionId: string, route: ModelRoute): void {
-    this.prefs.setOverride(sessionId, route);
-  }
-
-  /**
-   * 清除会话自己的模型路由
-   */
-  clearSessionModel(sessionId: string): void {
-    this.prefs.clearOverride(sessionId);
-  }
-
-  /**
-   * 获取 resume 时覆盖 session 的模型路由
-   *
-   * 优先级：该会话自己的偏好 > 核心默认值。这里不返回 undefined，因为没装
-   * installModelSelection 时 system-prompt 的 {{model}} 变量直接读
-   * agent.options.model——无值会抛 "prompt variable {{model}} has no value"。
-   */
-  getResumeRoute(sessionId: string): ModelRoute {
-    return this.prefs.getOverride(sessionId) ?? this.resolveDefault();
-  }
-
-  /**
-   * 获取指定 sessionKey 的最新 sessionId（fork 后记录，重启恢复用）
+   * 获取指定 sessionKey 的最新 sessionId（重启恢复用）
    */
   getSessionId(sessionKey: string): string | undefined {
     return this.prefs.getSessionId(sessionKey);
   }
 
   /**
-   * 记录指定 sessionKey 的最新 sessionId（fork 后调用）并持久化
+   * 记录指定 sessionKey 的最新 sessionId 并持久化
    */
   setSessionId(sessionKey: string, sessionId: string): void {
     this.prefs.setSessionId(sessionKey, sessionId);

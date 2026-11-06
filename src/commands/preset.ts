@@ -43,7 +43,7 @@ export function presetCommand({ manager, config, logger }: CommandDeps): Categor
         lines.push(
           '',
           started
-            ? 'preset 只在 `/new` 之后、第一条消息之前可改'
+            ? '已开始的会话不能改 preset'
             : '手动指定: `/preset <id>`，重置默认: `/preset reset`',
         );
 
@@ -56,7 +56,7 @@ export function presetCommand({ manager, config, logger }: CommandDeps): Categor
         const outcome = await manager.clearPresetOverride(scope, peerId);
         if (!outcome.ok) {
           return outcome.reason === 'session-started'
-            ? '⚠️ 当前会话已开始，preset 只在 `/new` 之后、第一条消息之前可改'
+            ? '⚠️ 会话已开始，preset 不可再改'
             : `❌ 重置失败: ${outcome.message ?? '未知错误'}`;
         }
         return '✅ 已重置为默认 preset（下一条消息生效）';
@@ -71,7 +71,7 @@ export function presetCommand({ manager, config, logger }: CommandDeps): Categor
           case 'broken':
             return `❌ preset ${args} 加载失败: ${outcome.message ?? '未知错误'}`;
           case 'session-started':
-            return '⚠️ 当前会话已开始，preset 只在 `/new` 之后、第一条消息之前可改';
+            return '⚠️ 会话已开始，preset 不可再改';
           default:
             return `❌ 切换失败: ${outcome.message ?? '未知错误'}`;
         }

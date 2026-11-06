@@ -61,7 +61,7 @@ export interface DshAgent {
   readonly ctx: Context;
   /** 当前生命周期状态（用于判断是否正在生成） */
   readonly status: 'idle' | 'running';
-  /** 底层 session（fork 时作为 source；snapshotEvents 用于统计/导出） */
+  /** 底层 session（snapshotEvents 用于统计/导出；requestHeader 读实际路由） */
   readonly session: {
     readonly id: string;
     snapshotEvents(): readonly SessionEventLike[];
@@ -113,10 +113,11 @@ export interface PresetSwitchOutcome {
 export interface ModelSwitchOutcome {
   provider: string;
   model: string;
-  /** true = 目标就是当前模型，未写偏好、未 fork 会话 */
+  /** true = 目标就是当前模型，未写选择 */
   unchanged?: boolean;
-  /** 没有活跃会话：切换没有作用对象 */
-  reason?: 'no-session';
+  /** no-session = 没有活跃会话；failed = 宿主 selectModel 抛错 */
+  reason?: 'no-session' | 'failed';
+  message?: string;
 }
 
 /** 宿主请求头的精简视图（读会话实际用的选择） */
@@ -324,7 +325,7 @@ export interface WorkspaceSession {
   held: boolean;
   /** 已获取且 agent 正在生成（只在 held 时有意义） */
   running: boolean;
-  /** 是否由 fork 派生（/model 换模型产生） */
+  /** 是否带继承前缀（宿主 seeded fork 产生的会话） */
   isSeeded: boolean;
   /** 是否在宿主的归档集里（归档 = 从列表/侧栏隐藏，日志仍在，可取消归档） */
   archived: boolean;

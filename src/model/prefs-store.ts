@@ -1,5 +1,5 @@
 /**
- * PrefsStore — per-peer 会话偏好持久化（模型 + preset）
+ * PrefsStore — per-peer 会话偏好持久化（会话映射 + preset + 工作目录）
  *
  * 隔离文件 I/O 操作，便于单元测试时 mock。
  * 存储路径：~/.dsh-qqbot/model-prefs.json（全局共享，多实例/多进程共存）。
@@ -13,7 +13,6 @@ import { readFileSync, writeFileSync, renameSync, unlinkSync, existsSync, mkdirS
 import { randomBytes } from 'node:crypto';
 import { resolve, dirname } from 'node:path';
 import { PLUGIN_HOME } from '../shared/dirs.ts';
-import type { ModelRoute } from './types.ts';
 
 /** 日志回调（可选） */
 type DebugFn = (msg: string) => void;
@@ -22,9 +21,7 @@ type ErrorFn = (msg: string) => void;
 
 /** 隔离偏好文件结构 */
 interface PrefsFile {
-  /** sessionId → 该会话自己的模型路由（只影响这一个会话；新会话不读） */
-  overrides: Record<string, ModelRoute>;
-  /** sessionKey → 最新 sessionId（fork 后更新，用于重启后恢复到 fork 后的会话） */
+  /** sessionKey → 最新 sessionId（用于重启后恢复当前会话） */
   sessionIds: Record<string, string>;
   /** sessionId → preset id（会话创建前的待定值，create 时消费） */
   presets: Record<string, string>;
@@ -34,16 +31,13 @@ interface PrefsFile {
 
 /** 各段的删除墓碑（key 集合），合并时用于压住磁盘上的旧值 */
 interface Tombstones {
-  overrides: Set<string>;
   sessionIds: Set<string>;
   presets: Set<string>;
   dirs: Set<string>;
 }
 
 export class PrefsStore {
-  /** per-peer 模型偏好（内存态） */
-  private overrides = new Map<string, ModelRoute>();
-  /** per-peer 最新 sessionId（fork 后更新，内存态） */
+  /** per-peer 最新 sessionId（内存态） */
   private sessionIds = new Map<string, string>();
   /** per-peer preset 偏好（内存态） */
   private presets = new Map<string, string>();
@@ -51,7 +45,6 @@ export class PrefsStore {
   private dirs = new Map<string, string>();
   /** 本进程显式删除的 key（防止并发合并把删除复活） */
   private deleted: Tombstones = {
-    overrides: new Set(),
     sessionIds: new Set(),
     presets: new Set(),
     dirs: new Set(),
@@ -66,31 +59,6 @@ export class PrefsStore {
     this.debugLog = debugLog;
     this.onError = options?.onError;
     this.load();
-  }
-
-  // ── Override 操作（键是 sessionId：选择只属于那一个会话） ──
-
-  getOverride(sessionKey: string): ModelRoute | undefined {
-    return this.overrides.get(sessionKey);
-  }
-
-  setOverride(sessionKey: string, route: ModelRoute): void {
-    this.overrides.set(sessionKey, route);
-    this.deleted.overrides.delete(sessionKey);
-    this.write();
-  }
-
-  clearOverride(sessionKey: string): boolean {
-    const deleted = this.overrides.delete(sessionKey);
-    if (deleted) {
-      this.deleted.overrides.add(sessionKey);
-      this.write();
-    }
-    return deleted;
-  }
-
-  hasOverride(sessionKey: string): boolean {
-    return this.overrides.has(sessionKey);
   }
 
   // ── SessionId 操作 ──
@@ -169,13 +137,6 @@ export class PrefsStore {
       if (!existsSync(this.prefsPath)) return;
       const content = readFileSync(this.prefsPath, 'utf8');
       const data = JSON.parse(content) as PrefsFile;
-      if (data.overrides && typeof data.overrides === 'object') {
-        for (const [key, route] of Object.entries(data.overrides)) {
-          if (route.provider && route.model) {
-            this.overrides.set(key, { provider: route.provider, model: route.model });
-          }
-        }
-      }
       if (data.sessionIds && typeof data.sessionIds === 'object') {
         for (const [key, sessionId] of Object.entries(data.sessionIds)) {
           if (typeof sessionId === 'string' && sessionId) {
@@ -258,7 +219,6 @@ export class PrefsStore {
       return out;
     };
     return {
-      overrides: pick(this.overrides, disk?.overrides, this.deleted.overrides),
       sessionIds: pick(this.sessionIds, disk?.sessionIds, this.deleted.sessionIds),
       presets: pick(this.presets, disk?.presets, this.deleted.presets),
       dirs: pick(this.dirs, disk?.dirs, this.deleted.dirs),

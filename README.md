@@ -117,13 +117,13 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqbot/cordis.dev.yml
 
 ### 模型、preset 与思考强度
 
-这三项都跟着**单个会话**走，新会话不继承上一个会话的选择：
+这三项都跟着**单个会话**走，行为与宿主 Web 端一致：
 
 - 新会话（`/new`、第一条消息）用宿主核心默认值：`settings.yaml` → 宿主 agentDefaultModel → `deepseek-official/deepseek-v4-flash`。插件不再提供 `provider` / `model` / `preset` 配置项。
-- `/model` 只切当前会话（fork 保留历史）；没有活跃会话时拒绝，先发一条消息。
+- `/model` 走宿主同一条切换路径：选择记进当前会话（不重建、不改历史），下一轮生效；没有活跃会话时拒绝，先发一条消息。
 - `/preset` 只在会话还没开始时有效（`/new` 之后、第一条消息之前），已开始直接拒绝。
-- `/reasoning` 只影响当前会话；插件会把宿主顺手写下的部署默认恢复原值。
-- 旧版本按聊天 key 存的偏好不再生效，存量会话恢复时回到它自己记录的值或核心默认。
+- `/reasoning` 走宿主 `selectModel`：按核心行为，切档后它同时成为新的部署默认值，新会话会跟随这个默认。
+- 插件不另存模型偏好；旧版本按聊天 key 存的偏好不再生效，存量会话恢复时用它自己日志里的选择。
 
 ### 访问控制（access）
 

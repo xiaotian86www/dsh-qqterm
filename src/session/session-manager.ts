@@ -156,11 +156,6 @@ interface SessionControllerLike {
 /** 宿主 agentDefaultModel 最小接口 */
 interface AgentDefaultModelLike {
   currentSelection(): HostSelection;
-  /**
-   * 写回部署默认选择（宿主 selectModel 会顺手把当前选择存成默认，
-   * 插件这里用它把默认值恢复成改动前的样子）。
-   */
-  saveSelection?(selection: HostSelection): Promise<void>;
 }
 
 /** 会话在一次请求/选择里用的模型与思考强度 */
@@ -299,26 +294,18 @@ export class SessionManager {
   // ── 模型相关（委托给 ModelResolver） ──
 
   /**
-   * 当前会话的生效模型：会话自己的偏好 → 宿主里实际用的选择 → 核心默认值
+   * 当前会话的生效模型：会话自己记录的选择 → 核心默认值
    *
-   * 没有活跃会话时就是核心默认值（新会话将要用的那个）。
+   * 选择由宿主记录在会话日志的 `model/selection` 事件里（Web 端切模型走同一条），
+   * 插件不再另存一份；没有活跃会话时显示核心默认值。
    */
   getEffectiveModel(scope: ChatScope, peerId: string): ModelRoute {
     const record = this.getSessionRecord(scope, peerId);
-    if (record) return this.routeOf(record);
-
-    // 没有 live 记录时看当前指针指向的那个会话（重启后、或 fork 降级 dispose 后），
-    // 它自己的偏好仍然有效；全新会话（/new 铸的新 id）没有偏好，自然落到默认值。
-    const currentId = this.currentSessionId(this.sessionKey());
-    const stored = currentId === undefined ? undefined : this.modelResolver.getSessionModel(currentId);
-    return stored ?? this.modelResolver.resolveDefault();
+    return record ? this.routeOf(record) : this.modelResolver.resolveDefault();
   }
 
-  /** 某个会话实际生效的路由（偏好 → 宿主选择 → 默认链） */
+  /** 某个会话实际生效的路由（宿主选择 → 默认链） */
   private routeOf(record: SessionRecord): ModelRoute {
-    const stored = this.modelResolver.getSessionModel(record.sessionId);
-    if (stored) return stored;
-
     const selection = this.hostSelection(record.agent);
     if (selection) {
       return {
@@ -359,10 +346,11 @@ export class SessionManager {
   }
 
   /**
-   * 切换当前会话的模型（fork + 重建会话，保留历史）
+   * 切换当前会话的模型
    *
-   * 只影响当前会话：偏好按新的 sessionId 保存，新会话仍走默认值。
-   * 可重入：目标就是当前模型时不写偏好、不 fork。
+   * 走宿主 `sessionController.selectModel`（Web 端切模型同一条路径）：选择记进
+   * 这个会话的 `model/selection` 事件，下一轮生效；会话历史不重建、插件不另存偏好。
+   * 宿主只接受 live 会话，没有活跃会话时如实拒绝。
    */
   async setModelOverride(scope: ChatScope, peerId: string, route: ModelRoute): Promise<ModelSwitchOutcome> {
     const key = this.sessionKey();
@@ -373,18 +361,27 @@ export class SessionManager {
       return { ...route, reason: 'no-session' };
     }
 
-    const current = this.getEffectiveModel(scope, peerId);
+    const current = this.routeOf(record);
     if (current.provider === route.provider && current.model === route.model) {
       this.logger.debug(`model switch skipped (already current): key=${key} → ${route.provider}/${route.model}`);
       return { ...route, unchanged: true };
     }
 
-    // 先记在当前会话 id 上：fork 不可用的宿主会 dispose 后 resume 同一会话，
-    // 这条偏好保证降级路径也换得动模型；fork 成功后它会被挪到子会话 id。
-    this.modelResolver.setSessionModel(record.sessionId, route);
+    try {
+      await this.sessionController.selectModel({
+        sessionId: record.sessionId,
+        provider: route.provider,
+        model: route.model,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`model switch failed: key=${key} err=${message}`);
+      return { ...route, reason: 'failed', message };
+    }
 
-    await this.rebuildSession(record, { route });
-    this.logger.info(`model switched via fork: key=${key} → ${route.provider}/${route.model}`);
+    // 宿主没装 model-selection projection 时 agent.model.current() 不会变，
+    // 但 selectModel 已把选择写进会话日志，下一轮请求仍按它走。
+    this.logger.info(`model switched: key=${key} → ${route.provider}/${route.model}`);
     return { ...route };
   }
 
@@ -469,7 +466,8 @@ export class SessionManager {
   /**
    * 把思考强度选择交给宿主 `sessionController`。
    *
-   * `selectModel` 只对 live 会话生效：没有会话时如实拒绝，不保存任何本地状态。
+   * 与核心一致：选择记进当前会话，同时成为新的部署默认值（接受这一点，
+   * 不再写回旧默认）。`selectModel` 只对 live 会话生效：没有会话时如实拒绝。
    */
   private async applySelection(
     route: ModelRoute,
@@ -478,10 +476,6 @@ export class SessionManager {
   ): Promise<{ ok: true; effort?: string } | EffortSwitchOutcome> {
     if (!record) return { ok: false, reason: 'no' };
 
-    // 宿主 selectModel 会顺手把这次选择存成部署默认；先记下改动前的默认，
-    // 成功后写回，保证「改思考强度只影响当前会话」。
-    const previousDefault = this.defaultSelection();
-
     try {
       const { selected } = await this.sessionController.selectModel({
         sessionId: record.sessionId,
@@ -489,26 +483,11 @@ export class SessionManager {
         model: route.model,
         ...(effort !== undefined ? { reasoningEffort: effort } : {}),
       });
-      if (previousDefault) await this.restoreDefaultSelection(previousDefault);
       return { ok: true, ...(selected.reasoningEffort !== undefined ? { effort: selected.reasoningEffort } : {}) };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.warn(`reasoning effort switch failed: ${message}`);
       return { ok: false, reason: 'failed', message };
-    }
-  }
-
-  /**
-   * 把部署默认模型选择恢复成改动前的值（宿主 selectModel 的副作用是改默认）
-   */
-  private async restoreDefaultSelection(previous: HostSelection): Promise<void> {
-    const model = this.agentDefaultModel;
-    if (!model.saveSelection) return;
-    try {
-      await model.saveSelection(previous);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.logger.warn(`restore default model selection failed: ${message}`);
     }
   }
 
@@ -582,24 +561,27 @@ export class SessionManager {
     return reasoning.efforts[0];
   }
 
-  /** create / resume 的 agentOptions：路由 + 部署默认档位（模型不支持时不带） */
-  private async agentOptionsFor(
-    _key: string,
-    route: ModelRoute | undefined,
-  ): Promise<AgentOptionsLike | undefined> {
-    if (!route) return undefined;
-    const selection = this.hostSelection();
-    const effort = selection?.reasoningEffort !== undefined
-      && selection.provider === route.provider
-      && selection.model === route.model
-      ? selection.reasoningEffort
-      : undefined;
-    if (effort === undefined) return { ...route };
-
-    const reasoning = await this.modelResolver.reasoningInfo(route);
-    return reasoning?.efforts.some((option) => option.id === effort)
-      ? { ...route, reasoningEffort: effort }
-      : { ...route };
+  /**
+   * create / resume 的 agentOptions
+   *
+   * 与宿主核心一致：传响应式 getter，读 agentDefaultModel 的当前选择。会话一旦
+   * 记录过 `model/selection`，宿主优先用会话自己的选择；getter 只在「这个会话
+   * 还没选过模型」时生效，新会话因此始终跟随核心默认值。
+   */
+  private agentOptionsFor(): AgentOptionsLike {
+    const fallback = (): ModelRoute => this.modelResolver.resolveDefault();
+    const current = (): HostSelection | undefined => this.defaultSelection();
+    return {
+      get provider() {
+        return current()?.provider ?? fallback().provider;
+      },
+      get model() {
+        return current()?.model ?? fallback().model;
+      },
+      get reasoningEffort() {
+        return current()?.reasoningEffort;
+      },
+    };
   }
 
   /**
@@ -777,76 +759,6 @@ export class SessionManager {
 
     this.logger.info(`permission switched: key=${key} preset=${preset}`);
     return { ok: true, preset };
-  }
-
-  /**
-   * fork + 重建会话（保留历史，换 model）
-   *
-   * options.route 缺省时沿用该会话当前生效值（偏好 → 宿主选择 → 默认）。
-   * preset 沿用会话锁定的 preset（新会话的待定 preset 在 create 时消费）。
-   * fork 不可用或失败时降级为 dispose（下次消息重建）。
-   */
-  private async rebuildSession(
-    record: SessionRecord,
-    options: { route?: ModelRoute; agentOptions?: AgentOptionsLike },
-  ): Promise<void> {
-    const key = record.sessionKey;
-    const oldId = record.sessionId;
-
-    // 对齐宿主官方 fork（commands.fork）：buildForkSeed 产物原样作 seed，
-    // create 传 inheritedEventCount + isSeeded + parentSession
-    const events = this.host.sessionEvents(record.agent.session);
-    const boundary = latestCompletedPrefixBoundary(events);
-    if (boundary === undefined) {
-      this.logger.warn(`fork unavailable (no completed turn), fallback to dispose: key=${key}`);
-      await this.dropRecord(record, { cancel: true, dispose: true });
-      return;
-    }
-
-    const seed = await this.host.buildForkSeed(events, boundary);
-    if (seed === undefined) {
-      this.logger.warn(`fork seed unavailable (old host), fallback to dispose: key=${key}`);
-      await this.dropRecord(record, { cancel: true, dispose: true });
-      return;
-    }
-
-    const childId = SessionId(mintSessionId());
-    const effectiveRoute = options.route ?? this.routeOf(record);
-    const agentOptions = options.agentOptions ?? await this.agentOptionsFor(key, effectiveRoute);
-    // preset 跟着会话走：fork 出来的子会话沿用旧会话锁定的那个
-    const composed = await this.composePreset(record.agentPreset ?? await this.resolvePersistedPreset(oldId));
-    const created = await this.agents.create({
-      sessionId: childId,
-      seed,
-      inheritedEventCount: boundary + 1,
-      meta: {
-        cwd: this.host.sessionDirectory(record.agent.session) ?? await this.chatDirectory(key),
-        isSeeded: true,
-        // 旧版宿主的 delivery 豁免要求 parentSession，新版忽略——都传
-        parentSession: oldId,
-        ...(composed.agentPreset ? { agentPreset: composed.agentPreset } : {}),
-      },
-      ...(agentOptions ? { agentOptions } : {}),
-      ...(composed.setup ? { setup: composed.setup } : {}),
-    });
-
-    this.modelResolver.setSessionId(key, childId);
-    // 偏好跟着会话走：旧 id 上的那条挪到 fork 出来的子会话
-    if (childId !== oldId) this.modelResolver.clearSessionModel(oldId);
-    this.modelResolver.setSessionModel(childId, effectiveRoute);
-    this.currentByKey.set(key, childId);
-
-    const oldHandle = record.handle;
-    record.sessionId = childId;
-    record.agent = created.agent;
-    record.handle = created;
-    record.agentPreset = composed.agentPreset;
-    record.acquiredAt = Date.now();
-    this.records.delete(oldId);
-    this.records.set(childId, record);
-
-    void oldHandle?.dispose().catch(() => {});
-    this.logger.info(`session rebuilt via fork: key=${key} preset=${composed.agentPreset ?? 'none'} sessionId=${childId}`);
   }
 
   async listAvailableModels(): Promise<ModelEntry[]> {
@@ -1214,13 +1126,7 @@ export class SessionManager {
     // prefs 命中 = 已知存量会话；miss = 全新会话，铸一个新 id 去试 resume（自然 miss）后创建
     const mapped = this.modelResolver.getSessionId(key);
     let sessionId = SessionId(mapped ?? mintSessionId());
-    // 这个会话 id 自己有偏好就用它（/new 铸的新 id 没有，落到核心默认值）；
-    // 存量会话恢复时再按 resumeRoute 处理 header 里的模型。
-    const storedRoute = this.modelResolver.getSessionModel(sessionId);
-    let route = storedRoute ?? this.modelResolver.resolveDefault();
-    this.logger.info(
-      `getOrCreate: key=${key} route=${route.provider}/${route.model}${storedRoute ? '' : ' (core default)'} sessionId=${sessionId}`,
-    );
+    this.logger.info(`getOrCreate: key=${key} sessionId=${sessionId}`);
 
     // 这个聊天的工作目录：新会话落在它里面，恢复的会话以它自己的 header 为准
     let directory = await this.chatDirectory(key);
@@ -1251,31 +1157,30 @@ export class SessionManager {
       const composed = await this.composePreset(presetId);
       agentPreset = composed.agentPreset;
       try {
-        const resumeRoute = this.modelResolver.getResumeRoute(sessionId);
-        const resumeOptions = await this.agentOptionsFor(key, resumeRoute);
+        // 与核心一致：agentOptions 是响应式 getter，会话里记录过的选择优先
+        const resumeOptions = this.agentOptionsFor();
         const resumed = await this.agents.resume({
           resumeSessionId: sessionId,
-          ...(resumeOptions ? { agentOptions: resumeOptions } : {}),
+          agentOptions: resumeOptions,
           ...(composed.setup ? { setup: composed.setup } : {}),
         });
         agent = resumed.agent;
         handle = resumed;
         directory = this.host.sessionDirectory(agent.session) ?? directory;
-        this.logger.info(`resumed session: key=${key} preset=${agentPreset ?? 'none'} route=${resumeRoute.provider}/${resumeRoute.model}`);
+        const resumedRoute = this.hostSelection(agent) ?? this.modelResolver.resolveDefault();
+        this.logger.info(`resumed session: key=${key} preset=${agentPreset ?? 'none'} route=${resumedRoute.provider}/${resumedRoute.model}`);
       } catch (err) {
         if (!(await this.mayCreateAfterResumeFailure(key, sessionId, err))) throw err;
         sessionId = this.resolveCreateId(key, sessionId);
         mkdirSync(directory, { recursive: true });
-        // id 可能被换成新的：新 id 没有偏好时沿用这个 chat 的当前路由
-        route = this.modelResolver.getSessionModel(sessionId) ?? route;
-        const createOptions = await this.agentOptionsFor(key, route);
+        const createOptions = this.agentOptionsFor();
         const created = await this.agents.create({
           sessionId,
           meta: {
             cwd: directory,
             ...(agentPreset ? { agentPreset } : {}),
           },
-          ...(createOptions ? { agentOptions: createOptions } : {}),
+          agentOptions: createOptions,
           ...(composed.setup ? { setup: composed.setup } : {}),
         });
         agent = created.agent;
@@ -1989,11 +1894,11 @@ export class SessionManager {
       const composed = await this.composePreset(presetId);
       agentPreset = composed.agentPreset;
       try {
-        const resumeRoute = this.modelResolver.getResumeRoute(sessionId);
-        const resumeOptions = await this.agentOptionsFor(key, resumeRoute);
+        // 与核心一致：agentOptions 读部署默认值，会话自己的选择由宿主回放优先
+        const resumeOptions = this.agentOptionsFor();
         const resumed = await this.agents.resume({
           resumeSessionId: sessionId,
-          ...(resumeOptions ? { agentOptions: resumeOptions } : {}),
+          agentOptions: resumeOptions,
           ...(composed.setup ? { setup: composed.setup } : {}),
         });
         agent = resumed.agent;

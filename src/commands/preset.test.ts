@@ -95,7 +95,7 @@ describe('/preset（查看）', () => {
     const text = await run(makeManager({ recordPreset: 'alpha' }));
 
     expect(text).toContain('**当前**: alpha');
-    expect(text).toContain('preset 只在 `/new` 之后、第一条消息之前可改');
+    expect(text).toContain('已开始的会话不能改 preset');
     expect(text).toContain('text="/preset alpha" show="/preset Alpha (alpha) ✅"');
     expect(text).toContain('text="/preset beta" show="/preset Beta (beta)"');
   });
@@ -129,7 +129,7 @@ describe('/preset（切换）', () => {
     const manager = makeManager({ recordPreset: 'alpha', sessionStarted: true });
     const text = await run(manager, 'beta');
 
-    expect(text).toBe('⚠️ 当前会话已开始，preset 只在 `/new` 之后、第一条消息之前可改');
+    expect(text).toBe('⚠️ 会话已开始，preset 不可再改');
   });
 
   it('reset 清除待定 preset，回到默认', async () => {
