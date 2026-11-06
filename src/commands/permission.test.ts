@@ -123,7 +123,6 @@ describe('/permission（切换）', () => {
       'c2c',
       'owner',
       'workspace-write',
-      expect.objectContaining({ replyTarget: expect.objectContaining({ scope: 'c2c' }) }),
     );
     expect(text).toBe('✅ 权限已切换: 工作区内修改 (workspace-write)');
   });
@@ -150,7 +149,7 @@ describe('/permission（切换）', () => {
   it('reset 不再特殊处理，按未知预设拒绝', async () => {
     const manager = makeManager({ outcome: { ok: false, reason: 'unknown-preset' } });
     const text = await run(manager, 'reset');
-    expect(manager.setPermissionPreset).toHaveBeenCalledWith('c2c', 'owner', 'reset', expect.anything());
+    expect(manager.setPermissionPreset).toHaveBeenCalledWith('c2c', 'owner', 'reset');
     expect(text).toContain('未知权限预设: reset');
   });
 

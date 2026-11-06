@@ -192,10 +192,7 @@ describe('切换权限', () => {
     const { service, set } = fakePermissions(); // defaultPreset = workspace-write
     const manager = createManager(service);
 
-    const outcome = await manager.setPermissionPreset('c2c', PEER, 'workspace-write', {
-      senderId: PEER,
-      replyTarget: REPLY,
-    });
+    const outcome = await manager.setPermissionPreset('c2c', PEER, 'workspace-write');
 
     expect(outcome).toEqual({ ok: true, preset: 'workspace-write', unchanged: true });
     expect(set).not.toHaveBeenCalled();
@@ -213,23 +210,22 @@ describe('切换权限', () => {
     expect(set).toHaveBeenCalledWith(record.agent.session, 'auto');
   });
 
-  it('无活跃会话：按 revive 拉起会话再写（与 /compact 一致）', async () => {
+  it('无活跃会话：拒绝，不为了切换拉起会话', async () => {
     const { service, set } = fakePermissions();
     const manager = createManager(service);
 
-    const outcome = await manager.setPermissionPreset('c2c', PEER, 'auto', { senderId: PEER, replyTarget: REPLY });
+    const outcome = await manager.setPermissionPreset('c2c', PEER, 'auto');
 
-    expect(outcome.ok).toBe(true);
-    expect(set).toHaveBeenCalledOnce();
-    // 拉起的是真实会话（getOrCreate 记录进内存）
-    expect(manager.getSessionRecord('c2c', PEER)).toBeDefined();
+    expect(outcome).toEqual({ ok: false, reason: 'no-session' });
+    expect(set).not.toHaveBeenCalled();
+    expect(manager.getSessionRecord('c2c', PEER)).toBeUndefined();
   });
 
   it('未知预设：拒绝且不写会话、不建会话', async () => {
     const { service, set } = fakePermissions();
     const manager = createManager(service);
 
-    const outcome = await manager.setPermissionPreset('c2c', PEER, 'nope', { senderId: PEER, replyTarget: REPLY });
+    const outcome = await manager.setPermissionPreset('c2c', PEER, 'nope');
 
     expect(outcome).toEqual({ ok: false, reason: 'unknown-preset' });
     expect(set).not.toHaveBeenCalled();
@@ -241,25 +237,12 @@ describe('切换权限', () => {
       set: vi.fn(() => { throw new Error('auto-review: integration is closing'); }),
     });
     const manager = createManager(service);
+    await manager.getOrCreate('c2c', PEER, PEER, REPLY);
 
-    const outcome = await manager.setPermissionPreset('c2c', PEER, 'auto', { senderId: PEER, replyTarget: REPLY });
+    const outcome = await manager.setPermissionPreset('c2c', PEER, 'auto');
 
     expect(outcome.ok).toBe(false);
     expect(outcome.reason).toBe('failed');
     expect(outcome.message).toContain('integration is closing');
-  });
-
-  it('会话拉不起来时返回 failed，不把异常抛给命令层', async () => {
-    const { service, set } = fakePermissions();
-    const registry = createRegistry();
-    registry.create.mockRejectedValueOnce(new Error('EIO: session log is locked'));
-    const manager = createManager(service, createLogger(), registry);
-
-    const outcome = await manager.setPermissionPreset('c2c', PEER, 'auto', { senderId: PEER, replyTarget: REPLY });
-
-    expect(outcome.ok).toBe(false);
-    expect(outcome.reason).toBe('failed');
-    expect(outcome.message).toContain('session log is locked');
-    expect(set).not.toHaveBeenCalled();
   });
 });
