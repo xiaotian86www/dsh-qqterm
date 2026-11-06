@@ -27,6 +27,7 @@ export const inject = [
   'workspaceRegistry',
   'agentPresets',
   'permissionPresets',
+  'settings',
   'tools',
   'attachments',
   'webServer',

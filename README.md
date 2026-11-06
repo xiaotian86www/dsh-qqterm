@@ -117,13 +117,13 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqbot/cordis.dev.yml
 
 ### 模型、preset 与思考强度
 
-这三项都跟着**单个会话**走，行为与宿主 Web 端一致：
+模型与思考强度跟着**单个会话**走，preset 跟着**部署默认值**走，都沿用宿主核心行为：
 
 - 新会话（`/new`、第一条消息）用宿主核心默认值：`settings.yaml` → 宿主 agentDefaultModel → `deepseek-official/deepseek-v4-flash`。插件不再提供 `provider` / `model` / `preset` 配置项。
 - `/model` 走宿主同一条切换路径：选择记进当前会话（不重建、不改历史），下一轮生效；没有活跃会话时拒绝，先发一条消息。
-- `/preset` 只在会话还没开始时有效（`/new` 之后、第一条消息之前），已开始直接拒绝。
+- `/preset` 改的是核心的默认 preset（与设置页「设为默认」同一个入口）：对之后新建的会话生效，已开始的会话保持自己的 preset。
 - `/reasoning` 走宿主 `selectModel`：按核心行为，切档后它同时成为新的部署默认值，新会话会跟随这个默认。
-- 插件不另存模型偏好；旧版本按聊天 key 存的偏好不再生效，存量会话恢复时用它自己日志里的选择。
+- 插件不存模型或 preset 偏好；旧版本按聊天 key 存的偏好不再生效，存量会话恢复时用它自己日志里的选择。
 
 ### 访问控制（access）
 
@@ -189,7 +189,7 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqbot/cordis.dev.yml
 | `/ls` | 列出目录里的子目录，点条目逐层进入 |
 | `/model` | 查看或切换模型 |
 | `/reasoning`（别名 `/think`） | 查看或切换思考强度（档位由模型决定）；`default` 恢复模型默认 |
-| `/preset` | 查看或切换 agent preset（只对新会话有效） |
+| `/preset` | 查看或切换默认 agent preset（对之后新建的会话生效） |
 | `/permission` | 查看或切换权限预设（沙箱模式 + 审批策略，当前会话立即生效；仅白名单可用） |
 | `/cost` | 查看当前会话的 token 消耗 |
 | `/status` | 查看会话状态：会话名与短 id / 工作区 / 模型 / 思考强度 / 上下文 / token |
@@ -326,7 +326,7 @@ src/
 - **纯 Cordis 插件** — 遵循 dsh "Plugins, not loop changes" 原则
 - **声明式依赖** — `inject` 列出全部必需服务（会话、模型、工作区、归档、preset、工具、附件、Web 服务等），缺任一就不激活，不在运行时探测或降级
 - **一个当前会话 + 多份已获取会话** — 任何 QQ 窗口续写同一个当前会话；`/sessions resume` 与 `/to` 获取过的会话继续活着并把输出发回 QQ
-- **Preset 支持** — 可通过 `agent-presets` 服务挂载预设（工具集、prompt 等）
+- **Preset 支持** — 可通过 `agent-presets` 服务挂载预设（工具集、prompt 等）；`/preset` 改的是核心默认值，与设置页「设为默认」一致
 - **Markdown 输出** — 回复以 Markdown 格式发送，支持代码块/表格感知切分
 - **图片理解** — 支持 `qqbot_describe_image` 视觉理解，可分析用户发送的图片
 - **附件发送** — 支持 `qqbot_send_file` 将本地文件发送给用户（默认启用路径白名单）

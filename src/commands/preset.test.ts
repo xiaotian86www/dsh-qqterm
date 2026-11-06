@@ -1,8 +1,8 @@
 /**
- * /preset：列表里标注当前 preset，样式与 /model、/permission 对齐
+ * /preset：列出可用 preset 并标注核心默认值；切换只改默认值
  *
- * manager 用替身，只验证「当前值 → 标注 → 按钮参数」；真正的 preset 切换
- * 与锁定语义由 session-manager.test.ts 覆盖。
+ * manager 用替身，只验证「默认值 → 标注 → 按钮参数」；真正的写入与默认值语义
+ * 由 session-manager.test.ts 覆盖。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { SlashCommandHandlerContext } from '@tencent-connect/qqbot-nodejs';
@@ -28,36 +28,29 @@ const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi
 
 const PRESETS: PresetEntry[] = [
   { id: 'alpha', name: 'Alpha' },
-  { id: 'beta', name: 'Beta' },
+  { id: 'beta', name: 'Beta', isDefault: true },
   { id: 'gamma' },
 ];
 
 interface StubOptions {
   presets?: PresetEntry[];
-  /** 当前会话锁定的 preset（record.agentPreset） */
-  recordPreset?: string;
-  /** 新会话的待定 preset（没有活跃会话时才有） */
+  /** 部署默认 preset（agentPresets.defaultId） */
   effective?: string;
-  /** 切换结果是否为「已经是当前值」 */
+  /** 切换结果是否为「已经是默认值」 */
   unchanged?: boolean;
-  /** 切换目标是已开始的会话 */
-  sessionStarted?: boolean;
+  /** 切换失败原因 */
+  fail?: 'unknown-preset' | 'broken' | 'failed';
 }
 
 function makeManager(options: StubOptions = {}) {
   return {
     listPresets: vi.fn(async () => options.presets ?? PRESETS),
-    getSessionRecord: vi.fn(() =>
-      options.recordPreset === undefined ? undefined : ({ agentPreset: options.recordPreset } as never),
-    ),
-    getEffectivePreset: vi.fn(() => options.effective ?? options.recordPreset),
-    setPresetOverride: vi.fn(async (_scope: unknown, _peer: unknown, id: string) => ({
-      ...(options.sessionStarted ? { ok: false, reason: 'session-started' as const } : { ok: true, presetId: id }),
-      ...(options.unchanged ? { unchanged: true } : {}),
-    })),
-    clearPresetOverride: vi.fn(async () => ({
-      ...(options.sessionStarted ? { ok: false, reason: 'session-started' as const } : { ok: true }),
-    })),
+    getEffectivePreset: vi.fn(() => options.effective),
+    setPresetOverride: vi.fn(async (_scope: unknown, _peer: unknown, id: string) => (
+      options.fail
+        ? { ok: false, reason: options.fail, message: options.fail === 'failed' ? 'write failed' : undefined }
+        : { ok: true, presetId: id, ...(options.unchanged ? { unchanged: true } : {}) }
+    )),
   } as unknown as SessionManager;
 }
 
@@ -81,62 +74,68 @@ beforeEach(() => {
 });
 
 describe('/preset（查看）', () => {
-  it('当前 preset 带 ✅，链接仍指向真实切换命令', async () => {
+  it('默认项带 ✅，链接仍指向真实切换命令', async () => {
     const text = await run(makeManager({ effective: 'beta' }));
 
-    expect(text).toContain('**当前**: beta');
+    expect(text).toContain('**默认**: beta');
     expect(text).toContain('text="/preset beta" show="/preset Beta (beta) ✅"');
     expect(text).toContain('text="/preset alpha" show="/preset Alpha (alpha)"');
-    // 只有当前项带 ✅
+    // 只有默认项带 ✅
+    expect(text.split('✅')).toHaveLength(2);
+    expect(text).toContain('对之后新建的会话生效');
+  });
+
+  it('没有默认值时按列表的 isDefault 标注，不重复显示 ✅', async () => {
+    const text = await run(makeManager());
+
+    expect(text).toContain('**默认**: beta');
+    expect(text).toContain('text="/preset beta" show="/preset Beta (beta) ✅"');
     expect(text.split('✅')).toHaveLength(2);
   });
 
-  it('已开始的会话显示它锁定的 preset，并提示只能在新会话改', async () => {
-    const text = await run(makeManager({ recordPreset: 'alpha' }));
+  it('无别名的项直接显示 id，列表没标 isDefault 时用生效默认值', async () => {
+    const text = await run(makeManager({
+      effective: 'gamma',
+      presets: [{ id: 'alpha', name: 'Alpha' }, { id: 'beta', name: 'Beta' }, { id: 'gamma' }],
+    }));
 
-    expect(text).toContain('**当前**: alpha');
-    expect(text).toContain('已开始的会话不能改 preset');
-    expect(text).toContain('text="/preset alpha" show="/preset Alpha (alpha) ✅"');
-    expect(text).toContain('text="/preset beta" show="/preset Beta (beta)"');
-  });
-
-  it('没有当前 preset 时列表不标 ✅，无别名的项直接显示 id', async () => {
-    const text = await run(makeManager());
-
-    expect(text).toContain('**当前**: 默认');
-    expect(text).not.toContain('✅');
-    expect(text).toContain('text="/preset gamma" show="/preset gamma"');
+    expect(text).toContain('**默认**: gamma');
+    expect(text).toContain('text="/preset gamma" show="/preset gamma ✅"');
+    expect(text.split('✅')).toHaveLength(2);
   });
 });
 
 describe('/preset（切换）', () => {
-  it('切换成功回显 preset id，并提示下一条消息生效', async () => {
+  it('切换成功回显 preset id，并提示之后新建的会话生效', async () => {
     const manager = makeManager({ effective: 'alpha' });
     const text = await run(manager, 'beta');
 
     expect(manager.setPresetOverride).toHaveBeenCalledWith('c2c', 'owner', 'beta');
-    expect(text).toBe('✅ preset 已切换: beta（下一条消息生效）');
+    expect(text).toBe('✅ 默认 preset 已切换: beta（之后新建的会话生效）');
   });
 
-  it('切到当前待定 preset 是可重入的，只回一行', async () => {
+  it('切到当前默认值是幂等的，只回一行', async () => {
     const manager = makeManager({ effective: 'beta', unchanged: true });
     const text = await run(manager, 'beta');
 
-    expect(text).toBe('✅ 已是当前 preset: beta');
+    expect(text).toBe('✅ 已是默认 preset: beta');
   });
 
-  it('会话已开始时拒绝切换，提示只能在新会话改', async () => {
-    const manager = makeManager({ recordPreset: 'alpha', sessionStarted: true });
-    const text = await run(manager, 'beta');
+  it('未知 preset 给警告', async () => {
+    const text = await run(makeManager({ fail: 'unknown-preset' }), 'nope');
 
-    expect(text).toBe('⚠️ 会话已开始，preset 不可再改');
+    expect(text).toBe('⚠️ 未知 preset: nope');
   });
 
-  it('reset 清除待定 preset，回到默认', async () => {
-    const manager = makeManager({ effective: 'beta' });
-    const text = await run(manager, 'reset');
+  it('preset 加载失败给原因', async () => {
+    const text = await run(makeManager({ fail: 'broken' }), 'beta');
 
-    expect(manager.clearPresetOverride).toHaveBeenCalledWith('c2c', 'owner');
-    expect(text).toBe('✅ 已重置为默认 preset（下一条消息生效）');
+    expect(text).toBe('❌ preset beta 加载失败: 未知错误');
+  });
+
+  it('写入失败给原因', async () => {
+    const text = await run(makeManager({ fail: 'failed' }), 'beta');
+
+    expect(text).toBe('❌ 切换失败: write failed');
   });
 });

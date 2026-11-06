@@ -102,9 +102,9 @@ export interface CompactOutcome {
 /** preset 切换结果 */
 export interface PresetSwitchOutcome {
   ok: boolean;
-  reason?: 'unknown-preset' | 'broken' | 'session-started' | 'failed';
+  reason?: 'unknown-preset' | 'broken' | 'failed';
   presetId?: string;
-  /** true = 目标就是当前值，未写覆盖 */
+  /** true = 目标就是当前默认值，未写入 */
   unchanged?: boolean;
   message?: string;
 }
@@ -189,8 +189,8 @@ export interface AgentPresetsLike {
   readonly defaultId: string;
   resolve(id?: string): Promise<{ id: string; broken?: string }>;
   mount(agentCtx: Context, id?: string): Promise<unknown>;
-  /** 列出所有可用 preset */
-  list(): Promise<Array<{ id: string; name?: string; description?: string; broken?: string }>>;
+  /** 列出所有可用 preset（isDefault 标记部署默认值） */
+  list(): Promise<Array<{ id: string; name?: string; description?: string; broken?: string; isDefault?: boolean }>>;
 }
 
 /** 可用 preset 条目（/preset 命令展示用） */
@@ -198,6 +198,14 @@ export interface PresetEntry {
   id: string;
   name?: string;
   description?: string;
+  /** 是不是当前部署默认值（新建会话会用它） */
+  isDefault?: boolean;
+}
+
+/** dsh-settings 服务接口（写 profile 配置的唯一入口） */
+export interface SettingsLike {
+  /** 合并写入某个插件条目的 volatile 字段（expectedRevision 省略时不做冲突检查） */
+  update(ns: string, patch: Record<string, unknown>, expectedRevision?: number): Promise<void>;
 }
 
 /**

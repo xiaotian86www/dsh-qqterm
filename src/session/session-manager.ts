@@ -48,6 +48,7 @@ import type {
   EffortView,
   EffortSwitchOutcome,
   AgentOptionsLike,
+  SettingsLike,
   RequestHeaderLike,
   PermissionPresetsLike,
   PermissionPresetEntry,
@@ -68,6 +69,9 @@ import type {
   SendToOutcome,
   RetryPromptOutcome,
 } from './types.ts';
+
+/** agent preset 默认值所在的配置条目（与设置页写的是同一个 namespace） */
+const PRESET_SETTINGS_NS = 'agent-preset-registry';
 
 /** ManualCompactionError 各 code 的友好提示 */
 const COMPACTION_ERROR_HINTS: Record<string, string> = {
@@ -284,6 +288,28 @@ export class SessionManager {
   }
 
   /**
+   * settings 服务（已加入 inject）：写核心默认 preset 的唯一入口
+   */
+  private getSettingsService(): SettingsLike {
+    return (this.ctx as unknown as { settings: SettingsLike }).settings;
+  }
+
+  /**
+   * 部署默认 preset（新建会话用它）
+   *
+   * 由核心 agent-preset-registry 的配置持有（`selectedDefault ?? default`），
+   * 插件只读不存。
+   */
+  private defaultPresetId(): string | undefined {
+    try {
+      return this.getPresetsService()?.defaultId;
+    } catch (err) {
+      this.logger.debug(`default preset unavailable: ${errorText(err)}`);
+      return undefined;
+    }
+  }
+
+  /**
    * 从 session 持久化 header 读 session 当初的 preset（started 锁定语义）。
    * 读不到（服务缺失 / session 不存在 / 未记录 agentPreset）返回 undefined。
    */
@@ -320,14 +346,11 @@ export class SessionManager {
   }
 
   /**
-   * 获取当前会话的 preset（已开始的会话取它锁定的值，未开始的取新会话的待定值）
+   * 当前会话的 preset（已开始的会话取它锁定的值，未开始的取部署默认值）
    */
   getEffectivePreset(scope: ChatScope, peerId: string): string | undefined {
     const record = this.getSessionRecord(scope, peerId);
-    if (record) return record.agentPreset;
-
-    const pendingId = this.currentSessionId(this.sessionKey());
-    return pendingId ? this.modelResolver.getSessionPreset(pendingId) : undefined;
+    return record ? record.agentPreset : this.defaultPresetId();
   }
 
   /**
@@ -338,7 +361,13 @@ export class SessionManager {
     if (!presets) return [];
     try {
       const list = await presets.list();
-      return list.map((p) => ({ id: p.id, name: p.name, description: p.description }));
+      const defaultId = this.defaultPresetId();
+      return list.map((p) => ({
+        id: p.id,
+        name: p.name,
+        description: p.description,
+        isDefault: p.isDefault ?? (defaultId !== undefined && p.id === defaultId),
+      }));
     } catch (err) {
       this.logger.warn(`list presets failed: ${err instanceof Error ? err.message : String(err)}`);
       return [];
@@ -595,10 +624,11 @@ export class SessionManager {
   }
 
   /**
-   * 设置当前会话的 agent preset
+   * 切换部署默认 preset
    *
-   * preset 决定会话的工具集与提示词，会话一旦开始就固定：这里只接受
-   * 「/new 之后、第一条消息之前」的当前会话，已开始直接拒绝。
+   * preset 决定新建会话的工具集与提示词，由核心 agent-preset-registry 持有：
+   * 这里写它的 `selectedDefault`（与设置页「设为默认」同一个入口），之后新建的
+   * 会话用它；已经开始的会话保持自己的值。插件不另存待定 preset。
    */
   async setPresetOverride(_scope: ChatScope, _peerId: string, presetId: string): Promise<PresetSwitchOutcome> {
     const key = this.sessionKey();
@@ -609,64 +639,29 @@ export class SessionManager {
     try {
       resolved = await presets.resolve(presetId);
     } catch (err) {
-      return { ok: false, reason: 'unknown-preset', message: err instanceof Error ? err.message : String(err) };
+      return { ok: false, reason: 'unknown-preset', message: errorText(err) };
     }
     if (resolved.broken !== undefined) {
       return { ok: false, reason: 'broken', message: resolved.broken };
     }
 
-    // 2. 只接受还没开始的当前会话
-    const fresh = await this.freshSessionId(key);
-    if (typeof fresh !== 'string') return fresh;
-
-    // 可重入：目标就是待定值时不再写覆盖；列表里的当前项也走同一条命令
-    if (resolved.id === this.modelResolver.getSessionPreset(fresh)) {
-      this.logger.debug(`preset switch skipped (already pending): key=${key} → ${resolved.id}`);
-      return { ok: true, presetId, unchanged: true };
-    }
-
-    this.modelResolver.setSessionPreset(fresh, presetId);
-    this.logger.info(`preset set for new session: key=${key} sessionId=${fresh} → ${presetId}`);
-    return { ok: true, presetId };
-  }
-
-  /**
-   * 清除当前会话的 preset，回到默认（只对还没开始的会话有效）
-   */
-  async clearPresetOverride(_scope: ChatScope, _peerId: string): Promise<PresetSwitchOutcome> {
-    const key = this.sessionKey();
-    const fresh = await this.freshSessionId(key);
-    if (typeof fresh !== 'string') return fresh;
-
-    const cleared = this.modelResolver.clearSessionPreset(fresh);
-    this.logger.info(`preset cleared: key=${key} sessionId=${fresh} cleared=${cleared}`);
-    return { ok: true };
-  }
-
-  /**
-   * 当前会话 id，前提是它还没开始（没有 live 记录、磁盘上也不存在）。
-   *
-   * 没有当前指针时先铸一个并落盘：`/new` 只是挪指针，这里补上同样的语义。
-   */
-  private async freshSessionId(key: string): Promise<string | PresetSwitchOutcome> {
-    let sessionId = this.currentSessionId(key);
-    if (sessionId === undefined) {
-      sessionId = mintSessionId();
-      this.setCurrent(key, sessionId);
-    }
-
-    if (this.records.has(sessionId)) {
-      return { ok: false, reason: 'session-started' };
+    // 2. 写核心默认值；目标就是默认值时不再写（列表里的默认项也走这条命令）
+    const targetId = resolved.id;
+    if (this.defaultPresetId() === targetId) {
+      this.logger.debug(`preset switch skipped (already default): key=${key} → ${targetId}`);
+      return { ok: true, presetId: targetId, unchanged: true };
     }
 
     try {
-      if (await this.host.sessionExists(sessionId)) {
-        return { ok: false, reason: 'session-started' };
-      }
+      await this.getSettingsService().update(PRESET_SETTINGS_NS, { selectedDefault: targetId });
     } catch (err) {
-      return { ok: false, reason: 'failed', message: errorText(err) };
+      const message = errorText(err);
+      this.logger.warn(`preset switch failed: key=${key} → ${targetId} err=${message}`);
+      return { ok: false, reason: 'failed', message };
     }
-    return sessionId;
+
+    this.logger.info(`default preset set: key=${key} → ${targetId}`);
+    return { ok: true, presetId: targetId };
   }
 
   // ── 权限预设（permission-presets，可选服务） ──
@@ -1162,8 +1157,8 @@ export class SessionManager {
       this.logger.info(`reusing live agent: key=${key}`);
     } else {
       // preset 只解析一次：resume/create 共用同一组合，避免重复 resolve/mount 目录。
-      // 优先 session 当初的 preset（started 锁定语义），无则用这个会话的待定 preset。
-      const presetId = (await this.resolvePersistedPreset(sessionId)) ?? this.modelResolver.getSessionPreset(sessionId);
+      // 优先 session 当初的 preset（started 锁定语义）；新会话用核心默认值。
+      const presetId = await this.resolvePersistedPreset(sessionId);
       const composed = await this.composePreset(presetId);
       agentPreset = composed.agentPreset;
       try {
@@ -1195,8 +1190,6 @@ export class SessionManager {
         });
         agent = created.agent;
         handle = created;
-        // 待定 preset 已经被这次 create 消费，清掉避免影响同一个 id 之后的语义
-        this.modelResolver.clearSessionPreset(sessionId);
         this.logger.info(`created new session: key=${key} sessionId=${sessionId} preset=${agentPreset ?? 'none'} cwd=${directory}`);
       }
     }
@@ -1900,7 +1893,7 @@ export class SessionManager {
       agent = live;
       agentPreset = await this.resolvePersistedPreset(sessionId);
     } else {
-      const presetId = (await this.resolvePersistedPreset(sessionId)) ?? this.modelResolver.getSessionPreset(sessionId);
+      const presetId = await this.resolvePersistedPreset(sessionId);
       const composed = await this.composePreset(presetId);
       agentPreset = composed.agentPreset;
       try {

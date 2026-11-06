@@ -1,5 +1,5 @@
 /**
- * PrefsStore — per-peer 会话偏好持久化（会话映射 + preset + 工作目录）
+ * PrefsStore — per-peer 会话偏好持久化（会话映射 + 工作目录）
  *
  * 隔离文件 I/O 操作，便于单元测试时 mock。
  * 存储路径：~/.dsh-qqbot/model-prefs.json（全局共享，多实例/多进程共存）。
@@ -23,8 +23,6 @@ type ErrorFn = (msg: string) => void;
 interface PrefsFile {
   /** sessionKey → 最新 sessionId（用于重启后恢复当前会话） */
   sessionIds: Record<string, string>;
-  /** sessionId → preset id（会话创建前的待定值，create 时消费） */
-  presets: Record<string, string>;
   /** sessionKey → 该聊天当前所在的工作目录（换会话后跟着会话走，/new 保留） */
   dirs: Record<string, string>;
 }
@@ -32,21 +30,17 @@ interface PrefsFile {
 /** 各段的删除墓碑（key 集合），合并时用于压住磁盘上的旧值 */
 interface Tombstones {
   sessionIds: Set<string>;
-  presets: Set<string>;
   dirs: Set<string>;
 }
 
 export class PrefsStore {
   /** per-peer 最新 sessionId（内存态） */
   private sessionIds = new Map<string, string>();
-  /** per-peer preset 偏好（内存态） */
-  private presets = new Map<string, string>();
   /** per-peer 当前工作目录（内存态） */
   private dirs = new Map<string, string>();
   /** 本进程显式删除的 key（防止并发合并把删除复活） */
   private deleted: Tombstones = {
     sessionIds: new Set(),
-    presets: new Set(),
     dirs: new Set(),
   };
   /** 隔离偏好文件路径 */
@@ -87,27 +81,6 @@ export class PrefsStore {
     return [...this.sessionIds.entries()];
   }
 
-  // ── Preset 操作（键是 sessionId：待定值只对那个新会话有效） ──
-
-  getPreset(sessionKey: string): string | undefined {
-    return this.presets.get(sessionKey);
-  }
-
-  setPreset(sessionKey: string, presetId: string): void {
-    this.presets.set(sessionKey, presetId);
-    this.deleted.presets.delete(sessionKey);
-    this.write();
-  }
-
-  clearPreset(sessionKey: string): boolean {
-    const deleted = this.presets.delete(sessionKey);
-    if (deleted) {
-      this.deleted.presets.add(sessionKey);
-      this.write();
-    }
-    return deleted;
-  }
-
   // ── 工作目录操作 ──
 
   getDirectory(sessionKey: string): string | undefined {
@@ -141,13 +114,6 @@ export class PrefsStore {
         for (const [key, sessionId] of Object.entries(data.sessionIds)) {
           if (typeof sessionId === 'string' && sessionId) {
             this.sessionIds.set(key, sessionId);
-          }
-        }
-      }
-      if (data.presets && typeof data.presets === 'object') {
-        for (const [key, presetId] of Object.entries(data.presets)) {
-          if (typeof presetId === 'string' && presetId) {
-            this.presets.set(key, presetId);
           }
         }
       }
@@ -220,7 +186,6 @@ export class PrefsStore {
     };
     return {
       sessionIds: pick(this.sessionIds, disk?.sessionIds, this.deleted.sessionIds),
-      presets: pick(this.presets, disk?.presets, this.deleted.presets),
       dirs: pick(this.dirs, disk?.dirs, this.deleted.dirs),
     };
   }

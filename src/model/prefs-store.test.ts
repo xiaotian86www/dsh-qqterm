@@ -62,21 +62,21 @@ describe('PrefsStore 并发安全（E3）', () => {
 
   it('删除墓碑：clear 后并发写盘的旧值不复活', () => {
     const a = store();
-    a.setPreset('k', 'p1');
+    a.setDirectory('k', 'D:/one');
 
     // 外部进程写入了 k 的旧值（模拟另一写者把条目落盘）
     const external = JSON.parse(readFileSync(path, 'utf8'));
-    external.presets.k = 'p-external';
+    external.dirs.k = 'D:/external';
     writeFileSync(path, JSON.stringify(external), 'utf8');
 
-    a.clearPreset('k'); // 本进程显式删除 → 墓碑
+    a.clearDirectory('k'); // 本进程显式删除 → 墓碑
 
     const disk = JSON.parse(readFileSync(path, 'utf8'));
-    expect('k' in disk.presets).toBe(false);
+    expect('k' in disk.dirs).toBe(false);
 
     // 墓碑解除：重新 set 后正常落盘
-    a.setPreset('k', 'p2');
-    expect(JSON.parse(readFileSync(path, 'utf8')).presets.k).toBe('p2');
+    a.setDirectory('k', 'D:/two');
+    expect(JSON.parse(readFileSync(path, 'utf8')).dirs.k).toBe('D:/two');
   });
 
   it('原子写：崩溃不留半截 JSON（写入后文件始终可解析），tmp 带唯一后缀且已清理', () => {

@@ -238,13 +238,13 @@ describe('getOrCreate — 对照组（主路径行为正确）', () => {
     expect(registry.create).not.toHaveBeenCalled();
   });
 
-  it('session 当初的 preset 锁定：优先 header.agentPreset，而非当前 effective preset', async () => {
+  it('session 当初的 preset 锁定：优先 header.agentPreset，而非部署默认 preset', async () => {
     const prefs = new PrefsStore();
     prefs.setSessionId(KEY, 'session-current');
-    prefs.setPreset(KEY, 'current-preset'); // 当前 effective 已被 /preset 换过
     const { registry } = createRegistry(async ({ resumeSessionId }) => fakeHandle(resumeSessionId));
     const presets = {
-      resolve: vi.fn(async (id?: string) => ({ id: id ?? 'default' })),
+      defaultId: 'current-preset', // 部署默认后来被 /preset 换过
+      resolve: vi.fn(async (id?: string) => ({ id: id ?? 'current-preset' })),
       mount: vi.fn(async () => {}),
       serviceFor: () => undefined,
       list: vi.fn(async () => []),
@@ -444,23 +444,43 @@ describe('getOrCreate — 会话创建/恢复后挂载到对应工作区', () =>
 });
 
 describe('切换类操作 — 可重入', () => {
-  /** 带 agentPresets 替身的 ctx（preset 切换需要 resolve） */
-  function presetsCtx(): Context {
+  /**
+   * 带 agentPresets / settings 替身的 ctx：/preset 写核心默认值
+   *
+   * `settings.update` 与 `presets.defaultId` 联动，等价于核心「写入后默认值立即变化」。
+   */
+  function presetsCtx(): Context & {
+    presets: { defaultId: string };
+    settings: { update: ReturnType<typeof vi.fn> };
+  } {
+    const state = { defaultId: 'default' };
     const presets = {
-      resolve: vi.fn(async (id?: string) => ({ id: id ?? 'default' })),
+      get defaultId(): string {
+        return state.defaultId;
+      },
+      resolve: vi.fn(async (id?: string) => ({ id: id ?? state.defaultId })),
       mount: vi.fn(async () => {}),
       serviceFor: () => undefined,
       list: vi.fn(async () => []),
     };
-    return {
+    const settings = {
+      update: vi.fn(async (_ns: string, patch: { selectedDefault?: string }) => {
+        if (patch.selectedDefault !== undefined) state.defaultId = patch.selectedDefault;
+      }),
+    };
+    const ctx = {
       ...hostCtxServices(),
       agentPresets: presets,
+      settings,
       get: (name: string) => {
         if (name === 'sessionPersistence') return { stat: async () => undefined };
-        return name === 'agentPresets' ? presets : undefined;
+        if (name === 'agentPresets') return presets;
+        if (name === 'settings') return settings;
+        return undefined;
       },
       on: vi.fn(),
     } as unknown as Context;
+    return Object.assign(ctx, { presets, settings });
   }
 
   it('模型：目标就是当前模型时不写选择、不 fork', async () => {
@@ -477,34 +497,41 @@ describe('切换类操作 — 可重入', () => {
     expect(manager.getSessionRecord('c2c', PEER)?.sessionId).toBe(before);
   });
 
-  it('preset：会话已开始后拒绝修改（只有新会话可设）', async () => {
+  it('preset：已开始的会话也能改默认值，但只对之后新建的会话生效', async () => {
     const { registry } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
-    const manager = createManagerWithCtx(registry, presetsCtx());
-    await manager.getOrCreate('c2c', PEER, PEER, REPLY);
+    const ctx = presetsCtx();
+    const manager = createManagerWithCtx(registry, ctx);
+    const started = await manager.getOrCreate('c2c', PEER, PEER, REPLY);
+    expect(started.agentPreset).toBe('default');
 
+    // 写核心 agent-preset-registry 的 selectedDefault，而不是按会话存待定值
     const outcome = await manager.setPresetOverride('c2c', PEER, 'beta');
 
-    expect(outcome).toEqual({ ok: false, reason: 'session-started' });
+    expect(outcome).toEqual({ ok: true, presetId: 'beta' });
+    expect(ctx.settings.update).toHaveBeenCalledWith('agent-preset-registry', { selectedDefault: 'beta' });
+    // 已开始的会话保持自己的 preset，/new 之后的新会话才用它
+    expect(started.agentPreset).toBe('default');
+    expect(manager.getEffectivePreset('c2c', PEER)).toBe('default');
+
+    await manager.remove();
+    const fresh = await manager.getOrCreate('c2c', PEER, PEER, REPLY);
+
+    expect(fresh.agentPreset).toBe('beta');
   });
 
-  it('新会话不继承旧会话的模型与 preset', async () => {
+  it('新会话不继承旧会话的模型选择', async () => {
     const { registry } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
-    const manager = createManagerWithCtx(registry, presetsCtx());
-
-    // 新会话先设 preset，再发第一条消息让它创建
-    expect(await manager.setPresetOverride('c2c', PEER, 'beta')).toEqual({ ok: true, presetId: 'beta' });
+    const manager = createManager(registry);
     const created = await manager.getOrCreate('c2c', PEER, PEER, REPLY);
-    expect(created.agentPreset).toBe('beta');
     await manager.setModelOverride('c2c', PEER, { provider: 'p', model: 'other' });
     expect(manager.getEffectiveModel('c2c', PEER)).toEqual({ provider: 'p', model: 'other' });
 
-    // 再 /new：模型回核心默认，preset 回默认，都不继承上一个会话
+    // 再 /new：新会话没有自己的选择，回核心默认
     await manager.remove();
     const fresh = await manager.getOrCreate('c2c', PEER, PEER, REPLY);
 
     expect(fresh.sessionId).not.toBe(created.sessionId);
     expect(manager.getEffectiveModel('c2c', PEER)).toEqual({ provider: 'p', model: 'm' });
-    expect(fresh.agentPreset).not.toBe('beta');
   });
 
   it('模型：没有活跃会话时拒绝切换，也不写任何状态', async () => {
@@ -517,19 +544,18 @@ describe('切换类操作 — 可重入', () => {
     expect(new PrefsStore().getSessionId(KEY)).toBeUndefined();
   });
 
-  it('preset：目标就是当前待定值时不重复写覆盖', async () => {
+  it('preset：目标就是当前默认值时不重复写 settings', async () => {
     const { registry } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
-    const manager = createManagerWithCtx(registry, presetsCtx());
+    const ctx = presetsCtx();
+    const manager = createManagerWithCtx(registry, ctx);
 
     const first = await manager.setPresetOverride('c2c', PEER, 'alpha');
     const second = await manager.setPresetOverride('c2c', PEER, 'alpha');
 
     expect(first).toEqual({ ok: true, presetId: 'alpha' });
     expect(second).toEqual({ ok: true, presetId: 'alpha', unchanged: true });
-    // 待定 preset 按会话 id 存：/new 铸出来的那个
-    const sessionId = new PrefsStore().getSessionId(KEY);
-    expect(sessionId).toBeDefined();
-    expect(new PrefsStore().getPreset(sessionId!)).toBe('alpha');
+    expect(ctx.settings.update).toHaveBeenCalledTimes(1);
+    expect(ctx.settings.update).toHaveBeenCalledWith('agent-preset-registry', { selectedDefault: 'alpha' });
   });
 });
 
