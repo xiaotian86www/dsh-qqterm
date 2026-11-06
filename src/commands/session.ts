@@ -160,7 +160,7 @@ export function compactCommand({ manager }: CommandDeps): CategorizedCommand {
 
       switch (outcome.reason) {
         case 'no-session':
-          return '⚠️ 当前无活跃会话';
+          return '⚠️ 当前没有会话';
         case 'busy':
           return '⚠️ 正在生成中，无法压缩';
         case 'no-compaction':

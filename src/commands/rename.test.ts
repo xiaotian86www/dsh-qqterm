@@ -82,14 +82,14 @@ describe('/rename（不带参数）', () => {
     });
 
     const text = await run(manager);
-    expect(text).toBe('⚠️ 当前无活跃会话');
+    expect(text).toBe('⚠️ 当前没有会话');
     expect(manager.renameCurrentSession).not.toHaveBeenCalled();
   });
 
   it('指针还在但会话没打开时同样只说明状态', async () => {
     const manager = makeManager({ hasCurrentSession: vi.fn(() => false) });
 
-    expect(await run(manager)).toContain('当前无活跃会话');
+    expect(await run(manager)).toContain('当前没有会话');
   });
 
   it('只有空白字符时按不带参数处理（不会把空标题写进日志）', async () => {
@@ -121,7 +121,7 @@ describe('/rename <新标题>', () => {
       renameCurrentSession: vi.fn(() => ({ ok: false as const, reason: 'no-session' as const })),
     });
 
-    expect(await run(manager, '新名字')).toBe('⚠️ 当前无活跃会话');
+    expect(await run(manager, '新名字')).toBe('⚠️ 当前没有会话');
   });
 
   it('标题为空时明确拒绝', async () => {

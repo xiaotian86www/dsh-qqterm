@@ -89,6 +89,6 @@ describe('/bot-status', () => {
   });
 
   it('没有活跃会话时提示', async () => {
-    expect(await run(makeManager({ active: false }))).toBe('⚠️ 当前无活跃会话');
+    expect(await run(makeManager({ active: false }))).toBe('⚠️ 当前没有会话');
   });
 });

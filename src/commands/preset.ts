@@ -55,7 +55,7 @@ export function presetCommand({ manager, config, logger }: CommandDeps): Categor
           case 'broken':
             return `❌ preset ${args} 加载失败: ${outcome.message ?? '未知错误'}`;
           default:
-            return `❌ 切换失败: ${outcome.message ?? '未知错误'}`;
+            return `❌ preset 切换失败: ${outcome.message ?? '未知错误'}`;
         }
       }
 

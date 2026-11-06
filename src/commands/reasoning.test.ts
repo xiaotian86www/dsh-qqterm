@@ -133,6 +133,6 @@ describe('/reasoning（切换）', () => {
 
   it('没有会话时只回一句没有会话', async () => {
     const text = await run(makeManager({ outcome: { ok: false, reason: 'no' } }), 'high');
-    expect(text).toBe('⚠️ 没有会话');
+    expect(text).toBe('⚠️ 当前没有会话');
   });
 });

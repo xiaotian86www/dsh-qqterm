@@ -16,7 +16,7 @@ export function statusCommand({ manager }: CommandDeps): CategorizedCommand {
     handler: async (cmdCtx) => {
       const { scope, peerId } = getScopePeer(cmdCtx);
       const status = manager.getStatus(scope, peerId);
-      if (!status.active) return '⚠️ 当前无活跃会话';
+      if (!status.active) return '⚠️ 当前没有会话';
       const record = manager.getSessionRecord(scope, peerId);
       const title = record === undefined ? undefined : sessionTitleOf(record);
       const session = status.sessionId === undefined

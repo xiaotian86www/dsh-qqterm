@@ -136,6 +136,6 @@ describe('/preset（切换）', () => {
   it('写入失败给原因', async () => {
     const text = await run(makeManager({ fail: 'failed' }), 'beta');
 
-    expect(text).toBe('❌ 切换失败: write failed');
+    expect(text).toBe('❌ preset 切换失败: write failed');
   });
 });

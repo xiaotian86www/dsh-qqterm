@@ -23,7 +23,7 @@ function displayTitle(raw: string | undefined): string {
 }
 
 /** 当前没有可改名的会话时的统一提示 */
-const NO_SESSION = '⚠️ 当前无活跃会话';
+const NO_SESSION = '⚠️ 当前没有会话';
 
 export function renameCommand({ manager }: CommandDeps): CategorizedCommand {
   return {

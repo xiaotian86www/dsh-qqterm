@@ -25,7 +25,7 @@ export function costCommand({ manager, config }: CommandDeps): CategorizedComman
       const { scope, peerId } = getScopePeer(cmdCtx);
 
       if (!manager.getSessionRecord(scope, peerId)) {
-        return '⚠️ 当前无活跃会话';
+        return '⚠️ 当前没有会话';
       }
 
       const stats = manager.getTokenUsage(scope, peerId);
