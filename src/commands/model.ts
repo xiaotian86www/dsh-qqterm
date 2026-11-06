@@ -100,7 +100,7 @@ export function modelCommand({ manager, config, logger }: CommandDeps): Categori
       if (outcome.unchanged) {
         return `✅ 已是当前模型: ${provider}/${model}`;
       }
-      return `✅ 模型已切换: ${provider}/${model}（下一条消息生效）`;
+      return `✅ 模型已切换: ${provider}/${model}`;
     },
   };
 }

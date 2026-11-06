@@ -115,7 +115,7 @@ describe('/status（有会话）', () => {
     expect(text).toContain('**会话**: 「修登录」 · `#9d2c4410` · 空闲');
     expect(text).toContain('**工作区**: repo · `D:\\repo`');
     expect(text).toContain('**模型**: deepseek/deepseek-v4');
-    expect(text).toContain('**思考强度**: 高（默认）');
+    expect(text).toContain('**思考强度**: 高');
     expect(text).toContain('**Preset**: default');
   });
 
