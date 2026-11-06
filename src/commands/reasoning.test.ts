@@ -40,9 +40,10 @@ const DEFAULT_VIEW: EffortView = {
 };
 
 function makeManager(
-  options: { view?: EffortView; outcome?: EffortSwitchOutcome } = {},
+  options: { view?: EffortView; outcome?: EffortSwitchOutcome; noSession?: boolean } = {},
 ) {
   return {
+    hasCurrentSession: vi.fn(() => !options.noSession),
     getEffortView: vi.fn(async () => options.view ?? DEFAULT_VIEW),
     selectEffort: vi.fn(async (_scope: unknown, _peer: unknown, _effort: string | undefined) =>
       options.outcome ?? { ok: true, effort: 'high' }),
@@ -103,6 +104,12 @@ describe('/reasoning（查看）', () => {
   it('模型不支持思考强度时只报原因', async () => {
     const text = await run(makeManager({ view: { defaulted: true } }));
     expect(text).toBe('⚠️ 当前模型不支持思考强度');
+  });
+
+  it('没有会话时不显示当前档位', async () => {
+    const text = await run(makeManager({ noSession: true }));
+    expect(text).not.toContain('当前:');
+    expect(text).toContain('text="/reasoning high" show="/reasoning 高 (high)"');
   });
 });
 

@@ -29,16 +29,18 @@ export function modelCommand({ manager, config, logger }: CommandDeps): Categori
           ? `${shortModelName(current.model, matched.name)} · ${current.provider}`
           : `${current.provider}/${current.model}`;
 
-        const lines: string[] = [
-          '### 🤖 模型配置',
-          '',
-          `**当前模型**: ${currentDisplay}`,
-        ];
+        const lines: string[] = ['### 🤖 模型配置'];
 
-        // 思考强度是模型配置的一部分：有档位才显示，免得给不支持思考的模型挂一行噪声
-        const effort = await manager.getEffortView(scope, peerId);
-        if (effort.current) {
-          lines.push(`**思考强度**: ${effortLabel(effort.current)}`);
+        // 没有会话时不显示「当前」：那是核心默认值，不是任何会话的状态
+        const hasSession = manager.hasCurrentSession();
+        if (hasSession) {
+          lines.push('', `**当前模型**: ${currentDisplay}`);
+
+          // 思考强度是模型配置的一部分：有档位才显示，免得给不支持思考的模型挂一行噪声
+          const effort = await manager.getEffortView(scope, peerId);
+          if (effort.current) {
+            lines.push(`**思考强度**: ${effortLabel(effort.current)}`);
+          }
         }
 
         if (models.length > 0) {
@@ -56,7 +58,7 @@ export function modelCommand({ manager, config, logger }: CommandDeps): Categori
             lines.push('', `**${provider}**`);
             for (const m of entries) {
               // 列表链接统一指向真实切换命令；当前项的「无变化」由命令自身兜底
-              const isCurrent = current?.provider === m.provider && current?.model === m.id;
+              const isCurrent = hasSession && current.provider === m.provider && current.model === m.id;
               const suffix = isCurrent ? ' ✅' : '';
               lines.push(
                 `<qqbot-cmd-input text="/model ${m.provider}/${m.id}" show="/model ${shortModelName(m.id, m.name)}${suffix}"/>`,

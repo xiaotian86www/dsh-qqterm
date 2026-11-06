@@ -34,9 +34,12 @@ export function reasoningCommand({ manager, config, logger }: CommandDeps): Cate
           return UNSUPPORTED_REASON;
         }
 
-        const current = view.current;
-        const currentLine = current ? `当前: ${optionLabel(current)}` : '当前: —';
-        const lines: string[] = ['### 🧠 思考强度', '', currentLine, ''];
+        // 没有会话就不给「当前」：那只是核心默认值
+        const hasSession = manager.hasCurrentSession();
+        const current = hasSession ? view.current : undefined;
+        const lines: string[] = ['### 🧠 思考强度'];
+        if (current) lines.push('', `当前: ${optionLabel(current)}`);
+        lines.push('');
 
         for (const option of view.options) {
           const isCurrent = current?.id === option.id;

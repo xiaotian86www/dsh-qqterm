@@ -45,6 +45,7 @@ function makeManager(
   } = {},
 ) {
   return {
+    hasCurrentSession: vi.fn(() => !options.noSession),
     // getEffectiveModel 现在总是有值：没有会话偏好时回核心默认
     getEffectiveModel: vi.fn(() => options.current ?? { provider: 'deepseek-official', model: 'deepseek-v4-flash' }),
     listAvailableModels: vi.fn(async () => options.models ?? MODELS),
@@ -95,6 +96,13 @@ describe('/model（查看）', () => {
   it('没有会话偏好时显示核心默认路由', async () => {
     const text = await run(makeManager({}));
     expect(text).toContain('**当前模型**: DeepSeek V4 Flash · deepseek-official');
+  });
+
+  it('没有会话时不显示当前模型，只列可用模型', async () => {
+    const text = await run(makeManager({ noSession: true }));
+    expect(text).not.toContain('**当前模型**');
+    expect(text).not.toContain('✅');
+    expect(text).toContain('**可用模型**');
   });
 
   it('模型列表按 provider 分组，组内只显示短名', async () => {
