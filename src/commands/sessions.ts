@@ -379,16 +379,6 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Categ
         }
       };
 
-      const loadEntries = async (): Promise<WorkspaceSession[] | string> => {
-        try {
-          return await manager.listWorkspaceSessions(scope, peerId);
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          logger?.warn(`/sessions 列举会话失败: ${message}`);
-          return `⚠️ 读取会话列表失败: ${message}`;
-        }
-      };
-
       const loadGroups = async (): Promise<WorkspaceGroup[] | string> => {
         try {
           return await manager.listWorkspaceGroups(scope, peerId);
@@ -543,29 +533,23 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Categ
               pickerPage = Number(rest[0]);
               listing = true;
             }
-            const loaded = await loadEntries();
-            if (typeof loaded === 'string') return loaded;
-            const active = loaded.filter((entry) => !entry.archived);
-
-            // 不带目标 = 页脚「归档」链接的落地页：当前工作区优先，再补其它工作区的持有会话
+            // 不带目标 = 页脚「归档」链接的落地页：列所有工作区的候选，与
+            // `/sessions all` 同源；宿主列表暂时没返回的持有会话也补进来
             if (listing) {
+              const groups = await loadGroups();
+              if (typeof groups === 'string') return groups;
               const loadedHeld = await loadHeld();
               if (typeof loadedHeld === 'string') return loadedHeld;
-              const workspace = await loadWorkspaceInfo();
-              const local = [...active];
-              const localIds = new Set(local.map((entry) => entry.id));
-              // 宿主列表暂时没返回的本工作区持有会话也补进来
-              for (const entry of loadedHeld) {
-                if (workspace !== undefined && entry.workspace === workspace.title
-                  && !localIds.has(entry.id)) {
-                  local.push(entry);
-                  localIds.add(entry.id);
-                }
-              }
-              const candidates = [...local, ...loadedHeld.filter((entry) => !localIds.has(entry.id))];
+              const fromGroups = flattenGroups(groups);
+              const known = new Set(fromGroups.map((entry) => entry.id));
+              // 组顺序沿用工作区顺序，工作区由候选视图的组标题交代
+              const candidates = [
+                ...fromGroups,
+                ...loadedHeld.filter((entry) => !known.has(entry.id)),
+              ].filter((entry) => !entry.archived);
               if (candidates.length === 0) {
-                return loaded.length === 0
-                  ? '⚠️ 这个工作区还没有会话'
+                return groups.length === 0
+                  ? '🗂 还没有任何会话'
                   : `⚠️ 没有未归档的会话 · ${commandLink('/sessions archived', '查看已归档')}`;
               }
               return renderArchivePicker(candidates, pickerPage);
@@ -798,9 +782,9 @@ function renderHeldList(
  * 渲染「选择要归档的会话」（`/sessions archive` 不带目标时的落地页）。
  *
  * 页脚里的「归档」只能填进不带目标的命令，所以这里再给一层可点击候选：
- * 点一条就把 `/sessions archive <id>` 填进输入框。按工作区分组（组标题与
- * `/sessions`、`/sessions all` 同一写法），当前工作区的候选排在最前，再补
- * 其它工作区的持有会话；最多 10 条，不编号。
+ * 点一条就把 `/sessions archive <id>` 填进输入框。候选覆盖所有工作区（与
+ * `/sessions all` 同源），按工作区分组，组标题与 `/sessions`、`/sessions all`
+ * 同一写法；最多 10 条，不编号。
  *
  * 超过一页时用页码翻页（`/sessions archive 2`），下一页仍是同一份候选清单。
  */

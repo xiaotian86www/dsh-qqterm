@@ -230,7 +230,7 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqbot/cordis.dev.yml
 | `/sessions all <页码>` | 全部会话视图的下一页；翻页后仍会重复页首会话所属的工作区标题；页脚格式相同 |
 | `/sessions resume <id>` | 把当前聊天切到该会话，历史接上继续聊（目标若已归档会顺带取消归档），工作区跟着切；目标用 8 位短 id |
 | `/sessions rename <id> <新标题>` | 修改会话名；标题会被固定，不再被自动标题覆盖。目标须已打开（先 `/sessions resume`） |
-| `/sessions archive [页码]` | 不带目标时按工作区分组列出归档候选（当前工作区的组排在最前，再补其它工作区的工作中会话），标题给 `X 个工作区 · Y 个会话`，候选不编号；只给页码时翻页，例如 `/sessions archive 2` |
+| `/sessions archive [页码]` | 不带目标时列出所有工作区的归档候选（与 `/sessions all` 同源），按工作区分组，标题给 `X 个工作区 · Y 个会话`，候选不编号；只给页码时翻页，例如 `/sessions archive 2` |
 | `/sessions archive <id>[,<id>…]` | 归档会话：从本命令与 Web 侧栏隐藏，**磁盘日志保留**，可随时取消归档；多个目标用英文逗号分隔（一次最多 10 个） |
 | `/sessions archived [页码]` | 查看已归档会话；每行带短 id 与所属工作区，点一下把 `/sessions unarchive <id>` 填进输入框；底部的翻页与返回列表也是链接 |
 | `/sessions unarchive <id>[,<id>…]` | 取消归档，让它重新出现在列表里 |

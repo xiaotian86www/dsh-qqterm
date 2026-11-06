@@ -726,6 +726,37 @@ describe('/sessions archive', () => {
     expect(text).toContain('<qqbot-cmd-input text="/sessions" show="工作中会话"/>');
   });
 
+  it('候选覆盖所有工作区，不只当前工作区', async () => {
+    const manager = makeManager({
+      listWorkspaceSessions: vi.fn(async () => []),
+      listHeldSessions: vi.fn(async () => []),
+      listWorkspaceGroups: vi.fn(async () => [
+        {
+          id: 'ws-1',
+          title: 'repo',
+          path: 'D:\\repo',
+          missing: false,
+          sessions: [entry({ id: 'session-aaaa0001', title: '甲', workspace: 'repo', workspacePath: 'D:\\repo' })],
+        },
+        {
+          id: 'ws-2',
+          title: 'docs',
+          path: 'D:\\docs',
+          missing: false,
+          sessions: [entry({ id: 'session-bbbb0002', title: '乙', workspace: 'docs', workspacePath: 'D:\\docs' })],
+        },
+      ]),
+    });
+
+    const text = await run(manager, 'archive');
+
+    expect(text).toContain('### 🗄 归档候选（2 个工作区 · 2 个会话）');
+    expect(text).toContain('**repo** · `D:\\repo`');
+    expect(text).toContain('**docs** · `D:\\docs`');
+    expect(text).toContain('text="/sessions archive #aaaa0001"');
+    expect(text).toContain('text="/sessions archive #bbbb0002"');
+  });
+
   it('候选超过一页时用页码翻页，第二页仍是同一份候选', async () => {
     const many = Array.from({ length: 13 }, (_, i) => entry({
       id: `session-${String(i).padStart(8, '0')}`,
