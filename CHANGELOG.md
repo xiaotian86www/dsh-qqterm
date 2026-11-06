@@ -26,7 +26,7 @@
 
 ### 行为变更
 
-- **模型、preset 与思考强度改为按会话隔离，行为尽量贴回宿主核心**：`/new`、`/reset` 与 `/sessions resume` 不再沿用上一个会话的选择——新会话取宿主默认（`settings.yaml` → 宿主默认模型 → `deepseek-official/deepseek-v4-flash`），已开的会话保留自己记录的选择，resume 回来仍是原样。`/model` 与 `/reasoning` 都走宿主的 `selectModel`：选择记进当前会话的 `model/selection` 事件，下一轮生效，不再 fork 重建会话，插件也不再自己存模型偏好（`~/.dsh-qqbot/model-prefs.json` 里旧的按聊天记录存的模型偏好不再生效）。宿主每次切换都会顺手把选择存成部署默认，这里不再写回——按核心行为接受这一点。`/preset` 只在 `/new` 之后、第一条消息之前可改，会话已开始就回一句 `⚠️ 会话已开始，preset 不可再改`。
+- **模型、preset 与思考强度改为按会话隔离，行为尽量贴回宿主核心**：`/new`、`/reset` 与 `/sessions resume` 不再沿用上一个会话的选择——新会话取宿主默认（`settings.yaml` → 宿主默认模型 → `deepseek-official/deepseek-v4-flash`），已开的会话保留自己记录的选择，resume 回来仍是原样。`/model` 与 `/reasoning` 都走宿主的 `selectModel`：选择记进当前会话的 `model/selection` 事件，下一轮生效，不再 fork 重建会话，插件也不再自己存模型偏好（`~/.dsh-qqbot/model-prefs.json` 里旧的按聊天记录存的模型偏好不再生效）。宿主每次切换都会顺手把选择存成部署默认，这里不再写回——按核心行为接受这一点。`/preset` 只在 `/new` 之后、第一条消息之前可改，会话已开始就回一句 `⚠️ 会话已开始，preset 不可再改`。`/reasoning` 的成功回显也统一成「下一条消息生效」，和 `/model` 一致。
 
 - **会话列表不再编号，归档候选翻页改用纯页码**：`/sessions` 与归档候选的行首只留 8 位短 id，`resume` / `rename` / `archive` 一律用短 id，不再接受「第几条」；列表按工作区分组、跨页，序号和实际行很容易对不上。归档候选翻页也从 `/sessions archive page 2` 写成 `/sessions archive 2`，只给页码就是翻页，给序号会提示改用短 id。
 

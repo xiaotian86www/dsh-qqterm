@@ -111,7 +111,7 @@ describe('/reasoning（切换）', () => {
     const manager = makeManager({ outcome: { ok: true, effort: 'max' } });
     const text = await run(manager, 'max');
     expect(manager.selectEffort).toHaveBeenCalledWith('c2c', 'owner', 'max');
-    expect(text).toBe('✅ 思考强度已切换: 最高（立即生效）');
+    expect(text).toBe('✅ 思考强度已切换: 最高（下一条消息生效）');
   });
 
   it('目标就是当前档位时返回「已是当前」', async () => {
@@ -123,7 +123,7 @@ describe('/reasoning（切换）', () => {
     const manager = makeManager({ outcome: { ok: true, effort: 'high' } });
     const text = await run(manager, 'default');
     expect(manager.selectEffort).toHaveBeenCalledWith('c2c', 'owner', undefined);
-    expect(text).toBe('✅ 思考强度已恢复默认: 高');
+    expect(text).toBe('✅ 思考强度已恢复默认: 高（下一条消息生效）');
   });
 
   it('已经是默认值时给出「已是模型默认」', async () => {

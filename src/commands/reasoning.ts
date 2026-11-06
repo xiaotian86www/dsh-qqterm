@@ -82,10 +82,10 @@ export function reasoningCommand({ manager, config, logger }: CommandDeps): Cate
       if (target === undefined) {
         return outcome.unchanged
           ? `✅ 已是模型默认思考强度${display ? `: ${display}` : ''}`
-          : `✅ 思考强度已恢复默认${display ? `: ${display}` : ''}`;
+          : `✅ 思考强度已恢复默认${display ? `: ${display}` : ''}（下一条消息生效）`;
       }
       if (outcome.unchanged) return `✅ 已是当前思考强度: ${display}`;
-      return `✅ 思考强度已切换: ${display}（立即生效）`;
+      return `✅ 思考强度已切换: ${display}（下一条消息生效）`;
     },
   };
 }
