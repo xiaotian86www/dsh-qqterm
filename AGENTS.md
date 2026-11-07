@@ -348,7 +348,18 @@ QQ 里只有一个聊天窗口，多个已获取会话的输出、提问、审�
 ## 7. 安装与 profile 隔离（联调）
 
 - **主 profile 禁止 `link:` 开发目录**：只装官方版或 `file:` 冻结快照，避免本地半成品在下次重启后直接影响线上机器人。
-- 开发调试用独立 profile（本机为 `qqdev`）：独立机器人应用 + `link:` 指向本仓库，与主 profile 并行、互不影响。
+- 开发调试用独立 profile（本机为 `qqdev`）：独立机器人应用 + **tgz 实体副本 + HMR 常开**，与主 profile 并行、互不影响。开发 profile 与主 profile 用同一套安装方式，区别只是改完代码后走 `/bot-reload` 而不是重启。
+- 开发 profile 改完代码固定走热重载：
+
+  ```bash
+  pnpm dev:reload qqdev     # build → pack（带时间戳）→ dsh plugin add
+  # 然后在 QQ 里发 /bot-reload
+  ```
+
+  `scripts/dev-reload.mjs` 负责打包命名与安装；`/bot-reload` 调宿主的 `reconcileProfile()`，只换磁盘上真变了的模块，回复会说明应用了哪些 entry——`✅ 没有需要应用的变更` 表示磁盘没变（没重新打包就发命令就是这种结果）。
+
+- 为什么开发 profile 也不用 `link:`：`pnpm build` 会直接改到已加载的包，宿主的文件监听与构建过程互相踩；tgz 是实体副本，「装包」与「重载」变成两件独立的事，失败最多影响本 profile。
+- 开发 profile 的 HMR 必须在 `cordis.patch.yml` 里保持开启（不要写 `- id: hmr / disabled: true`）；base 组合包在 profile 运行时本就启用它，只有 headless / SDK 组合包没有该服务。
 - 主 profile 换本地包：
 
   ```bash
@@ -357,9 +368,9 @@ QQ 里只有一个聊天窗口，多个已获取会话的输出、提问、审�
   dsh plugin --profile web add file:<绝对路径>/.pack/tencent-connect-dsh-qqbot-<版本>-<时间戳>.tgz
   ```
 
-  本地快照 tgz 命名规则：`.pack/tencent-connect-dsh-qqbot-<版本>-YYYYMMDD-HHmm.tgz`（例：`.pack/tencent-connect-dsh-qqbot-0.5.5-dev.1-20261105-1029.tgz`）。`pnpm pack` 默认输出不带时间戳，打完按此规则重命名；同一版本重打保留旧包，不覆盖。
+  本地快照 tgz 命名规则：`.pack/tencent-connect-dsh-qqbot-<版本>-YYYYMMDD-HHmm.tgz`（例：`.pack/tencent-connect-dsh-qqbot-0.5.5-dev.1-20261105-1029.tgz`）。`pnpm pack` 默认输出不带时间戳，打完按此规则重命名；同一版本重打保留旧包，不覆盖。`pnpm dev:reload` 已按此规则命名。
 
-  装完必须重启 dsh（`dsh plugin add` 只装包，不会通知运行中的宿主）；客户端改动还要刷新页面。`node_modules` 里是实体副本，之后仓库改动不会自动进入 profile。
+  主 profile 装完必须重启 dsh（`dsh plugin add` 只装包，不会通知运行中的宿主）；客户端改动还要刷新页面。`node_modules` 里是实体副本，之后仓库改动不会自动进入 profile。
 - 回滚：`dsh plugin --profile web add @tencent-connect/dsh-qqbot@<官方版本>`，或恢复安装前备份的 `package.json` / `pnpm-lock.yaml`。
 - profile 的 pnpm 版本要与它当前 `node_modules` 的 store 一致，而不是固定跟“创建时”的版本走：看 `~/.dsh/profiles/<name>/node_modules/.modules.yaml` 的 `packageManager` / `storeDir`（本机 web 当前为 `pnpm@12.4.2` / `store/v11`）。`dsh plugin` 调用 PATH 里的 `pnpm`，版本不匹配会报 `ERR_PNPM_UNEXPECTED_STORE`；此时换用与 `packageManager` 一致的 pnpm，不要用 `pnpm install` 迁移整个 profile 的 store。
 - 本地快照 tgz 是 profile 的依赖目标，不要删除或移动；重新打包会产生新路径。

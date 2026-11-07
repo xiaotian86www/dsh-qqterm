@@ -19,6 +19,7 @@ import {
 } from '@tencent-connect/qqbot-nodejs';
 import type { ImQQBotConfig } from '../config.ts';
 import type { SessionManager } from '../session/index.ts';
+import type { Reloader } from '../reload/index.ts';
 import type { Logger } from '../types.ts';
 import { buildCommandList } from '../commands/index.ts';
 import type { CategorizedCommand } from '../commands/types.ts';
@@ -31,6 +32,7 @@ export function setupMiddlewares(
   config: ImQQBotConfig,
   manager: SessionManager,
   logger: Logger,
+  reloader?: Reloader,
 ): CategorizedCommand[] {
   // 1. 错误兜底（最外层洋葱皮）
   bot.use(errorHandler());
@@ -64,7 +66,7 @@ export function setupMiddlewares(
   bot.use(rateLimiter());
 
   // 6. 斜杠命令（在 concurrencyGuard 之前，命令匹配后不排队直接响应）
-  const commandList = buildCommandList({ manager, config, logger, bot });
+  const commandList = buildCommandList({ manager, config, logger, bot, reloader });
   const slash = slashCommand({
     // 关闭 autoHelp：help 命令由 qqbot 注册为 /bot-help，
     // 避免 SDK 再自动注册一个无前缀的 /help 造成重复

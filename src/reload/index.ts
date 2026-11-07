@@ -1,0 +1,313 @@
+/**
+ * 插件热重载 — 把「应用 profile 磁盘变更」包装成一条命令能用的能力。
+ *
+ * 一次重载会 dispose 当前 fiber，因此这里有三条硬约束：
+ *   1. `hmr` 只按可选服务探测（`ctx.get('hmr')`），不能进 inject：
+ *      开发 profile 常把它关掉，headless 组合包也没有这个服务。
+ *   2. 命令处理器跑在即将被销毁的 fiber 里，必须先写完状态、再回复，
+ *      最后用脱离 fiber 的原生定时器调度重载。
+ *   3. 重载失败不回滚（旧 fiber 已经没了），结果只能落盘，由新 fiber 读回。
+ *
+ * 结果通知有两条路：本插件被替换时没有「旧实例补发」的机会，由新 fiber 的
+ * `ready` 读状态文件补上；本插件没被替换（磁盘上没变、或变的是别人）时不会有
+ * 新的 `ready`，只能由当前实例在重载结束后自己发。
+ *
+ * 「到底换没换」靠重载前后比各 entry 的 fiber uid：`reconcileProfile` 的返回值
+ * 里没有这个信息，而用户最想知道的恰恰是「这次到底应用了什么」。
+ *
+ * 还有一处坑：本插件若是上一轮重载装进来的，它的 async 上下文继承了宿主的
+ * `executing = true`，直接 `runExclusive` 会被判成嵌套事务 —— 所以提交前要先
+ * `executing.exit()`（见 `outsideTransaction`）。
+ */
+import type { Context } from '@deepseek-ai/cordis';
+import type { QQBot } from '@tencent-connect/qqbot-nodejs';
+import { getProfileDir } from '../shared/index.ts';
+import { sendResolvedMarkdown } from '../transport/reply-target.ts';
+import type { Logger } from '../types.ts';
+import {
+  describeReloadState,
+  errorText,
+  readReloadState,
+  reloadStatePath,
+  writeReloadState,
+  type ReloadNotice,
+  type ReloadState,
+} from './state.ts';
+
+/** 本插件在组合里的 entry id（bundle patch 与用户配置都按它定位，是兼容契约） */
+const ENTRY_ID = 'im-qqbot';
+
+/** 宿主 HMR 服务的最小接口（只用这两个方法） */
+interface HmrLike {
+  runExclusive<T>(operation: () => Promise<T> | T): Promise<T>;
+  reconcileProfile(requiredIds?: string[]): Promise<{ restartReason?: string }>;
+  /** `hmr` 内部的 AsyncLocalStorage（同一实例上，用来跳出上一轮的上下文） */
+  executing?: ExecutingLike;
+}
+
+/** AsyncLocalStorage 的最小接口：只用 exit */
+interface ExecutingLike {
+  exit<T>(callback: () => T): T;
+}
+
+/** fiber 的唯一编号：Cordis 分配的是数字，dispose 后为 null */
+type EntryUid = string | number;
+
+/** loader 条目：`entries()` 直接给 Entry 对象，id 在 `options.id` 上 */
+interface LoaderEntryLike {
+  options?: { id?: string; name?: string };
+  fiber?: { uid?: EntryUid | null };
+}
+
+/** loader 的最小接口：只用来判断「换掉了哪些 entry」 */
+interface LoaderLike {
+  entries(): Iterable<LoaderEntryLike>;
+}
+
+export interface Reloader {
+  /** 当前 profile 是否可用热重载（未启用时为 false，命令据此提示） */
+  readonly available: boolean;
+  /** 写状态并调度一次重载；调用方负责先回复用户，并传入发结果用的 bot */
+  run(notice?: ReloadNotice, bot?: QQBot): void;
+  /** 上次重载的一句话描述（`/bot-status` 用） */
+  describe(): string | undefined;
+  /** 新 fiber 的 ready：消费上一次重载留下的通知 */
+  announce(bot: QQBot): Promise<void>;
+}
+
+/** 构造参数 */
+export interface ReloaderOptions {
+  /** 状态文件路径（单测注入临时目录，避免读写真实的 ~/.dsh-qqbot） */
+  statePath?: string;
+}
+
+/** 回复之后再重载：给被动回复留出送达时间 */
+const RELOAD_DELAY_MS = 200;
+/** ready 早于结果落盘时，最多等这么久再判定「这一轮还没收尾」 */
+const SETTLE_MS = 5_000;
+/** 等待结果落盘的轮询间隔 */
+const SETTLE_POLL_MS = 400;
+/** 超过这个时长仍停在 running，视为这一轮没跑完就退了，不再补发 */
+const IN_FLIGHT_MS = 60_000;
+/** 超过这个时长的记录不再播报（避免下次正常重启时冒出陈旧通知） */
+const STALE_MS = 600_000;
+
+/** 从 ctx 取 profile 目录：profileContext 最准，退回路径探测 */
+function resolveProfileDir(ctx: Context): string | undefined {
+  const profile = (ctx as unknown as { get?: (name: string) => { dir?: string } | undefined })
+    .get?.('profileContext');
+  if (profile !== undefined && typeof profile.dir === 'string' && profile.dir !== '') return profile.dir;
+  return getProfileDir() ?? undefined;
+}
+
+/**
+ * 当前各个 entry 的 fiber uid；拿不到 loader 时返回 undefined。
+ *
+ * 注意 uid 是 Cordis 分配的**数字**（dispose 后为 null），fiber 在跑才有值：
+ * 按字符串判会一个都收不到，diff 就永远返回「什么都没变」。
+ */
+function entryUids(loader: LoaderLike | undefined): Map<string, EntryUid> | undefined {
+  if (loader === undefined) return undefined;
+  try {
+    const uids = new Map<string, EntryUid>();
+    for (const entry of loader.entries()) {
+      const id = entry.options?.id;
+      const uid = entry.fiber?.uid;
+      if (typeof id !== 'string') continue;
+      if (typeof uid === 'number' || typeof uid === 'string') uids.set(id, uid);
+    }
+    // 一个都读不到说明形状又变了，别拿空表冒充「没有变更」
+    return uids.size === 0 ? undefined : uids;
+  } catch {
+    // loader 在重载期间可能已经失效，判不出就交给调用方兜底
+    return undefined;
+  }
+}
+
+/** 被替换的 entry：uid 变了或整个消失了；两边有一边读不到时返回 undefined */
+function changedEntries(
+  before: Map<string, EntryUid> | undefined,
+  after: Map<string, EntryUid> | undefined,
+): string[] | undefined {
+  if (before === undefined || after === undefined) return undefined;
+  const changed: string[] = [];
+  for (const [id, uid] of after) {
+    const previous = before.get(id);
+    if (previous !== undefined && previous !== uid) changed.push(id);
+  }
+  for (const id of before.keys()) {
+    if (!after.has(id)) changed.push(id);
+  }
+  return changed;
+}
+
+/** 本插件自己有没有被换掉：true=换了，false=还在，undefined=判不出来 */
+function selfReplaced(
+  before: Map<string, EntryUid> | undefined,
+  after: Map<string, EntryUid> | undefined,
+): boolean | undefined {
+  if (before === undefined || after === undefined) return undefined;
+  return before.get(ENTRY_ID) !== after.get(ENTRY_ID);
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolveDelay) => {
+    const timer = setTimeout(resolveDelay, ms);
+    timer.unref?.();
+  });
+}
+
+/**
+ * 在「不在 HMR 事务里」的上下文执行。
+ *
+ * 本插件若是上一轮重载装进来的，它整个 async 上下文都继承了 `executing = true`
+ * （fiber 是在事务里创建的），再调 `runExclusive` 就会被判成嵌套事务。
+ * `exit()` 临时清掉这个继承值，新事务才开得起来。
+ */
+function outsideTransaction<T>(hmr: HmrLike, operation: () => Promise<T>): Promise<T> {
+  const executing = hmr.executing;
+  if (executing === undefined || typeof executing.exit !== 'function') return operation();
+  return Promise.resolve(executing.exit(operation));
+}
+
+/** 提交一次重载；拿不到 executing 又撞上嵌套时，退化成直接调用（此时已在事务上下文里） */
+async function reloadOnce(hmr: HmrLike): Promise<{ restartReason?: string }> {
+  try {
+    return await outsideTransaction(hmr, () => hmr.runExclusive(async () => hmr.reconcileProfile()));
+  } catch (err) {
+    if (err instanceof Error && err.message.includes('cannot be nested')) return await hmr.reconcileProfile();
+    throw err;
+  }
+}
+
+export function createReloader(ctx: Context, logger: Logger, options?: ReloaderOptions): Reloader {
+  const services = ctx as unknown as { get?: (name: string) => unknown };
+  const hmr = services.get?.('hmr') as HmrLike | undefined;
+  // 提前抓 loader：本插件被换掉之后旧 ctx 就不可再访问，而 loader 属于宿主
+  const loader = services.get?.('loader') as LoaderLike | undefined;
+  const statePath = options?.statePath ?? reloadStatePath(resolveProfileDir(ctx));
+
+  /** 发结果通知；成功才清 notify，失败留给下一个 ready 重试 */
+  const deliver = async (bot: QQBot, state: ReloadState): Promise<void> => {
+    const notice = state.notify;
+    if (notice === undefined || notice.targetId === '') return;
+    if (Date.now() - state.startedAt > STALE_MS) {
+      writeReloadState(statePath, { ...state, notify: undefined }, logger);
+      return;
+    }
+    const text = resultText(state);
+    if (text === undefined) return;
+    try {
+      await sendResolvedMarkdown(
+        bot,
+        { scope: 'c2c', targetId: notice.targetId, msgId: notice.msgId, eventId: notice.eventId },
+        text,
+      );
+      writeReloadState(statePath, { ...state, notify: undefined }, logger);
+    } catch (err) {
+      logger.warn(`热重载结果通知失败: ${errorText(err)}`);
+    }
+  };
+
+  return {
+    available: hmr !== undefined,
+
+    run(notice?: ReloadNotice, bot?: QQBot): void {
+      const startedAt = Date.now();
+      const before = entryUids(loader);
+      writeReloadState(statePath, {
+        phase: 'running',
+        startedAt,
+        ...(notice === undefined ? {} : { notify: notice }),
+      }, logger);
+      if (hmr === undefined) return;
+
+      // 脱离当前 fiber：命令处理器返回后这个 fiber 就会被 dispose
+      const timer = setTimeout(() => {
+        void reloadOnce(hmr)
+          .then(async (result): Promise<void> => {
+            const after = entryUids(loader);
+            const replaced = changedEntries(before, after);
+            const done: ReloadState = {
+              phase: 'done',
+              startedAt,
+              ...(notice === undefined ? {} : { notify: notice }),
+              ...(replaced === undefined ? {} : { replaced }),
+              ...(result.restartReason === undefined ? {} : { restartReason: result.restartReason }),
+            };
+            writeReloadState(statePath, done, logger);
+            // 自己没被换掉就没有新的 ready，只能由当前实例补发
+            if (bot !== undefined && selfReplaced(before, after) !== true) await deliver(bot, done);
+          })
+          .catch((err: unknown): void => {
+            const after = entryUids(loader);
+            const replaced = changedEntries(before, after);
+            const failed: ReloadState = {
+              phase: 'failed',
+              startedAt,
+              ...(notice === undefined ? {} : { notify: notice }),
+              ...(replaced === undefined ? {} : { replaced }),
+              error: errorText(err),
+            };
+            writeReloadState(statePath, failed, logger);
+            logger.warn(`插件热重载失败: ${errorText(err)}`);
+            if (bot !== undefined && selfReplaced(before, after) !== true) void deliver(bot, failed);
+          });
+      }, RELOAD_DELAY_MS);
+      timer.unref?.();
+    },
+
+    describe(): string | undefined {
+      return describeReloadState(readReloadState(statePath, logger));
+    },
+
+    async announce(bot: QQBot): Promise<void> {
+      let state = readReloadState(statePath, logger);
+      if (state === undefined) return;
+
+      if (state.phase === 'running') {
+        // ready 可能早于结果落盘：等结果写下来；仍在 running 说明这一轮没跑完就退了
+        if (Date.now() - state.startedAt > IN_FLIGHT_MS) return;
+        for (let waited = 0; waited < SETTLE_MS; waited += SETTLE_POLL_MS) {
+          await delay(SETTLE_POLL_MS);
+          const settled = readReloadState(statePath, logger);
+          if (settled === undefined) return;
+          if (settled.phase !== 'running') {
+            state = settled;
+            break;
+          }
+        }
+        if (state.phase === 'running') return;
+      }
+      await deliver(bot, state);
+    },
+  };
+}
+
+/**
+ * 结果文案：一行结论，必要时再补一行下一步。
+ *
+ * 三种结论分别对应「换掉了谁」「什么都没换」「判不出来」，别把它们合成一句话：
+ * 用户要靠这个区分「命令跑了但白跑」和「真的有新代码生效」。
+ */
+function resultText(state: ReloadState): string | undefined {
+  if (state.phase === 'failed') {
+    return state.error === undefined
+      ? '❌ 重载失败，重启 dsh 恢复'
+      : `❌ 重载失败: ${state.error}\n重启 dsh 恢复。`;
+  }
+  if (state.phase !== 'done') return undefined;
+  const applied = describeApplied(state.replaced);
+  if (state.restartReason === undefined) return applied;
+  return `${applied}\n⚠️ 部分改动需重启 dsh 才生效`;
+}
+
+/** 「应用了什么」：区分「有替换」与「没有任何变化」 */
+function describeApplied(replaced: string[] | undefined): string {
+  if (replaced === undefined) return '✅ 已应用变更';
+  if (replaced.length === 0) return '✅ 没有需要应用的变更';
+  const names = replaced.slice(0, 3).join(' · ');
+  return replaced.length > 3
+    ? `✅ 已应用变更: ${names} 等 ${replaced.length} 个`
+    : `✅ 已应用变更: ${names}`;
+}

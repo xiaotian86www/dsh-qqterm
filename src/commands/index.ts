@@ -23,6 +23,7 @@ import { statusCommand } from './status.ts';
 import { retryCommand } from './retry.ts';
 import { helpCommand } from './help.ts';
 import { syncCommand } from './sync.ts';
+import { reloadCommand } from './reload.ts';
 import { pingCommand, versionCommand, stopCommand, meCommand } from './misc.ts';
 
 /**
@@ -51,6 +52,7 @@ export function buildCommandList(deps: CommandDeps): CategorizedCommand[] {
     versionCommand(deps),
     meCommand(deps),
     statusCommand(deps),
+    reloadCommand(deps),
   ];
 
   // help / sync 需要访问完整列表（含自身），通过闭包惰性引用

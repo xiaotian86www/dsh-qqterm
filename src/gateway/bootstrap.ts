@@ -30,6 +30,7 @@ import { registerSendFileTool, type MediaSenderLike } from '../media/send-file-t
 import { DeliverablesDeliverer } from '../transport/deliverables.ts';
 import { formatPanelSummary, syncCommandPanels, type PanelSyncResult } from '../features/command-panel.ts';
 import { syncCommandMenu, type MenuSyncResult } from '../features/command-menu.ts';
+import { createReloader } from '../reload/index.ts';
 
 /**
  * interaction 统一分发器：按 button_data 的顶层 `t` 判别字段，路由到对应
@@ -54,6 +55,8 @@ export async function bootstrapGateway(
   logger: Logger,
 ): Promise<void> {
   const manager = new SessionManager(ctx, agents, config, logger);
+  // 热重载能力：hmr 是可选服务，profile 未启用时命令只提示、不做任何事
+  const reloader = createReloader(ctx, logger);
 
   // ── 初始化 QQ Bot SDK ──
   const userAgent = buildUserAgent();
@@ -69,7 +72,7 @@ export async function bootstrapGateway(
   logger.info(`QQBot SDK initialized (UA: ${userAgent})`);
 
   // ── 中间件链 ──
-  const commands = setupMiddlewares(bot, config, manager, logger);
+  const commands = setupMiddlewares(bot, config, manager, logger, reloader);
 
   // ── 入站：经过中间件链后的消息交给 dsh agent ──
   bot.on('message', async (mCtx: MiddlewareContext) => {
@@ -186,6 +189,11 @@ export async function bootstrapGateway(
 
   bot.on('ready', () => {
     console.log(`[im-qqbot] Bot ready! appId=${config.appId}`);
+
+    // 上一次 /bot-reload 的结果只能靠状态文件带到这个 fiber：ready 后补发一条被动回复
+    void reloader.announce(bot).catch((err: unknown) => {
+      logger.warn(`热重载结果播报失败: ${err instanceof Error ? err.message : String(err)}`);
+    });
 
     // 指令面板：ready 后把当前命令推到私聊全局面板。
     // 每次 ready（含重连）都同步一次，面板被外部删掉也能自愈；失败只记 warn，
