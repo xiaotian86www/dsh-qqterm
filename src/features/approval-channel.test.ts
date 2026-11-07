@@ -31,9 +31,9 @@ function createSender(sent: SentMessage[]) {
 
 const sessionKey = (scope: ChatScope, peerId: string): string => `qqbot:app:${scope}:${peerId}`;
 
-/** 默认开放模式（不校验）；allowlist 模式用 makeConfig('allowlist', [...]) */
-function makeConfig(c2cMode: 'open' | 'allowlist' | 'disabled' = 'open', c2cAllow: string[] = []): ApprovalChannelConfigLike {
-  return { access: { c2cMode, c2cAllow } };
+/** 默认绑定 peer-qq；传空字符串模拟未配置 owner */
+function makeConfig(owner = 'peer-qq'): ApprovalChannelConfigLike {
+  return { access: { owner } };
 }
 
 function makeRecord(key: string, scope: ChatScope = 'c2c'): ApprovalSessionRecordLike {
@@ -228,7 +228,7 @@ describe('ApprovalChannel.install', () => {
         findBySessionId: (id) => (id === 'sess-qq' ? makeRecord(sessionKey('c2c', 'peer-qq')) : undefined),
       }),
       createSender(sent),
-      makeConfig('allowlist', ['peer-qq']),
+      makeConfig('peer-qq'),
       createLogger(),
     );
     const { handler } = installAndCapture(ch, sent);
@@ -253,14 +253,14 @@ describe('ApprovalChannel.install', () => {
     await expect(second).resolves.toBe('allowed-once');
   });
 
-  it('allowlist 模式：点击者身份缺失（无 user_openid）拒绝（fail-closed）', async () => {
+  it('绑定用户：点击者身份缺失（无 user_openid）拒绝（fail-closed）', async () => {
     const sent: SentMessage[] = [];
     const ch = new ApprovalChannel(
       createManager({
         findBySessionId: (id) => (id === 'sess-qq' ? makeRecord(sessionKey('c2c', 'peer-qq')) : undefined),
       }),
       createSender(sent),
-      makeConfig('allowlist', ['peer-qq']),
+      makeConfig('peer-qq'),
       createLogger(),
     );
     const { handler } = installAndCapture(ch, sent);
@@ -275,14 +275,14 @@ describe('ApprovalChannel.install', () => {
     await expect(p).resolves.toBe('cancelled');
   });
 
-  it('allowlist 模式：私聊卡片转发给他人点击无效', async () => {
+  it('绑定用户：私聊卡片转发给他人点击无效', async () => {
     const sent: SentMessage[] = [];
     const ch = new ApprovalChannel(
       createManager({
         findBySessionId: (id) => (id === 'sess-qq' ? makeRecord(sessionKey('c2c', 'peer-qq')) : undefined),
       }),
       createSender(sent),
-      makeConfig('allowlist', ['peer-qq']),
+      makeConfig('peer-qq'),
       createLogger(),
     );
     const { handler } = installAndCapture(ch, sent);
@@ -357,7 +357,7 @@ describe('ApprovalChannel.cancelPending', () => {
     await expect(p).resolves.toBe('cancelled');
   });
 
-  it('fails closed as unavailable when sending fails', async () => {
+  it('QQ 投递失败时把审批交回链上其他通道，不吞掉请求', async () => {
     const ch = new ApprovalChannel(
       createManager({ findBySessionId: (id) => (id === 'sess-qq' ? makeRecord(sessionKey('c2c', 'peer-qq')) : undefined) }),
       { sendMarkdown: vi.fn(async () => { throw new Error('network down'); }) },
@@ -366,7 +366,8 @@ describe('ApprovalChannel.cancelPending', () => {
     );
     const { handler } = installAndCapture(ch, []);
 
-    await expect(handler(makeRequest({ id: 'sess-qq' }), () => Promise.resolve('unavailable' as ApprovalOutcome)))
-      .resolves.toBe('unavailable');
+    const delegated = vi.fn(async () => 'allowed-once' as ApprovalOutcome);
+    await expect(handler(makeRequest({ id: 'sess-qq' }), delegated)).resolves.toBe('allowed-once');
+    expect(delegated).toHaveBeenCalledTimes(1);
   });
 });

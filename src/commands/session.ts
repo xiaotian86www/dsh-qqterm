@@ -24,8 +24,7 @@ function num(n: number): string {
  * 带参数：在指定工作区开新会话。
  *
  * 参数先解析再动会话：路径写错不该把当前会话弄丢。换工作区等于换 agent 能读写
- * 的目录，所以带参数时要求白名单（`access.c2cAllow`），不带参数的 `/new` 不受
- * 限制。
+ * 的目录，所以带参数时只允许唯一绑定用户；不带参数的 `/new` 不受限制。
  */
 export function newCommand({ manager, config }: CommandDeps): CategorizedCommand {
   return {
@@ -51,13 +50,14 @@ export function newCommand({ manager, config }: CommandDeps): CategorizedCommand
         return '✅ 已开启新会话';
       }
 
-      // 带参数 = 换工作区（= 换 agent 能读写的目录）：只允许私聊 + 白名单
+      // 带参数 = 换工作区（= 换 agent 能读写的目录）：只允许唯一绑定用户
       const senderId = cmdCtx.message.senderId;
+      const owner = config.access.owner.trim();
       const allowed = scope === 'c2c'
-        && senderId !== undefined
-        && config.access.c2cAllow.includes(senderId);
+        && owner !== ''
+        && senderId === owner;
       if (!allowed) {
-        return '⚠️ `/new <工作区>` 只在私聊 + 白名单（access.c2cAllow）可用；直接 `/new` 不受限制。';
+        return '⚠️ `/new <工作区>` 仅限绑定用户可用；直接 `/new` 不受限制。';
       }
 
       // 先解析目标再动会话：路径写错不该把当前会话弄丢

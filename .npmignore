@@ -9,3 +9,4 @@ docs/
 *.tsbuildinfo
 node_modules/
 .pack/
+.tmp/

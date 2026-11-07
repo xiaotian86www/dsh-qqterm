@@ -355,6 +355,27 @@ export interface SwitchSessionOutcome {
 }
 
 /**
+ * 启动时恢复上次会话的结果。
+ *
+ * - none：没有待恢复的会话（从未聊过、指针指向的会话已不在盘上、或没有可用的回复目标）；
+ * - ok：已接回，record 与指针一致；
+ * - failed：盘上还在但这次没接回来（另一个客户端占着写句柄 / 宿主报错）。
+ *   not-found 一律归入 none：那只说明会话已不存在，没有可重试的东西。
+ */
+export type RestoreOutcome =
+  | { kind: 'none' }
+  | { kind: 'ok'; sessionId: string }
+  | {
+    kind: 'failed';
+    sessionId: string;
+    /** 上次交互的用户，失败通知发给他 */
+    targetId: string;
+    /** 另一个进程/客户端持有写句柄，等它释放后可以重试 */
+    locked?: boolean;
+    message?: string;
+  };
+
+/**
  * 向指定会话发 prompt / 回答的结果。
  *
  * - sent：作为普通 prompt 交给目标会话；

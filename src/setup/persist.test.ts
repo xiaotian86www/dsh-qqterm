@@ -64,7 +64,7 @@ describe('persistCredentialsToProfile', () => {
     expect(entryIds(after)).toEqual(['insert', 'ui-settings', 'im-qqbot', 'llm-deepseek']);
   });
 
-  it('userOpenid 覆盖 c2cAllow 并切到白名单模式（旧扫码者不残留），保留其他配置', () => {
+  it('userOpenid 覆盖为唯一 owner（旧扫码者与旧模式键不残留），保留其他配置', () => {
     writeFileSync(patchPath, [
       '- id: im-qqbot',
       '  config:',
@@ -79,10 +79,11 @@ describe('persistCredentialsToProfile', () => {
     expect(persistCredentialsToProfile({ ...credentials, userOpenid: 'qr-user' }, dir, log)).toBe(true);
 
     const after = readFileSync(patchPath, 'utf8');
-    expect(after).toContain('c2cMode: allowlist');
+    expect(after).toContain('owner: qr-user');
     expect(after).toContain('streaming: false');
-    expect(after).toContain('qr-user');
     expect(after).not.toContain('old-owner');
+    expect(after).not.toContain('c2cMode');
+    expect(after).not.toContain('c2cAllow');
   });
 
   it('userOpenid 相同时幂等（不重复）', () => {
@@ -97,15 +98,16 @@ describe('persistCredentialsToProfile', () => {
 
     const after = readFileSync(patchPath, 'utf8');
     expect((after.match(/qr-user/g) ?? []).length).toBe(1);
+    expect(after).not.toContain('c2cAllow');
   });
 
-  it('无 access 配置时新建（白名单模式 + 仅扫码者）', () => {
+  it('无 access 配置时新建（仅扫码者）', () => {
     expect(persistCredentialsToProfile({ ...credentials, userOpenid: 'qr-user' }, dir, log)).toBe(true);
 
     const after = readFileSync(patchPath, 'utf8');
-    expect(after).toContain('c2cMode: allowlist');
-    expect(after).toContain('c2cAllow');
-    expect(after).toContain('qr-user');
+    expect(after).toContain('owner: qr-user');
+    expect(after).not.toContain('c2cMode');
+    expect(after).not.toContain('c2cAllow');
   });
 
   it('文件不存在时安全重建（新条目）', () => {
@@ -196,11 +198,11 @@ describe('updateProfileConfig', () => {
   it('最小写入：只合并提交键，不触碰凭据字段', () => {
     writeFileSync(patchPath, SHARED_PATCH, 'utf8');
 
-    expect(updateProfileConfig({ directPrompt: '新提示词', access: { c2cMode: 'allowlist' } }, dir, log)).toBe(true);
+    expect(updateProfileConfig({ directPrompt: '新提示词', access: { owner: 'u1' } }, dir, log)).toBe(true);
 
     const after = readFileSync(patchPath, 'utf8');
     expect(after).toContain('directPrompt: 新提示词');
-    expect(after).toContain('c2cMode: allowlist');
+    expect(after).toContain('owner: u1');
     expect(after).toContain('appId: old-app');
     expect(entryIds(after)).toEqual(['insert', 'ui-settings', 'im-qqbot', 'llm-deepseek']);
   });

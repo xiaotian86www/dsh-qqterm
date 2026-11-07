@@ -6,7 +6,7 @@
  *   （对应底层 agent cancel，通用能力）
  */
 import type { CommandDeps, CategorizedCommand } from './types.ts';
-import { getScopePeer, PLUGIN_VERSION, sendMarkdownChunked } from '../shared/index.ts';
+import { getScopePeer, pluginVersion, sendMarkdownChunked } from '../shared/index.ts';
 
 /** /bot-ping — 测试当前 dsh 与 QQ 连接的网络延迟 */
 export function pingCommand(): CategorizedCommand {
@@ -52,7 +52,7 @@ export function versionCommand({ manager }: CommandDeps): CategorizedCommand {
     handler: () => {
       const current = manager.getEffectiveModel('c2c', '');
       const modelInfo = current ? `${current.provider}/${current.model}` : '宿主默认';
-      return `🤖 dsh-qqbot v${PLUGIN_VERSION} · model: ${modelInfo}`;
+      return `🤖 dsh-qqbot v${pluginVersion()} · model: ${modelInfo}`;
     },
   };
 }
@@ -60,7 +60,7 @@ export function versionCommand({ manager }: CommandDeps): CategorizedCommand {
 /**
  * /bot-me — 查看发送者身份标识
  *
- * 返回 user openid（对应 access.c2cAllow 的名单 key）。
+ * 返回 user openid（对应 access.owner 的唯一绑定用户）。
  */
 export function meCommand({ config }: CommandDeps): CategorizedCommand {
   return {

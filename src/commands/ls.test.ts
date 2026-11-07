@@ -26,7 +26,7 @@ const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi
 const config = ConfigSchema({
   appId: 'app',
   appSecret: 'secret',
-  access: { c2cAllow: ['user1'] },
+  access: { owner: 'user1' },
 } as ImQQBotConfig);
 
 let root = '';

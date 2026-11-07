@@ -111,6 +111,20 @@ export class ModelResolver {
   }
 
   /**
+   * 上次和这个聊天交互的 QQ 用户（启动恢复时的回复目标）
+   */
+  getTarget(sessionKey: string): string | undefined {
+    return this.prefs.getTarget(sessionKey);
+  }
+
+  /**
+   * 记下这个聊天的最后交互用户（值不变时不写盘）
+   */
+  setTarget(sessionKey: string, targetId: string): void {
+    this.prefs.setTarget(sessionKey, targetId);
+  }
+
+  /**
    * 模型支持的思考强度档位
    *
    * 宿主没挂 llm 服务、provider 不提供元数据、或模型本身不支持思考时返回

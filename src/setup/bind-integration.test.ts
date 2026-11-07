@@ -182,7 +182,7 @@ describe('绑定链路 × 真实 persist 落盘（#53 回归）', () => {
       showToolResults: true,
       debug: true,
       directPrompt: '私聊提示词',
-      access: { c2cMode: 'allowlist', c2cAllow: ['u1'] },
+      access: { owner: 'u1' },
     })), res);
 
     expect(res.statusCode).toBe(200);
@@ -190,7 +190,7 @@ describe('绑定链路 × 真实 persist 落盘（#53 回归）', () => {
     for (const expected of [
       'streaming: false', 'showToolResults: true', 'debug: true',
       'directPrompt: 私聊提示词',
-      'c2cMode: allowlist', 'c2cAllow:', '- u1',
+      'owner: u1',
     ]) {
       expect(after).toContain(expected);
     }
@@ -286,7 +286,7 @@ describe('绑定链路 × 真实 persist 落盘（#53 回归）', () => {
     expect(readFileSync(patchPath, 'utf8')).toBe(before);
   });
 
-  it('allowlist 大列表可保存（仅受 512KB body 上限约束）', async () => {
+  it('唯一绑定用户可保存并落盘', async () => {
     dir = mkdtempSync(join(tmpdir(), 'im-qqbot-bind-allow-'));
     patchPath = join(dir, 'cordis.patch.yml');
     writeFileSync(patchPath, SHARED_PATCH, 'utf8');
@@ -295,11 +295,11 @@ describe('绑定链路 × 真实 persist 落盘（#53 回归）', () => {
     const routes = registerRealRoutes(() => null);
     const res = fakeRes();
     await invoke(routes.get(BIND_CONFIG_PATH), fakeReq('POST', JSON.stringify({
-      access: { c2cMode: 'allowlist', c2cAllow: Array.from({ length: 5000 }, (_v, i) => `openid-${i}`) },
+      access: { owner: 'openid-owner' },
     })), res);
 
     expect(res.statusCode).toBe(200);
-    expect(readFileSync(patchPath, 'utf8')).toContain('openid-4999');
+    expect(readFileSync(patchPath, 'utf8')).toContain('owner: openid-owner');
     expectSharedPreserved(patchPath);
   });
 

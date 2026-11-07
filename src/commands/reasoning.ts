@@ -5,7 +5,7 @@
  * 读与写都交给宿主（sessionController / agentDefaultModel），插件不存偏好。
  */
 import type { CommandDeps, CategorizedCommand } from './types.ts';
-import { commandAllowlistAuth } from './auth.ts';
+import { ownerOnlyAuth } from './auth.ts';
 import { getScopePeer, sendMarkdownChunked } from '../shared/index.ts';
 import { effortLabel } from '../model/effort-label.ts';
 import type { EffortOption } from '../model/types.ts';
@@ -19,7 +19,7 @@ export function reasoningCommand({ manager, config, logger }: CommandDeps): Cate
     category: 'agent',
     scope: 'all',
     // 管理类指令：与 /model 同一权限面
-    authorized: commandAllowlistAuth(config, logger),
+    authorized: ownerOnlyAuth(config, logger),
     description: '查看或切换当前会话的思考强度（用法: /reasoning [档位]）',
     panelDesc: '切换思考强度',
     handler: async (cmdCtx) => {
@@ -34,9 +34,8 @@ export function reasoningCommand({ manager, config, logger }: CommandDeps): Cate
           return UNSUPPORTED_REASON;
         }
 
-        // 没有会话就不给「当前」：那只是核心默认值
-        const hasSession = manager.hasCurrentSession();
-        const current = hasSession ? view.current : undefined;
+        // 有会话看会话自己的值；没有会话时这里是核心默认档位（新建会话会用它）
+        const current = view.current;
         const lines: string[] = ['### 🧠 思考强度'];
         if (current) lines.push('', `当前: ${optionLabel(current)}`);
         lines.push('');

@@ -18,7 +18,7 @@ const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi
 const config = ConfigSchema({
   appId: 'app',
   appSecret: 'secret',
-  access: { c2cAllow: ['user1'] },
+  access: { owner: 'user1' },
 } as ImQQBotConfig);
 
 const CURRENT = 'session-3f2a9b1c-1111-2222-3333-444455556666';

@@ -22,7 +22,7 @@ vi.mock('../shared/send-helper.ts', () => ({
 const config = ConfigSchema({
   appId: 'app',
   appSecret: 'secret',
-  access: { c2cMode: 'open', c2cAllow: ['owner'] },
+  access: { owner: 'owner' },
 } as ImQQBotConfig);
 const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
 
@@ -69,22 +69,22 @@ beforeEach(() => {
 });
 
 describe('/permission 命令声明与鉴权', () => {
-  it('私聊可用，但鉴权是严格白名单（不看 c2cMode）', () => {
+  it('私聊可用，鉴权只认唯一绑定用户', () => {
     const command = permissionCommand({ manager: makeManager(), config, logger });
     expect(command.name).toBe('permission');
     expect(command.scope).toBe('all');
     const authorized = command.authorized as (ctx: { message: { senderId?: string } }) => boolean | string;
-    // open 模式也要求名单内：这是唯一能关沙箱的指令
+    // 这是唯一能关沙箱的指令，始终按 owner 判定
     expect(authorized({ message: { senderId: 'stranger' } })).toBeTypeOf('string');
     expect(authorized({ message: { senderId: 'owner' } })).toBe(true);
     expect(authorized({ message: {} })).toBeTypeOf('string');
   });
 
-  it('空名单在 open 模式下也拒绝（fail-closed）', () => {
+  it('owner 为空时拒绝（fail-closed）', () => {
     const empty = ConfigSchema({
       appId: 'app',
       appSecret: 'secret',
-      access: { c2cMode: 'open', c2cAllow: [] },
+      access: { owner: '' },
     } as ImQQBotConfig);
     const command = permissionCommand({ manager: makeManager(), config: empty, logger });
     const authorized = command.authorized as (ctx: { message: { senderId?: string } }) => boolean | string;
@@ -111,11 +111,11 @@ describe('/permission（查看）', () => {
     expect(text).toContain('### 🛡️ 权限预设');
   });
 
-  it('没有会话时也不显示当前行，不把部署默认值当当前', async () => {
+  it('没有会话时也照常展示当前值（部署默认预设），写法不变', async () => {
     const text = await run(makeManager({ noSession: true, current: 'auto' }));
-    expect(text).not.toContain('当前:');
-    expect(text).not.toContain('/permission 自动审查 (auto) · EXP ✅');
-    expect(text).toContain('text="/permission auto"');
+    expect(text).toContain('当前: 自动审查 (auto)');
+    // 部署默认值同样标 ✅：新建会话会用它（auto 不再追加 EXP）
+    expect(text).toContain('/permission 自动审查 (auto) ✅');
   });
 
   it('部署没有配置权限预设时如实说没有', async () => {

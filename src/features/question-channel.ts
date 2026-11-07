@@ -90,6 +90,10 @@ export interface QuestionChannelSenderLike {
 
 export interface QuestionChannelConfigLike {
   askTimeoutMs: number;
+  /** 唯一绑定用户；空 = 拒绝所有按钮点击 */
+  access: {
+    owner: string;
+  };
 }
 
 // ── 错误语义（对齐 dsh-user-questions 的 UserQuestionError code 约定） ──
@@ -292,6 +296,10 @@ export class QuestionChannel {
   public handleInteraction(event: InteractionEvent): boolean {
     const peerId = event.user_openid;
     if (!peerId) return false;
+
+    // 按钮只认唯一绑定用户；未绑定或身份不匹配直接忽略
+    const owner = this.config.access.owner.trim();
+    if (owner === '' || peerId !== owner) return false;
 
     const data = event.data?.resolved?.button_data;
     if (!data) return false;

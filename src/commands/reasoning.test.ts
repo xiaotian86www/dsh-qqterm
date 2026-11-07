@@ -22,7 +22,7 @@ vi.mock('../shared/send-helper.ts', () => ({
 const config = ConfigSchema({
   appId: 'app',
   appSecret: 'secret',
-  access: { c2cMode: 'open', c2cAllow: ['owner'] },
+  access: { owner: 'owner' },
 } as ImQQBotConfig);
 const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
 
@@ -106,10 +106,11 @@ describe('/reasoning（查看）', () => {
     expect(text).toBe('⚠️ 当前模型不支持思考强度');
   });
 
-  it('没有会话时不显示当前档位', async () => {
+  it('没有会话时也照常展示当前档位（核心默认值），写法不变', async () => {
     const text = await run(makeManager({ noSession: true }));
-    expect(text).not.toContain('当前:');
-    expect(text).toContain('text="/reasoning high" show="/reasoning 高 (high)"');
+    expect(text).toContain('当前: 高 (high)');
+    // 核心默认档位同样标 ✅：新建会话会用它
+    expect(text).toContain('text="/reasoning high" show="/reasoning 高 (high) ✅"');
   });
 });
 

@@ -121,10 +121,11 @@ When several private chats talk at once, the reply goes to the chat of the lates
 
 ### Access control (access)
 
+The bot serves exactly one user: every other private chat is rejected, and group chats are unsupported. QR binding writes the scanning user as the owner automatically; for manual binding or changing the owner, fill in the OpenID in settings (`/bot-me` shows it).
+
 | Config | Type | Default | Description |
 |------|------|--------|------|
-| `access.c2cMode` | `open`/`allowlist`/`disabled` | `open` | Direct-chat access mode |
-| `access.c2cAllow` | string[] | `[]` | Direct-chat allowlist (user openid) |
+| `access.owner` | string | `""` | The only allowed user (QQ OpenID); empty rejects everyone |
 
 ### Rich media (media)
 
@@ -165,14 +166,14 @@ When several private chats talk at once, the reply goes to the chat of the lates
 | `/ls` | List the subdirectories of a directory; click a row to go deeper |
 | `/model` | View or switch model |
 | `/reasoning` (alias `/think`) | View or switch reasoning effort (levels depend on the model); `default` restores the model default |
-| `/preset` | View or switch agent preset (applies to new sessions) |
-| `/permission` | View or switch the permission preset (sandbox mode + approval policy, effective immediately; allowlisted users only) |
+| `/preset` | View or switch the current agent preset |
+| `/permission` | View or switch the permission preset (sandbox mode + approval policy, effective immediately; the bound user only) |
 | `/cost` | View token usage of the current session |
 | `/status` | View session status: session name and short id / workspace / model / reasoning effort / context / tokens |
 | `/stop` | Abort the current generation; `/stop all` aborts every acquired session that is generating |
 | `/bot-ping` | Network latency test (transport & processing time) |
 | `/bot-version` | View version info |
-| `/bot-me` | View your OpenID (for access allowlists) |
+| `/bot-me` | View your OpenID (to fill in `access.owner`) |
 | `/bot-status` | View current session status (brief: session name and short id / model / reasoning effort / preset / message count; see `/status` for the full view) |
 | `/bot-help` | View all commands |
 
@@ -198,7 +199,7 @@ A workspace *is* the session's `cwd`. It is written into the session header when
 
 - A workspace is matched by **title**, **directory name** (case-insensitive, unique prefix), or an **absolute path**; the next message creates the session in the new directory and the workspace shows up in the host sidebar. A missing directory (or a file) is rejected without leaving a half-applied state, and `/new <path>` validates the target *before* touching the session, so a typo never costs you the current one.
 - Not sure how to spell the path? Use `/ls`: it lists the subdirectories of the current workspace and every row is clickable to go one level deeper. Rows always fill an absolute path, so descending never drifts.
-- Same permission surface as `/sessions`: **private chat + allowlist** (`access.c2cAllow`) only — switching workspace means changing the directories the agent may touch. A plain `/new` is unrestricted.
+- Same permission surface as `/sessions`: **private chat + the single bound user** (`access.owner`) only — switching workspace means changing the directories the agent may touch. A plain `/new` is unrestricted.
 
 ### Session management (`/sessions`)
 
@@ -223,7 +224,7 @@ Notes:
 - **Handle rule**: every row shows an 8-char short id (like `#3f2a9b1c`; the `#` is optional) that works from any view; an **index only means a row of the `/sessions` held list**, and it stays continuous across groups and pages. `all` / `archived` / the archive picker show no indexes.
 - **Paging**: multi-page views use `上一页 · 第 1/2 页 · 下一页` in the footer, omitting the missing direction; the page number is not in the title and "N more" is not shown.
 - Status words appear only in the held list: `生成中` (agent running), `空闲` (held but idle); a current pointer that has not been acquired yet shows `待恢复`. Other views only mark acquired sessions with `📌` (QQ holds it), with no current marker and no status.
-- Private chat only, and the operator must be in the allowlist (`access.c2cAllow`) — titles and archive state touch other chats' data; with no allowlist configured the command is disabled (`/bot-me` shows your OpenID).
+- Private chat only, and the operator must be the single bound user (`access.owner`) — titles and archive state touch other chats' data; with no owner configured the command is disabled (`/bot-me` shows your OpenID).
 - Archiving goes through the host `workspaceRegistry.archiveSession` and only writes the registry-global archive set — **no file is deleted**. This plugin offers no hard delete; clean up on disk from the Web side or by hand.
 - Archiving goes through the host `workspaceRegistry.archiveSession`; `workspaceRegistry` is part of the plugin's `inject`, so a profile missing it keeps the plugin inactive rather than exposing a half-working command.
 - Archiving disposes the session's agent in this process; if it is the current session, the chat mapping is also repointed to a new session — an archived session is rejected by the host `agent/pre-step` gate, so a chat left bound to it would stop getting replies.

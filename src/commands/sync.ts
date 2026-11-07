@@ -8,7 +8,7 @@
  * 所以合在一个命令里手动重推。启动时的自动同步见 bootstrap。
  */
 import type { CommandDeps, CategorizedCommand } from './types.ts';
-import { commandAllowlistAuth } from './auth.ts';
+import { ownerOnlyAuth } from './auth.ts';
 import { formatPanelSummary, syncCommandPanels } from '../features/command-panel.ts';
 import { syncCommandMenu } from '../features/command-menu.ts';
 
@@ -48,7 +48,7 @@ export function syncCommand(
     category: 'qqbot',
     scope: 'all',
     description: '同步指令面板与自定义菜单',
-    authorized: commandAllowlistAuth(config, logger),
+    authorized: ownerOnlyAuth(config, logger),
     handler: async () => {
       if (!bot) return '⚠️ 同步失败: 机器人未就绪';
 

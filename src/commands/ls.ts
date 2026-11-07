@@ -15,7 +15,7 @@
  * 第二层就会跑偏，而绝对路径点进任何一层都稳。
  *
  * 与 `/new <工作区>` 同一权限面：列目录等于让人看见 agent 能碰的文件系统，只允许
- * 私聊 + 白名单（`access.c2cAllow`）。
+ * 唯一绑定用户（`access.owner`）。
  */
 import type { CommandDeps, CategorizedCommand } from './types.ts';
 import type { ChatScope } from '../types.ts';

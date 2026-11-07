@@ -29,9 +29,8 @@
  * 足够满足「从列表里拿掉」的需求。
  */
 import type { CommandDeps, CategorizedCommand } from './types.ts';
-import type { ImQQBotConfig } from '../config.ts';
+import { ownerOnlyAuth } from './auth.ts';
 import { getScopePeer, formatRelativeTime, sendMarkdownChunked, shortSessionId } from '../shared/index.ts';
-import type { Logger } from '../types.ts';
 import type { ArchiveSessionOutcome, WorkspaceGroup, WorkspaceSession } from '../session/index.ts';
 
 /** 每页展示多少条（也是单次最多处理的目标数） */
@@ -69,27 +68,12 @@ function attrValue(raw: string): string {
 }
 
 /**
- * 会话管理鉴权。
+ * 会话管理鉴权：与聊天同一权限面，只允许唯一绑定用户。
  *
- * 归档会让会话从所有人的列表里消失（Web 侧栏同样受影响），列表里还能看到别的
- * 聊天的会话标题，因此要求操作者在 `access.c2cAllow` 名单内；没配名单时一律拒绝
- * （fail-closed），哪怕 `c2cMode` 是 open——open 是「谁能和 bot 聊天」，不是
- * 「谁能改动别人的会话」。
+ * 归档会让会话从列表里消失，列表里还能看到会话标题，因此未绑定用户一律拒绝
+ * （fail-closed），直接复用命令层的 ownerOnlyAuth。
  */
-export function sessionAdminAuth(
-  config: ImQQBotConfig,
-  logger?: Logger,
-): (ctx: { message: { senderId?: string } }) => boolean | string {
-  return (ctx) => {
-    const allow = config.access.c2cAllow;
-    const senderId = ctx.message.senderId;
-    if (senderId !== undefined && allow.includes(senderId)) return true;
-    logger?.warn(`im-qqbot: /sessions denied: sender=${senderId ?? '(missing)'} allowlist=${allow.length}`);
-    return allow.length === 0
-      ? '⚠️ 会话管理需要先配置白名单\n用 /bot-me 查 OpenID，加入 access.c2cAllow'
-      : '⚠️ 会话管理仅限白名单用户\n用 /bot-me 查 OpenID，加入 access.c2cAllow';
-  };
-}
+export const sessionAdminAuth = ownerOnlyAuth;
 
 const USAGE = [
   '### 🗂 会话管理',
@@ -342,7 +326,7 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Categ
   return {
     name: ['sessions', 'session'],
     category: 'agent',
-    // 会话里可能含其它 chat 的历史标题，归档会影响所有人的列表：只允许私聊 + 白名单
+    // 会话里可能含其它 chat 的历史标题，归档会影响所有人的列表：只允许私聊 + 唯一绑定用户
     scope: 'c2c',
     authorized: sessionAdminAuth(config, logger),
     description: '列出工作中会话、恢复、改名、归档',

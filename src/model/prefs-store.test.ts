@@ -117,3 +117,32 @@ describe('PrefsStore 并发安全（E3）', () => {
     expect(readdirSync(dir).filter((f) => f.includes('.corrupted.'))).toHaveLength(1);
   });
 });
+
+describe('PrefsStore 回复目标', () => {
+  it('写入后重启可读回（启动恢复用）', () => {
+    store().setTarget('qqbot:app:chat', 'openid-1');
+    expect(store().getTarget('qqbot:app:chat')).toBe('openid-1');
+  });
+
+  it('值不变不写盘（每条消息都调 touch，只有换人时才该写）', () => {
+    const a = store();
+    a.setTarget('k', 'openid-1');
+    const writes = vi.spyOn(PrefsStore.prototype as unknown as { write: () => void }, 'write');
+    a.setTarget('k', 'openid-1');
+    expect(writes).not.toHaveBeenCalled();
+    writes.mockRestore();
+  });
+
+  it('与旧文件兼容：没有 targets 段时 load 不报错，其它段照常读', () => {
+    writeFileSync(path, JSON.stringify({ sessionIds: { k: 's1' }, dirs: { k: 'D:/x' } }), 'utf8');
+    const a = store();
+    expect(a.getSessionId('k')).toBe('s1');
+    expect(a.getDirectory('k')).toBe('D:/x');
+    expect(a.getTarget('k')).toBeUndefined();
+
+    a.setTarget('k', 'openid-1'); // 写入时补上 targets 段，且不丢旧条目
+    const disk = JSON.parse(readFileSync(path, 'utf8'));
+    expect(disk.sessionIds.k).toBe('s1');
+    expect(disk.targets.k).toBe('openid-1');
+  });
+});

@@ -5,11 +5,10 @@
  * 之后的新会话仍回到 profile 的默认权限预设。
  *
  * 这是唯一能把沙箱关掉的指令（`auto` / `danger-full-access` 都不启用沙箱），
- * 所以鉴权比 `/model`、`/preset` 更严：不看 c2cMode，一律要求发送者在
- * `access.c2cAllow` 里（见 auth.ts 的 permissionCommandAuth）。
+ * 因此和其他管理命令一样只允许唯一绑定用户执行（见 auth.ts 的 ownerOnlyAuth）。
  */
 import type { CommandDeps, CategorizedCommand } from './types.ts';
-import { permissionCommandAuth } from './auth.ts';
+import { ownerOnlyAuth } from './auth.ts';
 import { getScopePeer, sendMarkdownChunked } from '../shared/index.ts';
 import type { PermissionPresetEntry } from '../session/index.ts';
 
@@ -37,9 +36,9 @@ export function permissionCommand({ manager, config, logger }: CommandDeps): Cat
   return {
     name: 'permission',
     category: 'agent',
-    // 管理类指令：私聊可用，但必须过白名单（见文件头）
+    // 管理类指令：只允许唯一绑定用户
     scope: 'all',
-    authorized: permissionCommandAuth(config, logger),
+    authorized: ownerOnlyAuth(config, logger),
     description: '查看或切换权限预设',
     usage: [
       '/permission：查看当前权限与可选项',
@@ -54,8 +53,9 @@ export function permissionCommand({ manager, config, logger }: CommandDeps): Cat
         return '⚠️ 当前部署没有权限预设';
       }
 
-      // 没有会话就不给「当前」：那只是宿主的部署默认值
-      const current = manager.hasCurrentSession() ? manager.getPermissionPreset(scope, peerId) : undefined;
+      // 有会话看会话自己的值；没有会话时这里是宿主的部署默认值（新建会话会用它）
+      // 沿用「当前」的写法，不另造标签
+      const current = manager.getPermissionPreset(scope, peerId);
 
       // 无参数：一行现状 + 可点击切换的预设
       if (!args) {

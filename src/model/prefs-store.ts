@@ -25,12 +25,15 @@ interface PrefsFile {
   sessionIds: Record<string, string>;
   /** sessionKey → 该聊天当前所在的工作目录（换会话后跟着会话走，/new 保留） */
   dirs: Record<string, string>;
+  /** sessionKey → 上次和这个聊天交互的 QQ 用户 openid（重启后主动推送用） */
+  targets: Record<string, string>;
 }
 
 /** 各段的删除墓碑（key 集合），合并时用于压住磁盘上的旧值 */
 interface Tombstones {
   sessionIds: Set<string>;
   dirs: Set<string>;
+  targets: Set<string>;
 }
 
 export class PrefsStore {
@@ -38,10 +41,13 @@ export class PrefsStore {
   private sessionIds = new Map<string, string>();
   /** per-peer 当前工作目录（内存态） */
   private dirs = new Map<string, string>();
+  /** per-peer 上次交互的用户 openid（内存态） */
+  private targets = new Map<string, string>();
   /** 本进程显式删除的 key（防止并发合并把删除复活） */
   private deleted: Tombstones = {
     sessionIds: new Set(),
     dirs: new Set(),
+    targets: new Set(),
   };
   /** 隔离偏好文件路径 */
   private readonly prefsPath: string;
@@ -103,6 +109,25 @@ export class PrefsStore {
     return deleted;
   }
 
+  // ── 回复目标操作 ──
+
+  getTarget(sessionKey: string): string | undefined {
+    return this.targets.get(sessionKey);
+  }
+
+  /**
+   * 记下「这个聊天最后跟谁说过话」。
+   *
+   * 启动时恢复会话要用它做回复目标：那时没有入站消息，拿不到 openid。
+   * 值没变就不写盘——touch 每条消息都会调一次，写盘只该发生在换人时。
+   */
+  setTarget(sessionKey: string, targetId: string): void {
+    if (this.targets.get(sessionKey) === targetId) return;
+    this.targets.set(sessionKey, targetId);
+    this.deleted.targets.delete(sessionKey);
+    this.write();
+  }
+
   // ── 私有方法 ──
 
   private load(): void {
@@ -121,6 +146,13 @@ export class PrefsStore {
         for (const [key, dir] of Object.entries(data.dirs)) {
           if (typeof dir === 'string' && dir) {
             this.dirs.set(key, dir);
+          }
+        }
+      }
+      if (data.targets && typeof data.targets === 'object') {
+        for (const [key, targetId] of Object.entries(data.targets)) {
+          if (typeof targetId === 'string' && targetId) {
+            this.targets.set(key, targetId);
           }
         }
       }
@@ -187,6 +219,7 @@ export class PrefsStore {
     return {
       sessionIds: pick(this.sessionIds, disk?.sessionIds, this.deleted.sessionIds),
       dirs: pick(this.dirs, disk?.dirs, this.deleted.dirs),
+      targets: pick(this.targets, disk?.targets, this.deleted.targets),
     };
   }
 

@@ -1,25 +1,29 @@
 import { describe, it, expect } from 'vitest';
 import { ConfigSchema } from './config.ts';
 
-describe('ConfigSchema 默认值（内层外层默认必须对齐：#94-1 不变量）', () => {
-  it('完全省略 access → c2cMode open（子 schema 默认生效）', () => {
+describe('ConfigSchema 访问控制（唯一绑定用户）', () => {
+  it('完全省略 access → owner 为空（拒绝所有人）', () => {
     const cfg = ConfigSchema({});
-    expect(cfg.access.c2cMode).toBe('open');
-    expect(cfg.access.c2cAllow).toEqual([]);
+    expect(cfg.access.owner).toBe('');
   });
 
-  it('access: {} → 子字段默认填充 open', () => {
+  it('access: {} → owner 默认空字符串', () => {
     const cfg = ConfigSchema({ access: {} });
-    expect(cfg.access.c2cMode).toBe('open');
+    expect(cfg.access.owner).toBe('');
   });
 
-  it('access 空值（YAML access: 后无内容）→ open', () => {
+  it('access 空值（YAML access: 后无内容）→ owner 为空', () => {
     const cfg = ConfigSchema({ access: null });
-    expect(cfg.access.c2cMode).toBe('open');
+    expect(cfg.access.owner).toBe('');
   });
 
-  it('显式配置不受默认影响', () => {
-    const cfg = ConfigSchema({ access: { c2cMode: 'allowlist' } });
-    expect(cfg.access.c2cMode).toBe('allowlist');
+  it('显式配置 owner 原样保留', () => {
+    const cfg = ConfigSchema({ access: { owner: 'u1' } });
+    expect(cfg.access.owner).toBe('u1');
+  });
+
+  it('旧版 c2cMode/c2cAllow 不再放行，owner 仍为空', () => {
+    const cfg = ConfigSchema({ access: { c2cMode: 'open', c2cAllow: ['u1'] } });
+    expect(cfg.access.owner).toBe('');
   });
 });

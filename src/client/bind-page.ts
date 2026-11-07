@@ -14,7 +14,7 @@
  * 运行时仅依赖 react（dsh 客户端平台种子表提供）；宿主通信走同源 fetch，
  * Desktop 下由壳的 IPC 桥自动附加 Host 认证转发。
  */
-import { createElement, useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { createElement, useCallback, useEffect, useRef, useState, type FormEvent, type ReactElement, type ReactNode } from 'react';
 import {
   BIND_MANUAL_PATH,
   BIND_REFRESH_PATH,
@@ -248,13 +248,13 @@ export function useBindState(enabled = true): { state: BindStateWire | null; gon
 
 interface ManualResult { ok: boolean; message?: string; error?: string }
 
-/** 手动提交凭据（填写 / 更换共用） */
-async function submitManualCredentials(appId: string, appSecret: string): Promise<ManualResult> {
+/** 手动提交凭据（填写 / 更换共用）；owner 留空表示保留现有绑定用户 */
+async function submitManualCredentials(appId: string, appSecret: string, owner: string): Promise<ManualResult> {
   try {
     const res = await fetch(BIND_MANUAL_PATH, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ appId, appSecret }),
+      body: JSON.stringify({ appId, appSecret, owner }),
     });
     const body = (await res.json().catch(() => ({}))) as ManualResult;
     if (res.ok && body.ok) return { ok: true, message: body.message };
@@ -273,6 +273,7 @@ async function submitManualCredentials(appId: string, appSecret: string): Promis
 function ManualForm({ initialAppId }: { initialAppId?: string }): ReactNode {
   const [appId, setAppId] = useState(initialAppId ?? '');
   const [appSecret, setAppSecret] = useState('');
+  const [owner, setOwner] = useState('');
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<ManualResult | null>(null);
 
@@ -286,11 +287,11 @@ function ManualForm({ initialAppId }: { initialAppId?: string }): ReactNode {
       return;
     }
     setBusy(true);
-    void submitManualCredentials(trimmedId, trimmedSecret).then((outcome) => {
+    void submitManualCredentials(trimmedId, trimmedSecret, owner.trim()).then((outcome) => {
       setResult(outcome);
       setBusy(false);
     });
-  }, [appId, appSecret, busy]);
+  }, [appId, appSecret, owner, busy]);
 
   if (result !== null && result.ok) {
     return createElement('div', { className: 'imqb-status' },
@@ -298,7 +299,7 @@ function ManualForm({ initialAppId }: { initialAppId?: string }): ReactNode {
         createElement('div', { className: 'imqb-status-icon' }, '✅'),
         createElement('div', { className: 'imqb-status-meta' },
           createElement('p', { className: 'imqb-status-title' }, result.message ?? '凭据已保存'),
-          createElement('p', { className: 'imqb-status-sub' }, '插件将自动重载；稍后即可开始对话'),
+          createElement('p', { className: 'imqb-status-sub' }, '插件将自动重载；未填允许的用户时需在设置里补填 OpenID'),
         ),
       ),
     );
@@ -320,6 +321,15 @@ function ManualForm({ initialAppId }: { initialAppId?: string }): ReactNode {
         placeholder: initialAppId === undefined ? 'QQ 机器人 AppSecret' : '输入新的 AppSecret（不回显）',
         onChange: (event) => { setAppSecret(event.currentTarget.value); },
         autoComplete: 'new-password',
+      }),
+    ),
+    createElement('label', { className: 'imqb-field' },
+      '允许的用户',
+      createElement('input', {
+        className: 'imqb-input', value: owner,
+        placeholder: 'QQ OpenID（可留空，之后在设置里填）',
+        onChange: (event) => { setOwner(event.currentTarget.value); },
+        autoComplete: 'off', spellCheck: false,
       }),
     ),
     result !== null && !result.ok
@@ -452,15 +462,15 @@ function UnboundView({ state }: { state: Extract<BindStateWire, { phase: 'waitin
 }
 
 /** 依据宿主相位渲染面板主体（可注入共享轮询结果避免双计时器） */
-export function BindPanelBody(props?: {
+export function BindPanelBody(props: {
   state?: BindStateWire | null;
   gone?: boolean;
   recheck?: () => void;
-}): ReactNode {
+} = {}): ReactElement {
   usePanelStyles();
   const injected = props?.state !== undefined;
   const internal = useBindState(!injected);
-  const state = injected ? props.state : internal.state;
+  const state = injected ? (props.state ?? null) : internal.state;
   const gone = injected ? (props.gone ?? false) : internal.gone;
   const recheck = injected ? (props.recheck ?? (() => {})) : internal.recheck;
   // 扫码成功的连接过渡场景需要保留最后一帧二维码：waiting 相位持续记录，

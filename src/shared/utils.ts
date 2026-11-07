@@ -12,10 +12,12 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const PLUGIN_ROOT = resolve(__dirname, '../..');
 
-/** 插件版本号（从 package.json 读取，供 help/version 等展示真实版本） */
-export const PLUGIN_VERSION = readPluginVersion();
-
-function readPluginVersion(): string {
+/**
+ * 插件版本号（从 package.json 现读，供 help/version 等展示真实版本）
+ *
+ * 不做模块级缓存：热重载时本模块可能未被驱逐，常量会一直停在旧版本。
+ */
+export function pluginVersion(): string {
   try {
     const pkgPath = resolve(PLUGIN_ROOT, 'package.json');
     const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as { version?: string };
@@ -31,7 +33,7 @@ function readPluginVersion(): string {
  * 格式: dsh-qqbot/{version} (Node/{nodeVersion}; {platform})
  */
 export function buildUserAgent(): string {
-  return `dsh-qqbot/${PLUGIN_VERSION} (Node/${process.versions.node}; ${os.platform()})`;
+  return `dsh-qqbot/${pluginVersion()} (Node/${process.versions.node}; ${os.platform()})`;
 }
 
 /**

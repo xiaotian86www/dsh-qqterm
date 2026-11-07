@@ -4,7 +4,7 @@
  * UI 复刻 DSW 通用设置（settings-form 原语）的视觉风格：
  * 左对齐设置列、0.5px 行分隔、label 13px/500、控件右置；
  * Switch 为 36×20 aria-checked 结构（thumb translateX 动画）；
- * 三值选择用分段控件（滑动指示器按段数/索引的 CSS 变量定位）；
+ * 文字类配置用单行输入；
  * 保存按钮为 DSW 反色主按钮（label-primary 底 + bg-layer-3 字）。
  *
  * 数据流：GET /qqbot/im-qqbot/config 回显当前生效配置（appSecret
@@ -14,13 +14,12 @@
  * 字段策略：只开放用户必要的配置；工作目录跟随会话（不再是一项配置）；
  * 超时与性能调优类字段走 profile patch / 环境变量。
  */
-import { createElement, useCallback, useEffect, useState, type CSSProperties, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
+import { createElement, useCallback, useEffect, useState, type ChangeEvent, type FormEvent, type ReactElement, type ReactNode } from 'react';
 import { BIND_CONFIG_PATH } from '../shared/bind-protocol.ts';
 
 /** 访问控制配置（与 src/config.ts 的 AccessControlConfig 对应的局部投影） */
 interface AccessControlWire {
-  c2cMode: 'open' | 'allowlist' | 'disabled';
-  c2cAllow: string[];
+  owner: string;
 }
 
 /** GET 回显的生效配置（appSecret 已剔除） */
@@ -88,34 +87,7 @@ function useConfigPanelStyles(): void {
 .imqb2-input:focus { outline: none; border-color: var(--dsw-alias-state-business-primary); }
 .imqb2-input:disabled { color: var(--dsw-alias-label-tertiary); cursor: default; }
 .imqb2-textarea { height: auto; min-height: 68px; padding: 8px 12px; resize: vertical; line-height: 1.5; }
-/* 分段控件（官方 SegmentedControl 复刻：指示器按段数/索引定位） */
-.imqb2-seg {
-  position: relative; display: inline-grid; grid-auto-flow: column; grid-auto-columns: 1fr;
-  gap: 2px; padding: 4px; border-radius: var(--dsw-radius-md, 8px);
-  background: var(--dsw-alias-interactive-bg-hover);
-}
-.imqb2-seg-indicator {
-  position: absolute; top: 4px; left: 4px;
-  width: calc((100% - 8px - 2px * (var(--imqb2-seg-count) - 1)) / var(--imqb2-seg-count));
-  height: calc(100% - 8px);
-  border: 0; border-radius: var(--dsw-radius-sm, 6px);
-  background: var(--dsw-alias-bg-layer-1);
-  box-shadow: var(--dsw-elevation-soft, 0 1px 3px rgba(0,0,0,.08));
-  transform: translateX(calc(var(--imqb2-seg-index) * (100% + 2px)));
-  transition: transform 160ms ease;
-  pointer-events: none;
-}
-.imqb2-seg-tab {
-  box-sizing: border-box; position: relative; z-index: 1; height: 28px; padding: 0 16px;
-  border: 0; border-radius: var(--dsw-radius-sm, 6px); background: transparent;
-  color: var(--dsw-alias-label-secondary); font: inherit; font-size: 13px; line-height: 20px;
-  font-weight: 500; white-space: nowrap; cursor: pointer; transition: color 120ms ease;
-}
-.imqb2-seg-tab:hover, .imqb2-seg-tab[aria-selected='true'] { color: var(--dsw-alias-label-primary); }
-.imqb2-seg-tab:focus-visible {
-  outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
-  outline-offset: -2px;
-}
+/* 分段控件样式已移除：访问控制只保留唯一用户输入 */
 /* 底栏（官方 SettingsForm.footer 复刻） */
 .imqb2-footer { display: flex; align-items: center; gap: 8px; padding-top: 16px; }
 .imqb2-note { flex: 1; min-width: 0; margin: 0; font-size: 12px; line-height: 1.5; color: var(--dsw-alias-label-tertiary); }
@@ -147,25 +119,6 @@ function Switch({ checked, label, onChange }: {
     className: 'imqb2-switch',
     onClick: () => { onChange(!checked); },
   }, createElement('span', { className: 'imqb2-switch-thumb' }));
-}
-
-/** 访问模式分段选择（官方 SegmentedControl 结构：CSS 变量定位滑动指示器） */
-function Segmented({ value, options, onChange, label }: {
-  value: AccessMode; options: ReadonlyArray<{ value: AccessMode; label: string }>;
-  onChange: (next: AccessMode) => void; label: string;
-}): ReactNode {
-  const index = Math.max(0, options.findIndex((o) => o.value === value));
-  const trackStyle = {
-    '--imqb2-seg-count': options.length,
-    '--imqb2-seg-index': index,
-  } as CSSProperties;
-  return createElement('div', { className: 'imqb2-seg', role: 'tablist', 'aria-label': label, style: trackStyle },
-    createElement('span', { className: 'imqb2-seg-indicator' }),
-    options.map((o) => createElement('button', {
-      key: o.value, type: 'button', role: 'tab', 'aria-selected': o.value === value,
-      className: 'imqb2-seg-tab', onClick: () => { onChange(o.value); },
-    }, o.label)),
-  );
 }
 
 /** 开关行（label 左 + Switch 右 + 可选 help） */
@@ -209,28 +162,6 @@ function AreaRow({ label, help, value, rows, onChange }: {
   );
 }
 
-/** 访问模式分段选择行 */
-function SegmentedRow({ label, help, value, options, onChange }: {
-  label: string; help?: string; value: AccessMode;
-  options: ReadonlyArray<{ value: AccessMode; label: string }>; onChange: (next: AccessMode) => void;
-}): ReactNode {
-  return createElement('div', { className: 'imqb2-field' },
-    createElement('div', { className: 'imqb2-head' },
-      createElement('span', { className: 'imqb2-label' }, label),
-      createElement(Segmented, { value, options, onChange, label }),
-    ),
-    help === undefined ? null : createElement('p', { className: 'imqb2-hint' }, help),
-  );
-}
-
-type AccessMode = AccessControlWire['c2cMode'];
-
-const MODE_OPTIONS: ReadonlyArray<{ value: AccessMode; label: string }> = [
-  { value: 'open', label: '所有人' },
-  { value: 'allowlist', label: '白名单' },
-  { value: 'disabled', label: '禁用' },
-];
-
 /** 深比较（表单值与初始回显值的 dirty 判断） */
 function shallowEqual(a: unknown, b: unknown): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
@@ -242,7 +173,7 @@ function shallowEqual(a: unknown, b: unknown): boolean {
  * 保存仅提交变更键（服务端按白名单合并），保存成功后提示
  * HMR 重载语义（进行中的机器人会话将重置）。
  */
-export function ConfigPanel(props?: { bindPhase?: string }): ReactNode {
+export function ConfigPanel(props: { bindPhase?: string } = {}): ReactElement {
   useConfigPanelStyles();
   const [initial, setInitial] = useState<ConfigWire | null>(null);
   const [form, setForm] = useState<ConfigWire | null>(null);
@@ -284,14 +215,10 @@ export function ConfigPanel(props?: { bindPhase?: string }): ReactNode {
     }
     if (Object.keys(changed).length === 0) return;
 
-    // 白名单编辑期间保留原始换行/空行（textarea 可正常回车），提交时才规范化。
-    // 只提交两字段：旧版本残留在 profile 里的群聊字段就此不再被写回。
+    // 只提交 owner 一个字段：旧版本残留的群聊 / 模式字段就此不再被写回。
     if (changed.access !== undefined) {
       const a = changed.access as AccessControlWire;
-      changed.access = {
-        c2cMode: a.c2cMode,
-        c2cAllow: a.c2cAllow.map((s) => s.trim()).filter(Boolean),
-      };
+      changed.access = { owner: a.owner.trim() };
     }
 
     setBusy(true);
@@ -324,21 +251,17 @@ export function ConfigPanel(props?: { bindPhase?: string }): ReactNode {
   }
 
   const dirty = (Object.keys(form) as Array<keyof ConfigWire>).some((key) => !shallowEqual(form[key], initial[key]));
-  const access: AccessControlWire = form.access ?? { c2cMode: 'open', c2cAllow: [] };
+  const access: AccessControlWire = form.access ?? { owner: '' };
 
   return createElement('form', { className: 'imqb2-form', onSubmit: submit },
     createElement('div', { className: 'imqb2-group-title' }, '服务范围'),
-    createElement(SegmentedRow, {
-      label: '私聊', value: access.c2cMode, options: MODE_OPTIONS,
-      onChange: (v) => { patch('access', { c2cMode: v, c2cAllow: access.c2cAllow }); },
+    createElement(FieldRow, {
+      label: '允许的用户',
+      help: '只允许这一个 QQ 用户；留空则拒绝所有人',
+      placeholder: 'QQ OpenID',
+      value: access.owner,
+      onChange: (v) => { patch('access', { owner: v }); },
     }),
-    access.c2cMode === 'allowlist'
-      ? createElement(AreaRow, {
-          label: '私聊白名单', help: '请输入用户 openid，多个请换行输入', rows: 3,
-          value: access.c2cAllow.join('\n'),
-          onChange: (v) => { patch('access', { c2cMode: access.c2cMode, c2cAllow: v.split('\n').map((s) => s.trim()) }); },
-        })
-      : null,
 
     createElement('div', { className: 'imqb2-group-title' }, '基础设置'),
     createElement(SwitchRow, {

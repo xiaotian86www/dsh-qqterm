@@ -19,7 +19,7 @@ import { QuestionChannel } from '../features/question-channel.ts';
 import { ApprovalChannel, type ApprovalChannelContext } from '../features/approval-channel.ts';
 import { RetryChannel } from '../features/retry-channel.ts';
 import { decodeButtonData } from '../features/button-utils.ts';
-import { buildUserAgent } from '../shared/index.ts';
+import { buildUserAgent, shortSessionId } from '../shared/index.ts';
 import { decorateSessionMessage, sessionTitleOf } from '../transport/session-source.ts';
 import type { ImQQBotConfig } from '../config.ts';
 import type { Logger } from '../types.ts';
@@ -189,6 +189,23 @@ export async function bootstrapGateway(
 
   bot.on('ready', () => {
     console.log(`[im-qqbot] Bot ready! appId=${config.appId}`);
+
+    // 启动恢复：把上次的会话接回来，避免「/status 说未建立、下一条消息又能接回」。
+    // 失败时主动推一条带重试入口的消息——重启后没有入站消息，只能发给持久化的
+    // 最后交互用户（/sessions resume 是幂等的，重试安全）。
+    void manager.restoreCurrentSession()
+      .then(async (outcome) => {
+        if (outcome.kind !== 'failed') return;
+        const reason = outcome.locked ? '另一个客户端正在使用' : '宿主报错';
+        const text = [
+          `⚠️ 上次的会话没能恢复（${reason}）`,
+          `<qqbot-cmd-input text="/sessions resume #${shortSessionId(outcome.sessionId)}" show="重试恢复"/>`,
+        ].join('\n');
+        await sendResolvedMarkdown(bot, { scope: 'c2c', targetId: outcome.targetId }, text);
+      })
+      .catch((err: unknown) => {
+        logger.warn(`启动恢复会话失败: ${err instanceof Error ? err.message : String(err)}`);
+      });
 
     // 上一次 /bot-reload 的结果只能靠状态文件带到这个 fiber：ready 后补发一条被动回复
     void reloader.announce(bot).catch((err: unknown) => {

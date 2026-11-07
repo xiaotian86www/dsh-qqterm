@@ -120,9 +120,8 @@ function stringSchema(name: string): (value: unknown) => unknown {
 const MAX_MANUAL_BODY_BYTES = 4096;
 
 /**
- * config 请求体大小上限：对齐 Schema 的业务边界——白名单字符串字段单个
- * 允许 20000 字符（全中文 UTF-8 约 60KB），allowlist 不设条目上限（openid
- * 短标识，512KB 约容纳 1.4 万条）。上限只是反滥用闸门，语义校验在 Schema。
+ * config 请求体大小上限：access 只剩一个 openid 字符串，512KB 仅作为反滥用
+ * 闸门，语义校验在 Schema。
  */
 const MAX_CONFIG_BODY_BYTES = 512 * 1024;
 
@@ -257,7 +256,7 @@ async function readJsonBody(req: IncomingMessage, maxBytes: number = MAX_MANUAL_
   return JSON.parse(Buffer.concat(chunks).toString('utf8'));
 }
 
-/** 校验手动提交的凭据形态（不打印内容） */
+/** 校验手动提交的凭据形态（不打印内容）；owner 可选，留空则拒绝所有人 */
 function parseCredentials(body: unknown): SetupCredentials | null {
   if (typeof body !== 'object' || body === null) return null;
   const record = body as Record<string, unknown>;
@@ -265,7 +264,9 @@ function parseCredentials(body: unknown): SetupCredentials | null {
   const appSecret = typeof record.appSecret === 'string' ? record.appSecret.trim() : '';
   if (appId.length === 0 || appSecret.length === 0) return null;
   if (appId.length > 128 || appSecret.length > 256) return null;
-  return { appId, appSecret };
+  const owner = typeof record.owner === 'string' ? record.owner.trim() : '';
+  if (owner.length > 256) return null;
+  return owner === '' ? { appId, appSecret } : { appId, appSecret, userOpenid: owner };
 }
 
 async function handleManual(

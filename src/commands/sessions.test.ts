@@ -995,21 +995,20 @@ describe('sessionAdminAuth', () => {
   const withAllow = ConfigSchema({
     appId: 'app',
     appSecret: 'secret',
-    access: { c2cMode: 'open', c2cAllow: ['user1'] },
+    access: { owner: 'user1' },
   } as ImQQBotConfig);
 
-  it('名单内用户放行（open 模式也一样）', () => {
+  it('绑定用户放行', () => {
     expect(sessionAdminAuth(withAllow)({ message: { senderId: 'user1' } })).toBe(true);
   });
 
-  it('名单外用户拒绝', () => {
+  it('其他用户拒绝', () => {
     expect(sessionAdminAuth(withAllow)({ message: { senderId: 'stranger' } })).not.toBe(true);
   });
 
-  it('未配置名单时 fail-closed，并提示用 /bot-me 查 openid', () => {
+  it('未配置 owner 时 fail-closed', () => {
     const denied = sessionAdminAuth(config)({ message: { senderId: 'user1' } });
-    expect(denied).not.toBe(true);
-    expect(String(denied)).toContain('/bot-me');
+    expect(denied).toBe('⚠️ 无权限执行此命令');
   });
 });
 

@@ -2,7 +2,7 @@
  * 模型命令：/model — 查看或切换模型
  */
 import type { CommandDeps, CategorizedCommand } from './types.ts';
-import { commandAllowlistAuth } from './auth.ts';
+import { ownerOnlyAuth } from './auth.ts';
 import { getScopePeer, sendMarkdownChunked } from '../shared/index.ts';
 import { effortLabel } from '../model/effort-label.ts';
 
@@ -10,9 +10,9 @@ export function modelCommand({ manager, config, logger }: CommandDeps): Categori
   return {
     name: 'model',
     category: 'agent',
-    // 管理类指令：私聊可用，但仅限白名单用户（与 /preset 同构）
+    // 管理类指令：私聊可用，但仅限绑定用户（与 /preset 同构）
     scope: 'all',
-    authorized: commandAllowlistAuth(config, logger),
+    authorized: ownerOnlyAuth(config, logger),
     description: '查看或切换当前会话的模型（用法: /model [provider/model]）',
     handler: async (cmdCtx) => {
       const { scope, peerId } = getScopePeer(cmdCtx);
@@ -31,16 +31,14 @@ export function modelCommand({ manager, config, logger }: CommandDeps): Categori
 
         const lines: string[] = ['### 🤖 模型配置'];
 
-        // 没有会话时不显示「当前」：那是核心默认值，不是任何会话的状态
-        const hasSession = manager.hasCurrentSession();
-        if (hasSession) {
-          lines.push('', `**当前模型**: ${currentDisplay}`);
+        // 有会话看会话自己的值；没有会话时这里是核心默认值（新建会话会用它），
+        // 沿用「当前」的写法，不另造标签
+        lines.push('', `**当前模型**: ${currentDisplay}`);
 
-          // 思考强度是模型配置的一部分：有档位才显示，免得给不支持思考的模型挂一行噪声
-          const effort = await manager.getEffortView(scope, peerId);
-          if (effort.current) {
-            lines.push(`**思考强度**: ${effortLabel(effort.current)}`);
-          }
+        // 思考强度是模型配置的一部分：有档位才显示，免得给不支持思考的模型挂一行噪声
+        const effort = await manager.getEffortView(scope, peerId);
+        if (effort.current) {
+          lines.push(`**思考强度**: ${effortLabel(effort.current)}`);
         }
 
         if (models.length > 0) {
@@ -58,7 +56,7 @@ export function modelCommand({ manager, config, logger }: CommandDeps): Categori
             lines.push('', `**${provider}**`);
             for (const m of entries) {
               // 列表链接统一指向真实切换命令；当前项的「无变化」由命令自身兜底
-              const isCurrent = hasSession && current.provider === m.provider && current.model === m.id;
+              const isCurrent = current.provider === m.provider && current.model === m.id;
               const suffix = isCurrent ? ' ✅' : '';
               lines.push(
                 `<qqbot-cmd-input text="/model ${m.provider}/${m.id}" show="/model ${shortModelName(m.id, m.name)}${suffix}"/>`,

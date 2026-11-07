@@ -83,11 +83,11 @@ describe('/bot-sync', () => {
     await expect(command.handler(makeCtx())).resolves.toBe('⚠️ 同步失败: 机器人未就绪');
   });
 
-  it('白名单模式：名单外用户被拒', () => {
+  it('绑定用户：其他用户被拒', () => {
     const command = syncCommand(
       {
         manager: {} as never,
-        config: makeConfig({ c2cMode: 'allowlist', c2cAllow: ['user1'] }),
+        config: makeConfig({ owner: 'user1' }),
         logger,
         bot: { api: okApi } as unknown as QQBot,
       },

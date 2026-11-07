@@ -5,7 +5,7 @@
  * QQBot 特有：插件自身封装（bot-ping/bot-version/bot-status/bot-help），带 bot- 前缀
  */
 import type { CommandDeps, CategorizedCommand } from './types.ts';
-import { sendMarkdownChunked, PLUGIN_VERSION } from '../shared/index.ts';
+import { pluginVersion, sendMarkdownChunked } from '../shared/index.ts';
 
 /** /bot-help — 分组查看所有指令 */
 export function helpCommand(
@@ -44,7 +44,7 @@ export function helpCommand(
         lines.push('**插件内置指令**', '', ...render(qqbotCmds), '');
       }
 
-      lines.push('', `> dsh-qqbot v${PLUGIN_VERSION}`);
+      lines.push('', `> dsh-qqbot v${pluginVersion()}`);
       await sendMarkdownChunked(cmdCtx, lines.join('\n'), config.textChunkLimit);
       return { kind: 'noop' as const };
     },

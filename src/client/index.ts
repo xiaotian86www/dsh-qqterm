@@ -83,8 +83,8 @@ function BindGuideIcon(): ReactNode {
 function QQBotSettingsSection(): ReactNode {
   const { state, gone, recheck } = useBindState();
   return createElement('div', null,
-    createElement(BindPanelBody, { state, gone, recheck }),
-    createElement(ConfigPanel, { bindPhase: state?.phase }),
+    BindPanelBody({ state, gone, recheck }),
+    ConfigPanel({ bindPhase: state?.phase }),
   );
 }
 

@@ -67,11 +67,10 @@ export interface ApprovalChannelSenderLike {
   sendMarkdown(target: ReplyTarget, content: string, opts?: { keyboard?: unknown }): Promise<unknown>;
 }
 
-/** 配置投影（审批按钮校验 allowlist 用） */
+/** 配置投影（审批按钮校验唯一绑定用户用） */
 export interface ApprovalChannelConfigLike {
   access: {
-    c2cMode: 'open' | 'allowlist' | 'disabled';
-    c2cAllow: readonly string[];
+    owner: string;
   };
 }
 
@@ -168,7 +167,7 @@ export class ApprovalChannel {
       const request = req as ApprovalRequest;
       const nextFn = next as () => Promise<ApprovalOutcome>;
       const record = self.manager.findBySessionId(request.agent.id);
-      if (record) return self.park(record, request);
+      if (record) return self.park(record, request, nextFn);
       return nextFn();
     }, { global: true, prepend: true });
     this.logger.info('im-qqbot: QQ approval channel installed');
@@ -213,11 +212,11 @@ export class ApprovalChannel {
       return false;
     }
 
-    // 白名单模式下审批只认名单内用户；点击者身份缺失同样拒绝（fail-closed，#94-3）
+    // 审批只认唯一绑定用户；点击者身份缺失同样拒绝（fail-closed）
     const clicker = event.user_openid;
-    if (this.config.access.c2cMode === 'allowlist'
-      && (!clicker || !this.config.access.c2cAllow.includes(clicker))) {
-      this.logger.warn(`im-qqbot: approval button rejected (clicker not allowlisted): user=${clicker ?? '(missing)'} sessionId=${sessionIdOf(entry.record)}`);
+    const owner = this.config.access.owner.trim();
+    if (owner === '' || clicker !== owner) {
+      this.logger.warn(`im-qqbot: approval button rejected (clicker not owner): user=${clicker ?? '(missing)'} sessionId=${sessionIdOf(entry.record)}`);
       return false;
     }
 
@@ -228,7 +227,11 @@ export class ApprovalChannel {
   }
 
   /** 走 QQ 通道：发审批消息 + 挂起 Promise，等待用户决策 */
-  private async park(record: ApprovalSessionRecordLike, request: ApprovalRequest): Promise<ApprovalOutcome> {
+  private async park(
+    record: ApprovalSessionRecordLike,
+    request: ApprovalRequest,
+    delegate: () => Promise<ApprovalOutcome>,
+  ): Promise<ApprovalOutcome> {
     const sessionId = sessionIdOf(record);
     // 会话回收/取消可能在发送前发生：signal 已 abort 则直接失败
     if (request.signal?.aborted) return 'cancelled';
@@ -246,7 +249,9 @@ export class ApprovalChannel {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this.logger.error(`im-qqbot: approval send failed sessionId=${sessionId}: ${msg}`);
-      return 'unavailable'; // 无法呈现审批，fail-closed
+      // 卡片没送到 QQ 时不能把请求吞掉：交回链上其他通道（Web GUI 仍可弹窗）。
+      this.logger.warn('im-qqbot: QQ approval delivery failed, falling back to the host answerer');
+      return delegate();
     }
 
     return new Promise<ApprovalOutcome>((resolve) => {

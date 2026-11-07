@@ -4,10 +4,8 @@
 import Schema from '@deepseek-ai/schemastery';
 
 export interface AccessControlConfig {
-  /** C2C 访问模式 */
-  c2cMode: 'open' | 'allowlist' | 'disabled';
-  /** C2C 白名单（user openid） */
-  c2cAllow: string[];
+  /** 唯一允许使用机器人的 QQ 用户 OpenID；空字符串 = 拒绝所有人 */
+  owner: string;
 }
 
 export interface MediaConfig {
@@ -107,8 +105,7 @@ export interface ImQQBotConfig {
 
 /** 访问控制子 Schema（独立导出：config 路由的服务端校验复用） */
 export const AccessControlSchema: Schema<AccessControlConfig> = Schema.object({
-  c2cMode: Schema.union(['open', 'allowlist', 'disabled']).default('open').description('C2C访问模式（默认开放）'),
-  c2cAllow: Schema.array(Schema.string()).default([]).description('C2C白名单（QQ OpenID）'),
+  owner: Schema.string().default('').description('唯一允许的用户（QQ OpenID），空=拒绝所有人'),
 });
 
 export const ConfigSchema: Schema<ImQQBotConfig> = Schema.object({
@@ -128,8 +125,7 @@ export const ConfigSchema: Schema<ImQQBotConfig> = Schema.object({
     timeoutMs: 10 * 60 * 1000,
   }).description('失败重发询问配置'),
   access: AccessControlSchema.default({
-    c2cMode: 'open',
-    c2cAllow: [],
+    owner: '',
   }).description('访问控制'),
   showToolResults: Schema.boolean().default(false).description('是否展示工具调用结果（成功与失败都受此开关控制）'),
   debug: Schema.boolean().default(false),

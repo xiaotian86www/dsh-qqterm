@@ -40,19 +40,24 @@ export function setupMiddlewares(
   // 2. 消息过滤：bot 回声 + 消息去重
   bot.use(messageFilter({ skipSelfEcho: false }));
 
-  // 3. 访问控制（空名单 = 拒绝所有人，fail-closed）
+  // 3. 访问控制：唯一白名单用户，空 owner = 拒绝所有人（fail-closed）
   //    只放行 C2C 私聊：群聊消息在入口处直接拦掉，不进入后续链路
+  const owner = config.access.owner.trim();
   bot.use(accessPolicy({
     c2c: {
-      mode: config.access.c2cMode,
-      allow: config.access.c2cAllow,
+      mode: 'allowlist',
+      allow: owner === '' ? [] : [owner],
     },
     group: {
       mode: 'disabled',
     },
-    onBlock: (_mCtx, reason) => {
+    onBlock: (mCtx, reason) => {
+      if (owner === '') {
+        logger.info(`im-qqbot: 未配置白名单用户，已拒绝私聊: sender=${mCtx.message.senderId ?? '(missing)'}`);
+        return;
+      }
       if (config.debug) {
-        logger.debug(`Access blocked: ${reason}`);
+        logger.debug(`Access blocked: ${reason} sender=${mCtx.message.senderId ?? '(missing)'}`);
       }
     },
   }));

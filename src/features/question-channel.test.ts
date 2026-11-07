@@ -182,7 +182,7 @@ describe('parseAnswer', () => {
 describe('QuestionChannel.tryAnswer', () => {
   it('resolves single-question and consumes the message', async () => {
     const sent: SentMessage[] = [];
-    const ch = new QuestionChannel(createManager(), createSender(sent), { askTimeoutMs: 60_000 }, createLogger());
+    const ch = new QuestionChannel(createManager(), createSender(sent), { askTimeoutMs: 60_000, access: { owner: 'U1' } }, createLogger());
     const p = startAsk(ch, 'c2c', 'U1', [q2()]);
     await sleep(20);
     expect(ch.tryAnswer('c2c', 'U1', '2')).toBe(true);
@@ -191,7 +191,7 @@ describe('QuestionChannel.tryAnswer', () => {
 
   it('advances multi-question one by one', async () => {
     const sent: SentMessage[] = [];
-    const ch = new QuestionChannel(createManager(), createSender(sent), { askTimeoutMs: 60_000 }, createLogger());
+    const ch = new QuestionChannel(createManager(), createSender(sent), { askTimeoutMs: 60_000, access: { owner: 'U1' } }, createLogger());
     const q1: UserQuestion = { id: 'a', question: '问题1', options: [{ label: 'A1' }, { label: 'B1' }] };
     const q2b: UserQuestion = { id: 'b', question: '问题2', options: [{ label: 'A2' }, { label: 'B2' }] };
     const p = startAsk(ch, 'c2c', 'U1', [q1, q2b]);
@@ -210,7 +210,7 @@ describe('QuestionChannel.tryAnswer', () => {
 
   it('ignores empty text and returns false when no pending question', async () => {
     const sent: SentMessage[] = [];
-    const ch = new QuestionChannel(createManager(), createSender(sent), { askTimeoutMs: 60_000 }, createLogger());
+    const ch = new QuestionChannel(createManager(), createSender(sent), { askTimeoutMs: 60_000, access: { owner: 'U1' } }, createLogger());
     expect(ch.tryAnswer('c2c', 'nobody', '1')).toBe(false);
 
     const p = startAsk(ch, 'c2c', 'U1', [q2()]);
@@ -224,7 +224,7 @@ describe('QuestionChannel.tryAnswer', () => {
 describe('QuestionChannel.askViaQQ', () => {
   it('attaches keyboard for single-select', async () => {
     const sent: SentMessage[] = [];
-    const ch = new QuestionChannel(createManager(), createSender(sent), { askTimeoutMs: 60_000 }, createLogger());
+    const ch = new QuestionChannel(createManager(), createSender(sent), { askTimeoutMs: 60_000, access: { owner: 'U1' } }, createLogger());
     const p = startAsk(ch, 'c2c', 'U1', [q2()]);
     await sleep(20);
     expect(sent[0]?.opts?.keyboard).toBeDefined();
@@ -235,7 +235,7 @@ describe('QuestionChannel.askViaQQ', () => {
 
   it('falls back to plain text when keyboard send fails', async () => {
     const sent: SentMessage[] = [];
-    const ch = new QuestionChannel(createManager(), createSender(sent, { failKeyboard: true }), { askTimeoutMs: 60_000 }, createLogger());
+    const ch = new QuestionChannel(createManager(), createSender(sent, { failKeyboard: true }), { askTimeoutMs: 60_000, access: { owner: 'U1' } }, createLogger());
     const p = startAsk(ch, 'c2c', 'U1', [q2()]);
     await sleep(20);
     expect(sent).toHaveLength(1);
@@ -249,7 +249,7 @@ describe('QuestionChannel.askViaQQ', () => {
     const ch = new QuestionChannel(
       createManager(),
       { sendMarkdown: vi.fn(async () => { throw new Error('network down'); }) },
-      { askTimeoutMs: 60_000 },
+      { askTimeoutMs: 60_000, access: { owner: 'U1' } },
       createLogger(),
     );
     await expect(ch.askViaQQ(makeRecord('sx'), { questions: [q2()] }))
@@ -258,7 +258,7 @@ describe('QuestionChannel.askViaQQ', () => {
 
   it('rejects on abort signal', async () => {
     const sent: SentMessage[] = [];
-    const ch = new QuestionChannel(createManager(), createSender(sent), { askTimeoutMs: 60_000 }, createLogger());
+    const ch = new QuestionChannel(createManager(), createSender(sent), { askTimeoutMs: 60_000, access: { owner: 'U1' } }, createLogger());
     const ac = new AbortController();
     const p = startAsk(ch, 'c2c', 'U1', [q2()], ac.signal);
     await sleep(20);
@@ -268,7 +268,7 @@ describe('QuestionChannel.askViaQQ', () => {
 
   it('supersedes a previous pending question for the same session', async () => {
     const sent: SentMessage[] = [];
-    const ch = new QuestionChannel(createManager(), createSender(sent), { askTimeoutMs: 60_000 }, createLogger());
+    const ch = new QuestionChannel(createManager(), createSender(sent), { askTimeoutMs: 60_000, access: { owner: 'U1' } }, createLogger());
     const p1 = startAsk(ch, 'c2c', 'U1', [q2()]);
     p1.catch(() => {});
     await sleep(20);
@@ -281,7 +281,7 @@ describe('QuestionChannel.askViaQQ', () => {
 
   it('times out and rejects when the user never answers', async () => {
     const sent: SentMessage[] = [];
-    const ch = new QuestionChannel(createManager(), createSender(sent), { askTimeoutMs: 20 }, createLogger());
+    const ch = new QuestionChannel(createManager(), createSender(sent), { askTimeoutMs: 20, access: { owner: 'U1' } }, createLogger());
     const p = startAsk(ch, 'c2c', 'U1', [q2()]);
     p.catch(() => {}); // 抑制超时 reject 早于断言挂 handler 的 unhandled rejection
     await sleep(80);
@@ -303,7 +303,7 @@ describe('QuestionChannel.handleInteraction', () => {
 
   it('answers a c2c question by button click', async () => {
     const sent: SentMessage[] = [];
-    const ch = new QuestionChannel(createManager(), createSender(sent), { askTimeoutMs: 60_000 }, createLogger());
+    const ch = new QuestionChannel(createManager(), createSender(sent), { askTimeoutMs: 60_000, access: { owner: 'U1' } }, createLogger());
     const p = startAsk(ch, 'c2c', 'U1', [q2()]);
     await sleep(20);
     expect(ch.handleInteraction(makeEvent(JSON.stringify({ t: 'question', q: 'q', i: 1 }), { user: 'U1' }))).toBe(true);
@@ -312,7 +312,7 @@ describe('QuestionChannel.handleInteraction', () => {
 
   it('ignores clicks without user_openid', async () => {
     const sent: SentMessage[] = [];
-    const ch = new QuestionChannel(createManager(), createSender(sent), { askTimeoutMs: 60_000 }, createLogger());
+    const ch = new QuestionChannel(createManager(), createSender(sent), { askTimeoutMs: 60_000, access: { owner: 'U1' } }, createLogger());
     const p = startAsk(ch, 'c2c', 'U1', [q2()]);
     await sleep(20);
     expect(ch.handleInteraction(makeEvent(JSON.stringify({ t: 'question', q: 'q', i: 0 }), {}))).toBe(false);
@@ -322,17 +322,17 @@ describe('QuestionChannel.handleInteraction', () => {
 
   it('resolves with the full original label for truncated buttons', async () => {
     const sent: SentMessage[] = [];
-    const ch = new QuestionChannel(createManager(), createSender(sent), { askTimeoutMs: 60_000 }, createLogger());
+    const ch = new QuestionChannel(createManager(), createSender(sent), { askTimeoutMs: 60_000, access: { owner: 'U1' } }, createLogger());
     const long = '这是一个非常非常长的选项标签超过十八个字符的限制了吧';
-    const p = startAsk(ch, 'c2c', 'U7', [{ id: 'q', question: 't', options: [{ label: long }] }]);
+    const p = startAsk(ch, 'c2c', 'U1', [{ id: 'q', question: 't', options: [{ label: long }] }]);
     await sleep(20);
-    expect(ch.handleInteraction(makeEvent(JSON.stringify({ t: 'question', q: 'q', i: 0 }), { user: 'U7' }))).toBe(true);
+    expect(ch.handleInteraction(makeEvent(JSON.stringify({ t: 'question', q: 'q', i: 0 }), { user: 'U1' }))).toBe(true);
     expect(await p).toEqual({ answers: [{ id: 'q', selected: [long] }] });
   });
 
   it('rejects malformed or stale clicks without consuming the question', async () => {
     const sent: SentMessage[] = [];
-    const ch = new QuestionChannel(createManager(), createSender(sent), { askTimeoutMs: 60_000 }, createLogger());
+    const ch = new QuestionChannel(createManager(), createSender(sent), { askTimeoutMs: 60_000, access: { owner: 'U1' } }, createLogger());
     const p = startAsk(ch, 'c2c', 'U2', [q2()]);
     await sleep(20);
     expect(ch.handleInteraction(makeEvent('not-json', { user: 'U2' }))).toBe(false);
@@ -347,7 +347,7 @@ describe('QuestionChannel.handleInteraction', () => {
 
   it('ignores a stale click from a previous question after advancing', async () => {
     const sent: SentMessage[] = [];
-    const ch = new QuestionChannel(createManager(), createSender(sent), { askTimeoutMs: 60_000 }, createLogger());
+    const ch = new QuestionChannel(createManager(), createSender(sent), { askTimeoutMs: 60_000, access: { owner: 'U1' } }, createLogger());
     const q1: UserQuestion = { id: 'a', question: '问题1', options: [{ label: 'A1' }, { label: 'B1' }] };
     const q2b: UserQuestion = { id: 'b', question: '问题2', options: [{ label: 'A2' }, { label: 'B2' }] };
     const p = startAsk(ch, 'c2c', 'U1', [q1, q2b]);
@@ -371,7 +371,7 @@ describe('QuestionChannel: 多会话 routing', () => {
 
   it('answer(sessionId, text) 不依赖 current', async () => {
     const sent: SentMessage[] = [];
-    const ch = new QuestionChannel(createManager(), createSender(sent), { askTimeoutMs: 60_000 }, createLogger());
+    const ch = new QuestionChannel(createManager(), createSender(sent), { askTimeoutMs: 60_000, access: { owner: 'U1' } }, createLogger());
     const p = ch.askViaQQ(recordFor('sess-a', 'U1'), { questions: [q2()] });
     await sleep(20);
 
@@ -381,7 +381,7 @@ describe('QuestionChannel: 多会话 routing', () => {
 
   it('beginAnswerMode：下一条普通文本作为该会话答案，整组结束后退出', async () => {
     const sent: SentMessage[] = [];
-    const ch = new QuestionChannel(createManager(), createSender(sent), { askTimeoutMs: 60_000 }, createLogger());
+    const ch = new QuestionChannel(createManager(), createSender(sent), { askTimeoutMs: 60_000, access: { owner: 'U1' } }, createLogger());
     const p = ch.askViaQQ(recordFor('sess-a', 'U1'), { questions: [q2()] });
     await sleep(20);
 
@@ -394,7 +394,7 @@ describe('QuestionChannel: 多会话 routing', () => {
 
   it('按钮 button_data 带 s；非当前会话点击按 s 找回 pending', async () => {
     const sent: SentMessage[] = [];
-    const ch = new QuestionChannel(createManager(), createSender(sent), { askTimeoutMs: 60_000 }, createLogger());
+    const ch = new QuestionChannel(createManager(), createSender(sent), { askTimeoutMs: 60_000, access: { owner: 'U1' } }, createLogger());
     const p = ch.askViaQQ(recordFor('sess-a', 'U1'), { questions: [q2()] });
     await sleep(20);
 
@@ -415,7 +415,7 @@ describe('QuestionChannel: 多会话 routing', () => {
 
   it('点击者不是会话所属用户时忽略', async () => {
     const sent: SentMessage[] = [];
-    const ch = new QuestionChannel(createManager(), createSender(sent), { askTimeoutMs: 60_000 }, createLogger());
+    const ch = new QuestionChannel(createManager(), createSender(sent), { askTimeoutMs: 60_000, access: { owner: 'U1' } }, createLogger());
     const p = ch.askViaQQ(recordFor('sess-a', 'U1'), { questions: [q2()] });
     await sleep(20);
 
@@ -435,7 +435,7 @@ describe('QuestionChannel: 多会话 routing', () => {
 describe('QuestionChannel.cancelPending', () => {
   it('rejects pending question when the session is evicted', async () => {
     const sent: SentMessage[] = [];
-    const ch = new QuestionChannel(createManager(), createSender(sent), { askTimeoutMs: 60_000 }, createLogger());
+    const ch = new QuestionChannel(createManager(), createSender(sent), { askTimeoutMs: 60_000, access: { owner: 'U1' } }, createLogger());
     const p = startAsk(ch, 'c2c', 'U1', [q2()]);
     await sleep(20);
     ch.cancelPending(sessionKey('c2c', 'U1'));
@@ -467,7 +467,7 @@ describe('QuestionChannel.install routing（user-questions/request waterfall）'
   }
 
   it('registers a global, prepended waterfall listener', () => {
-    const ch = new QuestionChannel(createManager(), createSender([]), { askTimeoutMs: 60_000 }, createLogger());
+    const ch = new QuestionChannel(createManager(), createSender([]), { askTimeoutMs: 60_000, access: { owner: 'U1' } }, createLogger());
     const { options } = installChannel(ch);
     // 不带 global 会被 agent 作用域过滤；不带 prepend 会输给 Web 端 answerer
     expect(options).toEqual({ global: true, prepend: true });
@@ -481,7 +481,7 @@ describe('QuestionChannel.install routing（user-questions/request waterfall）'
       findBySessionId: (id) => (id === 'sess-qq' ? record : undefined),
       getSessionRecord: () => record,
     });
-    const ch = new QuestionChannel(manager, createSender(sent), { askTimeoutMs: 60_000 }, createLogger());
+    const ch = new QuestionChannel(manager, createSender(sent), { askTimeoutMs: 60_000, access: { owner: 'U1' } }, createLogger());
     const { handler } = installChannel(ch);
 
     const next = vi.fn(async () => ({ answers: [] }));
@@ -508,7 +508,7 @@ describe('QuestionChannel.install routing（user-questions/request waterfall）'
     const ch = new QuestionChannel(
       manager,
       { sendMarkdown: vi.fn(async () => { throw new Error('network down'); }) },
-      { askTimeoutMs: 60_000 },
+      { askTimeoutMs: 60_000, access: { owner: 'U1' } },
       logger,
     );
     const { handler } = installChannel(ch);
@@ -523,7 +523,7 @@ describe('QuestionChannel.install routing（user-questions/request waterfall）'
 
   it('uninstall 只清理 pending，不再改写服务方法', async () => {
     const sent: SentMessage[] = [];
-    const ch = new QuestionChannel(createManager(), createSender(sent), { askTimeoutMs: 60_000 }, createLogger());
+    const ch = new QuestionChannel(createManager(), createSender(sent), { askTimeoutMs: 60_000, access: { owner: 'U1' } }, createLogger());
     installChannel(ch);
     const p = startAsk(ch, 'c2c', 'U1', [q2()]);
     await sleep(10);
@@ -544,7 +544,7 @@ describe('非当前会话的标记', () => {
         sessionTitle: () => '修登录',
       }),
       createSender(sent),
-      { askTimeoutMs: 30 },
+      { askTimeoutMs: 30, access: { owner: 'U1' } },
       createLogger(),
     );
 

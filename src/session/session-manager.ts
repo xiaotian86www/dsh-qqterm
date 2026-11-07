@@ -64,6 +64,7 @@ import type {
   WorkspaceInfo,
   ChangeWorkspaceOutcome,
   SwitchSessionOutcome,
+  RestoreOutcome,
   RenameSessionOutcome,
   ArchiveSessionOutcome,
   SendToOutcome,
@@ -1100,6 +1101,8 @@ export class SessionManager {
     record.scope = scope;
     record.peerId = peerId;
     record.senderId = senderId;
+    // 记下最后说话的人：重启恢复会话时没有入站消息，只能靠它做回复目标
+    if (replyTarget.targetId !== '') this.modelResolver.setTarget(record.sessionKey, replyTarget.targetId);
   }
 
   /** 改当前会话指针并落盘（prefs 仍只记 current） */
@@ -1813,6 +1816,48 @@ export class SessionManager {
     }
 
     return groups;
+  }
+
+  /**
+   * 启动时把上次的会话接回来（网关在 QQ ready 后调用，失败不抛出）。
+   *
+   * 不接的话，重启后 record 为空、prefs 指针还在：`/status` 说「未建立」、
+   * `/model` 说「没有会话」，可下一条普通消息又能接回旧会话——同一件事两种
+   * 说法。接回之后「有会话」与「有 record」始终同真同假，不需要再为中间态
+   * 设计任何一种展示分支。
+   *
+   * 走 getOrCreate 而不是裸 resume：它自带 singleflight，启动瞬间正好来消息
+   * 也只会 resume 一次。
+   */
+  async restoreCurrentSession(): Promise<RestoreOutcome> {
+    const key = this.sessionKey();
+    const sessionId = this.modelResolver.getSessionId(key);
+    if (sessionId === undefined) return { kind: 'none' };
+
+    // 盘上已经没有了就别试：resume 失败后宿主也不会允许重建，白跑一趟。
+    // 指针一并清掉：留着会让 `/sessions` 把死会话显示成「待恢复」，
+    // 点「恢复当前」又只会报没有匹配的会话。目录保留，下一条消息仍落在上次工作区。
+    if ((await this.host.sessionExists(sessionId).catch(() => undefined)) === false) {
+      this.modelResolver.clearSessionId(key);
+      this.logger.info(`启动恢复跳过：会话已不存在，已清除指针 sessionId=${sessionId}`);
+      return { kind: 'none' };
+    }
+
+    // 重启后没有入站消息可回，只能用上次交互记下的 openid 做回复目标
+    const targetId = this.modelResolver.getTarget(key) ?? '';
+    const target: ReplyTarget = { scope: 'c2c', targetId };
+    try {
+      await this.getOrCreate('c2c', targetId, targetId, target);
+    } catch (err) {
+      const message = errorText(err);
+      const locked = (err as { name?: string } | null)?.name === 'SessionAlreadyOwnedError'
+        || /already ?owned|ownership|write handle/i.test(message);
+      this.logger.warn(`启动恢复会话失败: sessionId=${sessionId} err=${message}`);
+      if (targetId === '') return { kind: 'none' };
+      return { kind: 'failed', sessionId, targetId, locked, message };
+    }
+    this.logger.info(`启动已恢复会话: sessionId=${sessionId}`);
+    return { kind: 'ok', sessionId };
   }
 
   /**

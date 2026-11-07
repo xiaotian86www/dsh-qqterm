@@ -22,7 +22,7 @@ vi.mock('../shared/send-helper.ts', () => ({
 const config = ConfigSchema({
   appId: 'app',
   appSecret: 'secret',
-  access: { c2cMode: 'open', c2cAllow: ['owner'] },
+  access: { owner: 'owner' },
 } as ImQQBotConfig);
 const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
 
@@ -77,18 +77,19 @@ describe('/preset（查看）', () => {
   it('默认项带 ✅，链接仍指向真实切换命令', async () => {
     const text = await run(makeManager({ effective: 'beta' }));
 
-    expect(text).toContain('**全局**: beta');
+    expect(text).toContain('**当前**: beta');
     expect(text).toContain('text="/preset beta" show="/preset Beta (beta) ✅"');
     expect(text).toContain('text="/preset alpha" show="/preset Alpha (alpha)"');
     // 只有默认项带 ✅
     expect(text.split('✅')).toHaveLength(2);
-    expect(text).toContain('对之后新建的会话生效');
+    expect(text).not.toContain('可用 preset');
+    expect(text).not.toContain('对之后新建的会话生效');
   });
 
   it('没有默认值时按列表的 isDefault 标注，不重复显示 ✅', async () => {
     const text = await run(makeManager());
 
-    expect(text).toContain('**全局**: beta');
+    expect(text).toContain('**当前**: beta');
     expect(text).toContain('text="/preset beta" show="/preset Beta (beta) ✅"');
     expect(text.split('✅')).toHaveLength(2);
   });
@@ -99,26 +100,26 @@ describe('/preset（查看）', () => {
       presets: [{ id: 'alpha', name: 'Alpha' }, { id: 'beta', name: 'Beta' }, { id: 'gamma' }],
     }));
 
-    expect(text).toContain('**全局**: gamma');
+    expect(text).toContain('**当前**: gamma');
     expect(text).toContain('text="/preset gamma" show="/preset gamma ✅"');
     expect(text.split('✅')).toHaveLength(2);
   });
 });
 
 describe('/preset（切换）', () => {
-  it('切换成功回显 preset id，并提示之后新建的会话生效', async () => {
+  it('切换成功只回显 preset id', async () => {
     const manager = makeManager({ effective: 'alpha' });
     const text = await run(manager, 'beta');
 
     expect(manager.setPresetOverride).toHaveBeenCalledWith('c2c', 'owner', 'beta');
-    expect(text).toBe('✅ preset 已切换: beta（之后新建的会话生效）');
+    expect(text).toBe('✅ preset 已切换: beta');
   });
 
   it('切到当前默认值是幂等的，只回一行', async () => {
     const manager = makeManager({ effective: 'beta', unchanged: true });
     const text = await run(manager, 'beta');
 
-    expect(text).toBe('✅ 已是全局 preset: beta');
+    expect(text).toBe('✅ 已是当前 preset: beta');
   });
 
   it('未知 preset 给警告', async () => {

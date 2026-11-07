@@ -17,7 +17,7 @@ const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi
 const config = ConfigSchema({
   appId: 'app',
   appSecret: 'secret',
-  access: { c2cAllow: ['user1'] },
+  access: { owner: 'user1' },
 } as ImQQBotConfig);
 
 function makeManager() {
@@ -173,13 +173,13 @@ describe('/new <工作区>', () => {
     expect(text).not.toContain('已开启新会话');
   });
 
-  it('白名单外不能改工作区，且不动会话', async () => {
+  it('非绑定用户不能改工作区，且不动会话', async () => {
     const manager = makeManager();
     const text = await run(manager, 'repo', 'stranger');
 
     expect(manager.remove).not.toHaveBeenCalled();
     expect(manager.changeChatWorkspace).not.toHaveBeenCalled();
-    expect(text).toContain('只在私聊 + 白名单');
+    expect(text).toContain('仅限绑定用户可用');
   });
 });
 

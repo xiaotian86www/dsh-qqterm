@@ -5,17 +5,17 @@
  * 同一个入口），对之后新建的会话生效；已经开始的会话保持自己的 preset。
  */
 import type { CommandDeps, CategorizedCommand } from './types.ts';
-import { commandAllowlistAuth } from './auth.ts';
+import { ownerOnlyAuth } from './auth.ts';
 import { getScopePeer, sendMarkdownChunked } from '../shared/index.ts';
 
 export function presetCommand({ manager, config, logger }: CommandDeps): CategorizedCommand {
   return {
     name: 'preset',
     category: 'agent',
-    // 管理类指令：私聊可用，但仅限白名单用户（复用审批的名单语义）
+    // 管理类指令：私聊可用，但仅限绑定用户（复用审批的 owner 语义）
     scope: 'all',
-    authorized: commandAllowlistAuth(config, logger),
-    description: '查看或切换全局 agent preset（用法: /preset [id]）',
+    authorized: ownerOnlyAuth(config, logger),
+    description: '查看或切换当前 agent preset（用法: /preset [id]）',
     handler: async (cmdCtx) => {
       const { scope, peerId } = getScopePeer(cmdCtx);
       const args = (cmdCtx.command?.raw ?? '').trim();
@@ -27,20 +27,20 @@ export function presetCommand({ manager, config, logger }: CommandDeps): Categor
           return '⚠️ 当前部署无可用的 agent preset';
         }
 
-        // 全局值：之后新建的会话会用它；已开始的会话保持自己的 preset
+        // 沿用「当前」的写法，不另造「全局」标签
         const currentId = manager.getEffectivePreset(scope, peerId);
         const defaultId = presets.find((p) => p.isDefault)?.id ?? currentId;
 
         const lines: string[] = ['### 🧩 Agent Preset', ''];
-        lines.push(`**全局**: ${defaultId ?? '—'}`);
-        lines.push('', '**可用 preset**');
+        lines.push(`**当前**: ${defaultId ?? '—'}`);
+        // 列表本身就是全部可选 preset，不再加「可用 preset」这类小标题
+        lines.push('');
         for (const p of presets) {
           const display = p.name ? `${p.name} (${p.id})` : p.id;
           // 默认项带 ✅；链接统一指向真实切换命令，重复切换由命令自身幂等处理
           const suffix = p.id === defaultId ? ' ✅' : '';
           lines.push(`<qqbot-cmd-input text="/preset ${p.id}" show="/preset ${display}${suffix}"/>`);
         }
-        lines.push('', '对之后新建的会话生效');
 
         await sendMarkdownChunked(cmdCtx, lines.join('\n'), config.textChunkLimit);
         return { kind: 'noop' as const };
@@ -60,9 +60,9 @@ export function presetCommand({ manager, config, logger }: CommandDeps): Categor
       }
 
       const target = outcome.presetId ?? args;
-      if (outcome.unchanged) return `✅ 已是全局 preset: ${target}`;
+      if (outcome.unchanged) return `✅ 已是当前 preset: ${target}`;
 
-      return `✅ preset 已切换: ${target}（之后新建的会话生效）`;
+      return `✅ preset 已切换: ${target}`;
     },
   };
 }

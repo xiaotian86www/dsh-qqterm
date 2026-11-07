@@ -6,7 +6,7 @@ export {
   resolveEnv,
   formatRelativeTime,
   buildUserAgent,
-  PLUGIN_VERSION,
+  pluginVersion,
   shortSessionId,
 } from './utils.ts';
 export { getScopePeer } from './scope.ts';

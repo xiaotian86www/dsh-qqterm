@@ -853,3 +853,68 @@ describe('思考强度 — 宿主选择与重建', () => {
     expect(registry.create).not.toHaveBeenCalled();
   });
 });
+
+describe('restoreCurrentSession — 启动恢复上次会话', () => {
+  it('没有指针：不动宿主，返回 none', async () => {
+    const { registry } = createRegistry(async ({ resumeSessionId }) => fakeHandle(resumeSessionId));
+    const manager = createManager(registry);
+
+    expect(await manager.restoreCurrentSession()).toEqual({ kind: 'none' });
+    expect(registry.resume).not.toHaveBeenCalled();
+    expect(registry.create).not.toHaveBeenCalled();
+  });
+
+  it('盘上还在：接回会话，回复目标用上次交互的用户', async () => {
+    const prefs = new PrefsStore();
+    prefs.setSessionId(KEY, 'session-current');
+    prefs.setTarget(KEY, PEER_B);
+    const { registry } = createRegistry(async ({ resumeSessionId }) => fakeHandle(resumeSessionId));
+    const manager = createManagerWithCtx(registry, onDiskCtx('session-current'));
+
+    const outcome = await manager.restoreCurrentSession();
+
+    expect(outcome).toEqual({ kind: 'ok', sessionId: 'session-current' });
+    expect(registry.resume).toHaveBeenCalledWith(expect.objectContaining({ resumeSessionId: 'session-current' }));
+    expect(manager.getStatus('c2c', PEER)).toMatchObject({ active: true, sessionId: 'session-current' });
+    // touch 是后续消息的事；启动恢复本身不该改写记录里的回复目标
+    expect(new PrefsStore().getTarget(KEY)).toBe(PEER_B);
+  });
+
+  it('盘上已不存在：不 resume、不创建，清除死指针并返回 none（重启前 /new 留下的占位指针也走这条路）', async () => {
+    new PrefsStore().setSessionId(KEY, 'session-gone');
+    new PrefsStore().setTarget(KEY, PEER);
+    const { registry } = createRegistry(async ({ resumeSessionId }) => fakeHandle(resumeSessionId));
+    const manager = createManagerWithCtx(registry, absentCtx());
+
+    expect(await manager.restoreCurrentSession()).toEqual({ kind: 'none' });
+    expect(registry.resume).not.toHaveBeenCalled();
+    expect(registry.create).not.toHaveBeenCalled();
+    // 不清掉的话 /sessions 会显示「待恢复」，恢复链接却永远失败
+    expect(new PrefsStore().getSessionId(KEY)).toBeUndefined();
+    expect(new PrefsStore().getTarget(KEY)).toBe(PEER);
+  });
+
+  it('另一个客户端占着写句柄：返回 failed/locked 且带上通知目标', async () => {
+    new PrefsStore().setSessionId(KEY, 'session-current');
+    new PrefsStore().setTarget(KEY, PEER_B);
+    const { registry } = createRegistry(async () => {
+      throw Object.assign(new Error('session is already owned by another writer'), { name: 'SessionAlreadyOwnedError' });
+    });
+    const manager = createManagerWithCtx(registry, onDiskCtx('session-current'));
+
+    const outcome = await manager.restoreCurrentSession();
+
+    expect(outcome).toMatchObject({ kind: 'failed', sessionId: 'session-current', targetId: PEER_B, locked: true });
+    // 不重建：同 id 重建会把会话写进两个 project 目录
+    expect(registry.create).not.toHaveBeenCalled();
+    expect(manager.getStatus('c2c', PEER)).toMatchObject({ active: false });
+  });
+
+  it('没有记录过通知目标时失败不推送（返回 none）', async () => {
+    new PrefsStore().setSessionId(KEY, 'session-current');
+    const { registry } = createRegistry(async () => { throw corrupt('session-current'); });
+    const manager = createManagerWithCtx(registry, onDiskCtx('session-current'));
+
+    expect(await manager.restoreCurrentSession()).toEqual({ kind: 'none' });
+  });
+});

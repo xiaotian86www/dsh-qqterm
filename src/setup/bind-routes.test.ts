@@ -340,13 +340,13 @@ describe('bind-routes', () => {
     expect(json(res)).toEqual({ config: { appId: '102120114', streaming: true, cwd: '/tmp/w' } });
   });
 
-  it('POST config：白名单内合法值通过并触发合并写入', async () => {
+  it('POST config：owner 合法值通过并触发合并写入', async () => {
     const { routes } = createHarness({ onUpdateConfig: () => true });
     const res = fakeRes();
     await invoke(
       routes.get(BIND_CONFIG_PATH),
       fakeReq('POST', { host: '127.0.0.1:3080', 'content-type': 'application/json' },
-        '{"streaming":false,"access":{"c2cMode":"allowlist","c2cAllow":["u1"]}}'),
+        '{"streaming":false,"access":{"owner":"u1"}}'),
       res,
     );
     expect(res.statusCode).toBe(200);
