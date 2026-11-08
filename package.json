@@ -1,6 +1,6 @@
 {
   "name": "@tencent-connect/dsh-qqbot",
-  "version": "0.5.5-dev.20",
+  "version": "0.5.5-dev.21",
   "icon": "./assets/icons/qq_logo.svg",
   "description": "在 QQ 私聊里直接对话 DeepSeek Harness。 Chat with DeepSeek Harness in QQ private chats.",
   "type": "module",

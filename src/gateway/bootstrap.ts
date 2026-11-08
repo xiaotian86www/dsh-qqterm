@@ -48,6 +48,19 @@ function dispatchInteraction(event: InteractionEvent, manager: SessionManager): 
   return false;
 }
 
+/**
+ * 网关「连接可用」回调：全新握手发 ready，续传（热重载 / 断线重连）只发 resumed，
+ * 不会再补一条 ready。恢复流程必须挂在这两种信号上，否则重载后的新实例既不补发
+ * 上一轮结果，也不会接回上次的会话。
+ */
+export function onGatewayConnected(
+  bot: Pick<QQBot, 'on'>,
+  handler: (event: 'ready' | 'resumed') => void,
+): void {
+  bot.on('ready', () => handler('ready'));
+  bot.on('resumed', () => handler('resumed'));
+}
+
 export async function bootstrapGateway(
   ctx: Context,
   agents: DshAgentRegistry,
@@ -180,8 +193,8 @@ export async function bootstrapGateway(
     logger.warn(`qqbot-nodejs SDK 不支持 disconnected 事件（请升级 @tencent-connect/qqbot-nodejs 至 1.0.5+）: ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  bot.on('ready', () => {
-    console.log(`[im-qqbot] Bot ready! appId=${config.appId}`);
+  onGatewayConnected(bot, (event) => {
+    console.log(`[im-qqbot] Bot ${event}! appId=${config.appId}`);
 
     // 启动恢复：把上次的会话接回来，避免「/status 说未建立、下一条消息又能接回」。
     // 失败时主动推一条带重试入口的消息——重启后没有入站消息，只能发给持久化的
@@ -200,13 +213,13 @@ export async function bootstrapGateway(
         logger.warn(`启动恢复会话失败: ${err instanceof Error ? err.message : String(err)}`);
       });
 
-    // 上一次 /bot-reload 的结果只能靠状态文件带到这个 fiber：ready 后补发一条被动回复
+    // 上一次 /bot-reload 的结果只能靠状态文件带到这个 fiber：连上后补发一条被动回复
     void reloader.announce(bot).catch((err: unknown) => {
       logger.warn(`热重载结果播报失败: ${err instanceof Error ? err.message : String(err)}`);
     });
 
-    // 指令面板：ready 后把当前命令推到私聊全局面板。
-    // 每次 ready（含重连）都同步一次，面板被外部删掉也能自愈；失败只记 warn，
+    // 指令面板：连上后把当前命令推到私聊全局面板。
+    // 每次连接（含续传）都同步一次，面板被外部删掉也能自愈；失败只记 warn，
     // 不影响网关（OpenAPI 未开通时这里会拿到 4xx）。
     if (config.panel?.autoSync ?? true) {
       void syncCommandPanels(bot.api, commands, logger)
