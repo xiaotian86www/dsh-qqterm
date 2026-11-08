@@ -15,7 +15,7 @@ import { PLUGIN_HOME } from '../shared/dirs.ts';
 import { formatRelativeTime } from '../shared/utils.ts';
 import type { Logger } from '../types.ts';
 
-export type ReloadPhase = 'running' | 'done' | 'failed';
+export type ReloadPhase = 'done' | 'failed';
 
 /** 重载结果的通知目标：重载后只剩 targetId 能定位「回复给谁」 */
 export interface ReloadNotice {
@@ -23,7 +23,8 @@ export interface ReloadNotice {
 }
 
 export interface ReloadState {
-  phase: ReloadPhase;
+  /** 这一轮的结论；undefined 表示还没跑完（只有 startedAt 与 notify） */
+  phase?: ReloadPhase;
   /** 这一轮重载的发起时间（毫秒） */
   startedAt: number;
   notify?: ReloadNotice;
@@ -57,7 +58,7 @@ export function readReloadState(path: string, logger?: Logger): ReloadState | un
 
   try {
     const parsed = JSON.parse(text) as Partial<ReloadState>;
-    if (parsed.phase !== 'running' && parsed.phase !== 'done' && parsed.phase !== 'failed') {
+    if (parsed.phase !== undefined && parsed.phase !== 'done' && parsed.phase !== 'failed') {
       return undefined;
     }
     return {
@@ -87,7 +88,7 @@ export function writeReloadState(path: string, state: ReloadState, logger?: Logg
 export function describeReloadState(state: ReloadState | undefined): string | undefined {
   if (state === undefined) return undefined;
   const when = formatRelativeTime(state.startedAt);
-  if (state.phase === 'running') return `🔄 进行中 · ${when}`;
+  if (state.phase === undefined) return `🔄 进行中 · ${when}`;
   if (state.phase === 'failed') return `❌ 失败 · ${when}`;
   return state.restartReason === undefined
     ? `✅ 已应用 · ${when}`

@@ -72,10 +72,11 @@ describe('createReloader', () => {
     reloader.run({ targetId: 'u1' });
     await vi.advanceTimersByTimeAsync(500);
 
-    expect(readReloadState(path)?.phase).toBe('running');
+    expect(readReloadState(path)).toMatchObject({ notify: { targetId: 'u1' } });
+    expect(readReloadState(path)?.phase).toBeUndefined();
   });
 
-  it('run 先写 running 状态，延迟后再调 reconcileProfile 并落 done', async () => {
+  it('run 先写待补发记录，延迟后再调 reconcileProfile 并落 done', async () => {
     const path = statePath();
     const hmr = fakeHmr();
     const reloader = createReloader(fakeContext({ hmr }), logger, { statePath: path });
@@ -83,9 +84,9 @@ describe('createReloader', () => {
 
     reloader.run({ targetId: 'u1' });
     expect(readReloadState(path)).toMatchObject({
-      phase: 'running',
       notify: { targetId: 'u1' },
     });
+    expect(readReloadState(path)?.phase).toBeUndefined();
 
     await vi.advanceTimersByTimeAsync(100);
     expect(hmr.reconcileProfile).not.toHaveBeenCalled();
@@ -336,17 +337,17 @@ describe('announce', () => {
     expect(bot.sendMarkdown).not.toHaveBeenCalled();
   });
 
-  it('进行中的重载不打扰', async () => {
+  it('结论还没落盘时连上先不发，留给下一次命令前的补发', async () => {
     const path = statePath();
     const bot = fakeBot();
-    // 重载卡住不返回：状态一直停在 running
+    // reconcile 卡住不返回：状态一直停在「有 notify、没结论」
     const hmr = { runExclusive: vi.fn(() => new Promise<never>(() => {})), reconcileProfile: vi.fn() };
     const reloader = createReloader(fakeContext({ hmr }), logger, { statePath: path });
 
     reloader.run({ targetId: 'u1' }); // 还没到调度时间
-    const pending = reloader.announce(bot);
+    await reloader.announce(bot);
     await vi.advanceTimersByTimeAsync(6_000);
-    await pending;
+    await reloader.announce(bot);
 
     expect(bot.sendMarkdown).not.toHaveBeenCalled();
   });

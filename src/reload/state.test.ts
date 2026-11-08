@@ -93,8 +93,8 @@ describe('describeReloadState', () => {
     expect(describeReloadState({ phase: 'failed', startedAt, error: 'boom' })).toContain('❌');
   });
 
-  it('进行中', () => {
-    expect(describeReloadState({ phase: 'running', startedAt })).toContain('🔄');
+  it('进行中（还没有结论）', () => {
+    expect(describeReloadState({ startedAt })).toContain('🔄');
   });
 });
 

@@ -8,9 +8,13 @@
  *      最后用脱离 fiber 的原生定时器调度重载。
  *   3. 重载失败不回滚（旧 fiber 已经没了），结果只能落盘，由新 fiber 读回。
  *
- * 结果通知有两条路：本插件被替换时没有「旧实例补发」的机会，由新 fiber 的
- * `ready` 读状态文件补上；本插件没被替换（磁盘上没变、或变的是别人）时不会有
- * 新的 `ready`，只能由当前实例在重载结束后自己发。
+ * 结果通知有两条路：本插件被替换时没有「旧实例补发」的机会，由新 fiber 连上
+ * （`ready` 或续传的 `resumed`）时读状态文件补上；本插件没被替换（磁盘上没变、
+ * 或变的是别人）时不会有新的连接，只能由当前实例在重载结束后自己发。
+ *
+ * 新 fiber 连上时结论可能还没落盘（reconcile 还在跑），这里不等待：读不到结论就
+ * 什么都不发，留给下一条 `/bot-reload` 开始前的补发。等待换来的只是「早几十毫秒
+ * 送达」，代价是一整套超时判断。
  *
  * 「到底换没换」靠重载前后比各 entry 的 fiber uid：`reconcileProfile` 的返回值
  * 里没有这个信息，而用户最想知道的恰恰是「这次到底应用了什么」。
@@ -70,7 +74,7 @@ export interface Reloader {
   run(notice?: ReloadNotice, bot?: QQBot): void;
   /** 上次重载的一句话描述（`/bot-status` 用） */
   describe(): string | undefined;
-  /** 新 fiber 的 ready：消费上一次重载留下的通知 */
+  /** 新 fiber 连上、或下一条命令开始前：补发上一次重载留下的结果 */
   announce(bot: QQBot): Promise<void>;
 }
 
@@ -82,12 +86,6 @@ export interface ReloaderOptions {
 
 /** 回复之后再重载：给被动回复留出送达时间 */
 const RELOAD_DELAY_MS = 200;
-/** ready 早于结果落盘时，最多等这么久再判定「这一轮还没收尾」 */
-const SETTLE_MS = 5_000;
-/** 等待结果落盘的轮询间隔 */
-const SETTLE_POLL_MS = 400;
-/** 超过这个时长仍停在 running，视为这一轮没跑完就退了，不再补发 */
-const IN_FLIGHT_MS = 60_000;
 /** 超过这个时长的记录不再播报（避免下次正常重启时冒出陈旧通知） */
 const STALE_MS = 600_000;
 
@@ -147,13 +145,6 @@ function selfReplaced(
 ): boolean | undefined {
   if (before === undefined || after === undefined) return undefined;
   return before.get(ENTRY_ID) !== after.get(ENTRY_ID);
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolveDelay) => {
-    const timer = setTimeout(resolveDelay, ms);
-    timer.unref?.();
-  });
 }
 
 /**
@@ -225,8 +216,8 @@ export function createReloader(ctx: Context, logger: Logger, options?: ReloaderO
     run(notice?: ReloadNotice, bot?: QQBot): void {
       const startedAt = Date.now();
       const before = entryUids(loader);
+      // 先只记「往哪回」：结论要等 reconcile 跑完才知道，写在这里的就是待补发记录
       writeReloadState(statePath, {
-        phase: 'running',
         startedAt,
         ...(notice === undefined ? {} : { notify: notice }),
       }, logger);
@@ -272,23 +263,9 @@ export function createReloader(ctx: Context, logger: Logger, options?: ReloaderO
     },
 
     async announce(bot: QQBot): Promise<void> {
-      let state = readReloadState(statePath, logger);
-      if (state === undefined) return;
-
-      if (state.phase === 'running') {
-        // ready 可能早于结果落盘：等结果写下来；仍在 running 说明这一轮没跑完就退了
-        if (Date.now() - state.startedAt > IN_FLIGHT_MS) return;
-        for (let waited = 0; waited < SETTLE_MS; waited += SETTLE_POLL_MS) {
-          await delay(SETTLE_POLL_MS);
-          const settled = readReloadState(statePath, logger);
-          if (settled === undefined) return;
-          if (settled.phase !== 'running') {
-            state = settled;
-            break;
-          }
-        }
-        if (state.phase === 'running') return;
-      }
+      const state = readReloadState(statePath, logger);
+      // 还没跑完（没有 phase）：不猜等待，留给下一次命令前的补发
+      if (state === undefined || state.phase === undefined) return;
       await deliver(bot, state);
     },
   };
