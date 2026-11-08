@@ -17,7 +17,7 @@ set -eu
 PACKAGE="@tencent-connect/dsh-qqterm"
 VERSION=""
 REGISTRY=""
-PROFILE="qqbot"
+PROFILE="qqterm"
 
 # ── 参数解析 ──
 while [ $# -gt 0 ]; do
@@ -45,7 +45,7 @@ while [ $# -gt 0 ]; do
       echo "  --pkg <name>        指定 npm 包名 (默认: @tencent-connect/dsh-qqterm)"
       echo "  --version <ver>     指定包版本 (默认: latest)"
       echo "  --registry <url>    指定 npm registry"
-      echo "  --profile <name>    指定 dsh profile 名 (默认: qqbot)"
+      echo "  --profile <name>    指定 dsh profile 名 (默认: qqterm)"
       echo "  -h, --help          显示帮助"
       exit 0
       ;;
@@ -83,7 +83,7 @@ fi
 
 # ── 安装 ──
 echo "=================================================="
-echo "  安装 QQ Bot 插件到 dsh"
+echo "  安装 QQ 超级终端到 dsh"
 echo "=================================================="
 echo
 echo "  包名:     ${INSTALL_SPEC}"

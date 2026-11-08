@@ -1,6 +1,6 @@
 {
   "name": "@tencent-connect/dsh-qqterm",
-  "version": "0.6.0",
+  "version": "0.0.1",
   "icon": "./assets/icons/qq_logo.svg",
   "description": "QQ 超级终端：在 QQ 私聊里操作 DeepSeek Harness。 QQ SuperTerm: operate DeepSeek Harness from QQ private chats.",
   "type": "module",
@@ -46,14 +46,6 @@
   "license": "MIT",
   "engines": {
     "node": ">=20.3.0"
-  },
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/tencent-connect/dsh-qqterm.git"
-  },
-  "homepage": "https://github.com/tencent-connect/dsh-qqterm#readme",
-  "bugs": {
-    "url": "https://github.com/tencent-connect/dsh-qqterm/issues"
   },
   "dsh": {
     "bundle": {

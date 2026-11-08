@@ -193,7 +193,7 @@
 - 句子用全角标点 `，。；！？`；引号用 `「」`（会话标题、用户原话），不要 `""` / `''`。
 - 括号：中文内容用全角 `（…）`；纯 ASCII 内容用半角并在前留一个空格，如 `工作区内修改 (workspace-write)`。
 - 省略号用 `…`，不写 `...`；中文破折号用 `——`，不写 `—` 或 `--`。
-- 中文与英文 / 数字之间留一个半角空格：`约 128 tokens`、`dsh-qqterm v0.5.5`、`共 3 个`。
+- 中文与英文 / 数字之间留一个半角空格：`约 128 tokens`、`dsh-qqterm v0.0.1`、`共 3 个`。
 - 单位紧贴数字：`12ms`、`27m`、`2h10m`；计数用千分位且固定 en-US（`num()`），如 `1,234`。
 - 英文拟声与纯英文句用半角 `!`（`✅ pong!`）；中文句子用全角 `！`；同一句不混用。
 - 行内分隔统一 ` · `（前后各一个空格）；不要用 `|`、`、`、`/` 当分隔符（`/` 留给命令与模型 id）。
@@ -350,7 +350,7 @@ QQ 里只有一个聊天窗口，多个已获取会话的输出、提问、审�
 
 ## 6. 版本、打包与发布
 
-- **开发快照**：保持基线版本不变，只加 `-dev.N` 后缀（例：官方 `0.5.5` → 快照 `0.5.5-dev.0`）；不要把 dev 快照抬成 `0.5.6`。
+- **开发快照**：保持基线版本不变，只加 `-dev.N` 后缀（例：`0.0.1` → 快照 `0.0.1-dev.0`）；不要把快照抬成 `0.0.2`。
 - **正式发布**：更新 `CHANGELOG.md` 与 `CHANGELOG_EN.md`（Keep a Changelog 格式）→ 改版本号 → `pnpm build` → 打包/发布。
 - `prepublishOnly` 会再跑一次 build；发布前仍要确认 `lib/` 与 `src/` 一致。
 - 仓库不再带 CI 配置，没有自动流水线：发布由维护者本地 `pnpm build` 后打包/发布。
@@ -359,7 +359,7 @@ QQ 里只有一个聊天窗口，多个已获取会话的输出、提问、审�
 
 ## 7. 安装与 profile 隔离（联调）
 
-- **主 profile 禁止 `link:` 开发目录**：只装官方版或 `file:` 冻结快照，避免本地半成品在下次重启后直接影响线上机器人。
+- **主 profile 禁止 `link:` 开发目录**：只装已发布版本或 `file:` 冻结快照，避免本地半成品在下次重启后直接影响线上机器人。
 - 开发调试用独立 profile（本机为 `qqdev`）：独立机器人应用 + **tgz 实体副本 + HMR 常开**，与主 profile 并行、互不影响。开发 profile 与主 profile 用同一套安装方式，区别只是改完代码后走 `/bot-reload` 而不是重启。
 - 开发 profile 改完代码固定走热重载：
 
@@ -380,10 +380,10 @@ QQ 里只有一个聊天窗口，多个已获取会话的输出、提问、审�
   dsh plugin --profile web add file:<绝对路径>/.pack/tencent-connect-dsh-qqterm-<版本>-<时间戳>.tgz
   ```
 
-  本地快照 tgz 命名规则：`.pack/tencent-connect-dsh-qqterm-<版本>-YYYYMMDD-HHmm.tgz`（例：`.pack/tencent-connect-dsh-qqterm-0.5.5-dev.1-20261105-1029.tgz`）。`pnpm pack` 默认输出不带时间戳，打完按此规则重命名；同一版本重打保留旧包，不覆盖。`pnpm dev:reload` 已按此规则命名。
+  本地快照 tgz 命名规则：`.pack/tencent-connect-dsh-qqterm-<版本>-YYYYMMDD-HHmm.tgz`（例：`.pack/tencent-connect-dsh-qqterm-0.0.1-dev.1-20261105-1029.tgz`）。`pnpm pack` 默认输出不带时间戳，打完按此规则重命名；同一版本重打保留旧包，不覆盖。`pnpm dev:reload` 已按此规则命名。
 
   主 profile 装完必须重启 dsh（`dsh plugin add` 只装包，不会通知运行中的宿主）；客户端改动还要刷新页面。`node_modules` 里是实体副本，之后仓库改动不会自动进入 profile。
-- 回滚：`dsh plugin --profile web add @tencent-connect/dsh-qqterm@<官方版本>`，或恢复安装前备份的 `package.json` / `pnpm-lock.yaml`。
+- 回滚：`dsh plugin --profile web add @tencent-connect/dsh-qqterm@<已发布版本>`，或恢复安装前备份的 `package.json` / `pnpm-lock.yaml`。
 - profile 的 pnpm 版本要与它当前 `node_modules` 的 store 一致，而不是固定跟“创建时”的版本走：看 `~/.dsh/profiles/<name>/node_modules/.modules.yaml` 的 `packageManager` / `storeDir`（本机 web 当前为 `pnpm@12.4.2` / `store/v11`）。`dsh plugin` 调用 PATH 里的 `pnpm`，版本不匹配会报 `ERR_PNPM_UNEXPECTED_STORE`；此时换用与 `packageManager` 一致的 pnpm，不要用 `pnpm install` 迁移整个 profile 的 store。
 - 本地快照 tgz 是 profile 的依赖目标，不要删除或移动；重新打包会产生新路径。
 

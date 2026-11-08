@@ -2,27 +2,29 @@
 
 <img width="120" src="https://img.shields.io/badge/🤖-QQ_SuperTerm-blue?style=for-the-badge" alt="QQ SuperTerm" />
 
-**QQ 超级终端：基于 [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) (dsh) 的 QQ 渠道终端，在 QQ 私聊里操作 DeepSeek Harness。**
+**把 deepseek-harness 装进 QQ 私聊：会话、模型、权限、文件、审批，都在聊天窗口里完成。**
 
-[![npm version](https://img.shields.io/npm/v/@tencent-connect/dsh-qqterm)](https://www.npmjs.com/package/@tencent-connect/dsh-qqterm)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
-[![GitHub stars](https://img.shields.io/github/stars/tencent-connect/dsh-qqterm)](https://github.com/tencent-connect/dsh-qqterm)
 [![QQ Bot](https://img.shields.io/badge/QQ_Bot-API_v2-red)](https://bot.q.qq.com/wiki/)
+[![Node](https://img.shields.io/badge/node-%E2%89%A520.3-brightgreen)](https://nodejs.org/)
 
 <br/>
 
 **[English](./README_EN.md) | 简体中文**
 
-扫码加入 QQ 群 / 频道
-
-<table>
-<tr>
-<td align="center" width="50%"><img src="./assets/docs/qqgroup.jpg" height="360" alt="QQ 群二维码" /><br /><b>QQ 开发者交流群</b><br /><sub>1群: 1032635674 · 2群: 1056948758</sub></td>
-<td align="center" width="50%"><img src="./assets/docs/qqchannel.jpg" height="360" alt="QQ 频道二维码" /><br /><b>QQ 开发者社区频道</b><br /><sub>频道号: 20dnumts4z</sub></td>
-</tr>
-</table>
-
 </div>
+
+## 这是什么
+
+QQ 超级终端（`dsh-qqterm`）是 [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) 的 QQ 渠道终端。它把 dsh 的 agent 能力接到 QQ 私聊里：发一条消息就是一轮对话，发一条 `/` 开头的指令就能查看和切换会话、模型、思考强度、权限预设，也能让 agent 直接读写工作区、发送文件。
+
+特性：
+
+- **一个窗口就是终端** — 对话、指令、面板、菜单都在 QQ 私聊里，不需要另开网页或客户端。
+- **会话可切换** — `/sessions` 按工作区分组列出会话，`/to` 给任意会话发消息，后台会话继续跑并把结果发回 QQ。
+- **贴着宿主核心行为** — 模型、preset、思考强度、权限预设都走 dsh 自己的选择路径，插件不另存一套偏好。
+- **能干活** — 工作区读写、附件理解、文件发送、`ask_user_question` 问答、`approval` 审批确认。
+- **单用户私聊** — 只服务绑定的那一个人，群聊不支持；扫码即完成绑定。
 
 ## 架构
 
@@ -33,13 +35,15 @@ QQ 用户 → QQ WebSocket → dsh-qqterm → ctx.agents → dsh agent loop → 
                                        (assistant reply → QQ sendMarkdown)
 ```
 
+插件本身是一个纯 Cordis 插件：宿主加载 `lib/index.js`，浏览器加载 `lib/client.js` 提供设置页与侧栏入口，不修改宿主 loop。
+
 ## 安装
 
 ### 方式一：桌面版安装（推荐）
 
 无需命令行，全程在应用内完成：
 
-1. **安装**：左侧栏点击「插件」→「添加插件」→ 输入 `@tencent-connect/dsh-qqterm@latest` → 安装并立即启动
+1. **安装**：左侧栏点击「插件」→「添加插件」→ 输入 `@tencent-connect/dsh-qqterm` → 安装并立即启动
 
 <img src="./assets/docs/install.png" alt="端内添加插件" width="560" />
 
@@ -53,10 +57,10 @@ QQ 用户 → QQ WebSocket → dsh-qqterm → ctx.agents → dsh agent loop → 
 
 ```bash
 # 安装到 profile
-npx @deepseek-ai/dsh plugin --profile qqbot add @tencent-connect/dsh-qqterm
+npx @deepseek-ai/dsh plugin --profile qqterm add @tencent-connect/dsh-qqterm
 
 # 启动
-npx @deepseek-ai/dsh --profile qqbot
+npx @deepseek-ai/dsh --profile qqterm
 ```
 
 首次启动时，插件检测到凭据未配置会自动进入扫码引导：终端输出二维码 → 手机 QQ 扫码绑定 → 凭据自动保存到 profile，后续启动无需再次扫码。
@@ -64,8 +68,6 @@ npx @deepseek-ai/dsh --profile qqbot
 无端内绑定页的环境（如纯 CLI）可设置 `QQBOT_BIND_OPEN_BROWSER=1`，额外拉起系统浏览器扫码页作为降级通道。
 
 <img src="./assets/docs/qrcode.png" alt="二维码扫码示意图" width="280" />
-
-> **提示**：建议升级至 `0.4.0` 以上版本扫码，支持点击链接在浏览器打开，避免部分终端二维码渲染错位的问题。
 
 ### 方式三：本地路径安装
 
@@ -75,11 +77,11 @@ cd /path/to/dsh-qqterm
 pnpm install && pnpm build
 
 # 安装到 profile（本地路径）
-npx @deepseek-ai/dsh plugin --profile qqbot add /path/to/dsh-qqterm
+npx @deepseek-ai/dsh plugin --profile qqterm add /path/to/dsh-qqterm
 
 # 启动
 export QQBOT_APPID="你的AppID" QQBOT_SECRET="你的AppSecret"
-npx @deepseek-ai/dsh --profile qqbot
+npx @deepseek-ai/dsh --profile qqterm
 ```
 
 ### 方式四：--patch 开发模式
@@ -88,14 +90,6 @@ npx @deepseek-ai/dsh --profile qqbot
 export QQBOT_APPID="你的AppID" QQBOT_SECRET="你的AppSecret"
 npx @deepseek-ai/dsh web --patch /path/to/dsh-qqterm/cordis.dev.yml
 ```
-
-### 从旧版本升级（0.6.0）
-
-0.6.0 起项目改名为 **QQ 超级终端**（`dsh-qqterm`），与原 `dsh-qqbot` 彻底分开，不做兼容层：
-
-1. 包名换成 `@tencent-connect/dsh-qqterm`，重装到原 profile。
-2. profile 的 `cordis.patch.yml` 里把 `- id: im-qqbot` 改成 `- id: qqterm`，`config` 原样保留。
-3. 把 `~/.dsh-qqbot` 整个目录改名为 `~/.dsh-qqterm`（会话指针、被动回复凭据、网关票据、媒体缓存都在里面），旧目录不会自动迁移。
 
 ## 配置项
 
@@ -125,14 +119,13 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqterm/cordis.dev.yml
 
 ### 模型、preset 与思考强度
 
-模型与思考强度跟着**当前会话**走，preset 是**全局**设置，都沿用宿主核心行为：
+模型与思考强度跟着**当前会话**走，preset 是部署级设置，都沿用宿主核心行为：
 
-- 新会话（`/new`、第一条消息）取宿主核心的当前值：`settings.yaml` → 宿主 agentDefaultModel → `deepseek-official/deepseek-v4-flash`。插件不再提供 `provider` / `model` / `preset` 配置项。
+- 新会话（`/new`、第一条消息）取宿主核心的当前值：`settings.yaml` → 宿主 agentDefaultModel → `deepseek-official/deepseek-v4-flash`。插件配置里没有 `provider` / `model` / `preset`，这三项以宿主为准。
 - `/model` 走宿主同一条切换路径：选择记进当前会话（不重建、不改历史），下一轮生效；没有活跃会话时拒绝，先发一条消息。
 - `/reasoning` 走同一个入口：写进当前会话，下一轮生效；按核心行为，它同时成为全局的当前选择，新会话会跟随。
 - `/preset` 与设置页「设为默认」是同一个入口：写入的 preset 对之后新建的会话生效，已开始的会话保持自己的 preset。
 - 没有会话时，`/model`、`/reasoning`、`/permission` 的查看视图照常展示当前值——那就是核心默认值（新建会话会拿到的值），写法不变；切换仍要有会话。
-- 插件不存模型或 preset 偏好；旧版本按聊天 key 存的偏好不再生效，存量会话恢复时用它自己日志里的选择。
 
 ### 访问控制（access）
 
@@ -217,10 +210,10 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqterm/cordis.dev.yml
 
 工作区是宿主对「一个目录 + 跑在这个目录里的会话」的持久分组记录（`ctx.workspaceRegistry`），Web 侧栏看到的项目分组就是它。本插件遵循同一套规则：
 
-- **没有 `cwd` 配置**：会话的工作目录由宿主决定，插件不再写死一个目录。
+- **没有 `cwd` 配置**：会话的工作目录由宿主决定。
 - **新会话落在宿主的默认工作区**（首次使用时建在 `Documents/deepseek-harness/default-workspace`）；宿主没有默认工作区时退回 dsh 的启动目录。
 - **工作区跟着会话走**：`/sessions resume` 切到哪个会话，这个聊天的工作目录就变成那个会话的目录；之后 `/new` 也留在同一个工作区，重启后依然记得（记录在 `~/.dsh-qqterm/model-prefs.json` 的 `dirs` 里）。
-- **显示名用目录名**：插件不再给工作区起 `QQBot` 这种名字，宿主按目录最后一段自动命名；老版本留下的 `QQBot` 标题会在下次挂载时迁移成目录名（用户自己改过的名字不动）。
+- **显示名用目录名**：工作区标题由宿主按目录最后一段自动命名，你手动改过的标题不会被覆盖。
 
 ### 换工作区（`/new <工作区>`）
 
@@ -285,8 +278,9 @@ src/
 │   ├── qr-svg.ts               # 二维码 SVG 渲染（宿主侧）
 │   └── persist.ts              # 凭据写入 cordis.patch.yml
 ├── client/                     # 浏览器半边（dsh.client Web Bundle）
-│   ├── index.ts                # 侧栏 Tab 注册 + 待绑定自动引导
-│   └── bind-page.ts             # 端内绑定页（二维码 + 状态轮询）
+│   ├── index.ts                # 设置页/侧栏入口注册
+│   ├── bind-page.ts            # 端内绑定页（二维码 + 状态轮询）
+│   └── config-panel.ts         # 设置面板（可编辑配置）
 ├── gateway/                    # 网关装配
 │   ├── bootstrap.ts            # 启动装配（监听 session/event 等）
 │   └── middleware-setup.ts     # 中间件链配置
@@ -308,7 +302,9 @@ src/
 ├── features/                   # 交互特性
 │   ├── question-channel.ts     # ask_user_question 问答通道
 │   ├── approval-channel.ts     # approval 审批确认通道
-│   └── answer-parser.ts        # 答案解析
+│   ├── retry-channel.ts        # 失败重发卡片
+│   ├── command-panel.ts        # 指令面板同步
+│   └── command-menu.ts         # 自定义菜单同步
 ├── media/                      # 多媒体
 │   ├── vision-tool.ts          # 图片视觉理解
 │   ├── send-file-tool.ts       # 发送本地文件
@@ -319,8 +315,10 @@ src/
 │   └── attachment.ts           # 附件处理
 ├── shared/                     # 共享工具
 │   ├── utils.ts                # 通用函数
+│   ├── dirs.ts                 # 数据目录（~/.dsh-qqterm）
 │   ├── scope.ts                # scope/peer 提取
 │   └── send-helper.ts          # 分块发送
+├── reload/                     # /bot-reload（应用磁盘变更）
 └── commands/                   # 斜杠命令
 ```
 
