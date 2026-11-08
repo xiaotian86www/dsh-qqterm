@@ -34,6 +34,11 @@ export interface EnsureCredentialsOptions {
   source?: string;
   /** 当前生效配置（apply 时 loader 合并值；config 路由 GET 回显用） */
   config: Record<string, unknown>;
+  /**
+   * 已绑定态探测：扫码成功后本 fiber 直接启动网关时由调用方回填 appId。
+   * 不依赖 HMR 重载也能让状态接口从 saving 收敛到 bound。
+   */
+  boundAppId?: () => string | null;
 }
 
 /**
@@ -46,8 +51,9 @@ export interface EnsureCredentialsOptions {
  * settle，若 apply 无限期等待用户扫码，Host ready 会被阻塞
  * （Desktop 界面无法进入、Web URL 延迟输出）。
  *
- * 凭据持久化由调用方在 Promise 的 then 链中执行——成功写入
- * cordis.patch.yml 会触发 HMR 热重载，新 fiber 以凭据启动网关。
+ * 凭据持久化由调用方在 Promise 的 then 链中执行：成功写入
+ * cordis.patch.yml 让下次启动免扫码；宿主热重载到达时新 fiber 用凭据
+ * 启动网关，未到达时由调用方在原 fiber 内补启（见 src/index.ts）。
  */
 export async function ensureCredentials(
   ctx: Context,
@@ -83,6 +89,7 @@ export async function ensureCredentials(
   const webServer = (ctx as unknown as { webServer: WebServerLike }).webServer;
   {
     const disposeRoutes = registerBindRoutes(webServer, service, logger, {
+      ...(options.boundAppId === undefined ? {} : { boundAppId: options.boundAppId }),
       // 未绑定流程中的手动提交：终止扫码轮询，走同一持久化路径
       onManualCredentials: (credentials) => {
         service.dispose();

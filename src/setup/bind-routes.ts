@@ -322,9 +322,8 @@ function handleUnbind(req: IncomingMessage, res: ServerResponse, options: BindRo
     ? (() => {
         const removed = removeCredentialsFromProfile(getProfileDir() ?? undefined, undefined);
         if (removed) {
-          // 清除进程内凭据：扫码绑定成功时会写入 env（供热更新后的下次
-          // apply 兜底读取）；不清则 HMR 重载后新 fiber 仍从 env 读到
-          // 凭据，解绑不生效（状态一直停留在 bound）
+          // 清除进程内的环境变量凭据：凭据可能来自 QQBOT_APPID / QQBOT_SECRET，
+          // 不清则重载后的新 fiber 仍从 env 读到凭据，解绑不生效
           delete process.env.QQBOT_APPID;
           delete process.env.QQBOT_SECRET;
         }
