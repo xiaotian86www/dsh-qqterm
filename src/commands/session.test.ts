@@ -67,9 +67,9 @@ describe('/new 命令声明', () => {
 });
 
 describe('/reset /clear 命令声明', () => {
-  it('reset 是主名，clear 是别名，且不限作用域', () => {
+  it('clear 是主名，reset 是别名，且不限作用域', () => {
     const command = resetCommand({ manager: makeResetManager() as unknown as SessionManager });
-    expect(command.name).toEqual(['reset', 'clear']);
+    expect(command.name).toEqual(['clear', 'reset']);
     expect(command.scope).toBe('all');
   });
 });

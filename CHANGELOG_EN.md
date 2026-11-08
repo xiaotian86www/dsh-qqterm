@@ -19,6 +19,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 - **A failed approval delivery no longer swallows the request**: when the QQ card cannot be delivered (network, rate limit, rejected card), the approval is handed back to the host's other answerers so the Web GUI can still prompt; previously the plugin answered "unavailable" and the user saw nothing on either side, with the tool call failing without explanation.
 
+### Changed
+
+- **`/clear` is now the primary command**: the QQ command panel and `/bot-help` both show `/clear`, while `/reset` remains an alias — both spellings work, and `/clear all` equals `/reset all`.
+
 ### Added
 
 - **Restore the previous session automatically after a restart**: every time QQ becomes ready, the plugin reads `~/.dsh-qqbot/model-prefs.json` and re-attaches the last session, so `/status`, `/model` and `/cost` no longer report "no session" while one exists on disk; a failed restore never creates a new session and leaves the pointer untouched. The last interacting user is persisted too, so a failed restore (another client holds the session, or the host errors) pushes `⚠️ 上次的会话没能恢复` with a "retry" button; a session that no longer exists is skipped silently.

@@ -1302,7 +1302,7 @@ export class SessionManager {
   }
 
   /**
-   * `/reset` `/clear`：停掉当前会话，再换一个新铸的 id。
+   * `/clear` `/reset`：停掉当前会话，再换一个新铸的 id。
    *
    * 与 `remove()` 的区别：这里会把当前会话从已获取集合里摘掉——cancel 正在
    * 生成的回合，有 handle 的 dispose，借来的只丢引用；它不再回 QQ。其它已获取
@@ -1327,7 +1327,7 @@ export class SessionManager {
   }
 
   /**
-   * `/reset all` `/clear all`：停掉所有已获取会话，再换一个新铸的 id。
+   * `/clear all` `/reset all`：停掉所有已获取会话，再换一个新铸的 id。
    *
    * 不分 running / idle：全部 cancel、清 pending、有 handle 的 dispose，
    * 清空已获取集合后开新会话。工作区不变。

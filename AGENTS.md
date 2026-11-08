@@ -56,7 +56,7 @@
 
 - 插件只处理 C2C 私聊：群消息在 accessPolicy 层被拦掉，代码里不再有群聊分支。按钮键盘只在 C2C 可用，发送失败必须保留文本回退（现有实现会降级并记 warn）。改问答/审批时在 C2C 验证按钮回退。
 - `ask_user_question` / `approval` 走宿主 waterfall 通道，不要再退回 `userQuestions.ask` 这类服务探测式实现。QQ 卡片投递失败必须 `return nextFn()` 把请求交回宿主的其它通道（Web GUI 仍能弹窗），不能判成 `unavailable` 吞掉——否则用户在两边都看不到审批。
-- 聊天会话 key 固定为 `qqbot:${appId}:chat`：全 bot 只有一个「当前会话」，任何 QQ 窗口共享它；已获取集合（普通消息 / `/sessions resume` / `/to` 实际拿到 agent 的会话）可以有多份，全部输出回 QQ，非当前会话的消息首行标 `` > `#短id` · 标题 ``、末行给「回复」「恢复」两个链接（长回复只在首片带标题、末片带链接；提问 / 审批用同一个首行，见 §4.12）。`/sessions` 默认按工作区分组列出工作中会话（组标题带路径，行带 `生成中` / `空闲` 与当前 `✅`），`/sessions all` 看全部会话，只标 `📌`，不标当前。`/sessions resume` 与 `/new` 只改当前指针，切走不 dispose 旧会话；`/reset`（别名 `/clear`）会先停掉当前会话再开新的，`/reset all` 停掉全部已获取会话。`/stop` 只停当前会话，`/stop all` 停掉所有正在生成的已获取会话。没有映射即视为全新会话，会话 id 由 `mintSessionId()` 铸造。
+- 聊天会话 key 固定为 `qqbot:${appId}:chat`：全 bot 只有一个「当前会话」，任何 QQ 窗口共享它；已获取集合（普通消息 / `/sessions resume` / `/to` 实际拿到 agent 的会话）可以有多份，全部输出回 QQ，非当前会话的消息首行标 `` > `#短id` · 标题 ``、末行给「回复」「恢复」两个链接（长回复只在首片带标题、末片带链接；提问 / 审批用同一个首行，见 §4.12）。`/sessions` 默认按工作区分组列出工作中会话（组标题带路径，行带 `生成中` / `空闲` 与当前 `✅`），`/sessions all` 看全部会话，只标 `📌`，不标当前。`/sessions resume` 与 `/new` 只改当前指针，切走不 dispose 旧会话；`/clear`（别名 `/reset`）会先停掉当前会话再开新的，`/clear all` 停掉全部已获取会话。`/stop` 只停当前会话，`/stop all` 停掉所有正在生成的已获取会话。没有映射即视为全新会话，会话 id 由 `mintSessionId()` 铸造。
 - 启动即恢复上次会话：QQ `ready` 后网关调 `SessionManager.restoreCurrentSession()`，按 prefs 指针走 `getOrCreate` 接回（走 singleflight，启动瞬间来消息也只 resume 一次）；盘上已不存在则跳过并清掉指针（避免 `/sessions` 展示无法恢复的「待恢复」当前项），**恢复失败绝不新建**（沿用 `mayCreateAfterResumeFailure` 的语义）；占用 / 后端故障导致恢复失败时指针保持原样。这样「有会话」与「有 record」不会长期分叉，不需要为中间态另写展示分支。
 - 回复目标也持久化：`model-prefs.json` 的 `targets` 段（`sessionKey → openid`）在 `touch()` 里值变化时才写一次；启动恢复失败（locked / 宿主报错）用它主动推一条 `⚠️ 上次的会话没能恢复` + `/sessions resume #短id` 按钮，`not-found` 静默。持久化写在消息路径上而不是卸载钩子里——强杀 / 崩溃时卸载钩子不执行。
 - 模型 / preset / 思考强度尽量沿用宿主核心行为，插件不另立一套：插件不再有 `provider` / `model` / `preset` 配置项，新会话取核心默认值（`settings.yaml` → 宿主 agentDefaultModel → 兜底）。`/model` 与 `/reasoning` 都走宿主 `sessionController.selectModel`，选择记进当前会话的 `model/selection` 事件（不 fork、不重建、插件不另存偏好），下一轮生效；没有活跃会话时拒绝（`no-session`），宿主抛错回 `failed`。没有会话时 `/model`、`/reasoning`、`/permission` 的查看视图照常展示当前值（核心默认值，与新建会话会拿到的值一致，该条目同样标 `✅`），文案保持不变，不另造「全局」之类的标签；切换照旧要求有会话。宿主每次 `selectModel` 都会顺手把选择存成部署默认，按核心行为接受这一点，不要写回旧值。`/preset` 不按会话存待定值：它写核心 `agent-preset-registry` 的 `selectedDefault`（与设置页「设为默认」同一个 `settings.update` 入口），对之后新建的会话生效，已开始的会话保持自己的 preset；插件不存 preset。回显同样写「当前」，不标「全局」，也不补「之后新建的会话生效」这类提示（机制写在 README，不写进命令回复）。`create` / `resume` 的 `agentOptions` 传响应式 getter 读 `agentDefaultModel.currentSelection()`（会话自己记录过的选择优先）。插件只在 `~/.dsh-qqbot/model-prefs.json` 存 `sessionIds` / `dirs`，键是聊天 key。
@@ -66,6 +66,16 @@
 - 普通消息的入站处理在 `agent.followup()` 之后必须立刻返回：`concurrencyGuard` 以 QQ 用户为键，处理函数若 `await agent.whenIdle()` 会一直占着锁，正在生成的会话就把空闲会话的消息一起堵在队列里。会话内的先后由宿主 next-turn inbox 保证（`followup` 排在当前轮之后，不打断），跨会话必须互不阻塞。
 - 工具结果（成功与失败）只在 `showToolResults` 打开时推送到 QQ，默认一条都不发；失败消息按 §4.2 的两行格式给目标与原因，不是裸的「执行失败」。
 - 用户可见文案内联在 `src/` 对应模块（`locale/*.json` 只有插件 meta）；写法见 §4，注释与内部日志保持中文。
+
+### 3.5 简单优先（如无必要勿增实体）
+
+- **简单是所有方案设计里的第一要素**：先问「能不改结构解决吗」，再问「怎么改最小」；不是等实现完再看能不能减。
+- 适用范围不限于代码字段：模块 / 目录 / 文件、类型与选项、配置项、命令与子命令、状态与分支、异步流程与生命周期钩子、依赖、文档章节、测试辅助设施，每多一个实体都要先证明它必要。
+- 优先用现有结构表达：**默认值、名字顺序、已有别名、配置取值、已有事件与服务、现有命令的参数**；扩展优于新建，参数优于新命令，复用优于抽象。
+- 新增任何实体前回答三问：现有结构为什么表达不了？第二个使用方在哪？删掉它会坏掉哪个用户可见的行为？答案写进提交说明或注释，答不上来就不加。
+- 延迟抽象：只为单一场景存在的接口 / 基类 / 开关 / 适配层，等第二个使用方真的出现再抽；不为「以后可能要」预留。
+- 同一个事实只留一处来源：别名能解决的不再存显示名，顺序能表达的不再加覆盖字段，默认值能表达的不再写重复常量。
+- 简单不等于简陋：兼容契约（§3.2 插件 `name` / entry id、§3.3 客户端入口 id）、错误兜底与安全校验（§8）不因「少一个分支」而被删。
 
 ## 4. 用户可见文案格式规范
 

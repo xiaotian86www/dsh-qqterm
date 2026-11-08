@@ -158,7 +158,7 @@ The bot serves exactly one user: every other private chat is rejected, and group
 | Command | Description |
 |------|------|
 | `/new` | Start a new session (clear context); may take a workspace: `/new <workspace\|path>` |
-| `/reset` (alias `/clear`) | Stop the current session and start a new one in the same workspace; `/reset all` stops every acquired session |
+| `/clear` (alias `/reset`) | Stop the current session and start a new one in the same workspace; `/clear all` stops every acquired session |
 | `/compact` | Compact session history (replace old records with a summary) |
 | `/sessions` (alias `/session`) | Session management: group held sessions by workspace with status and the current marker by default; `all` for every workspace |
 | `/rename` | Rename the current session (the title is pinned against automatic titles) |

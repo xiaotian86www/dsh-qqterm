@@ -95,22 +95,25 @@ function describeChangeFailure(outcome: ChangeWorkspaceOutcome): string {
 }
 
 /**
- * /reset（别名 /clear）— 停掉当前会话，再在原工作区开新会话
+ * /clear（别名 /reset）— 停掉当前会话，再在原工作区开新会话
+ *
+ * 主名用 `clear`：指令面板与 `/bot-help` 都取第一个名字，`clear` 比 `reset`
+ * 更像是「清掉当前对话」；`reset` 作为别名继续可用，行为完全一致。
  *
  * 与 `/new` 的区别：`/new` 只把 current 指向新会话，旧会话继续在后台跑；
- * `/reset` 会 cancel 并释放当前会话，旧会话不再回 QQ。`/reset all` 停掉所有
+ * `/clear` 会 cancel 并释放当前会话，旧会话不再回 QQ。`/clear all` 停掉所有
  * 已获取会话。其它已获取会话不受影响（不带 all 时）。不支持工作区参数，
  * 换工作区用 `/new <工作区|路径>`。
  */
 export function resetCommand({ manager }: CommandDeps): CategorizedCommand {
   return {
-    name: ['reset', 'clear'],
+    name: ['clear', 'reset'],
     category: 'agent',
     scope: 'all',
     description: '停止当前会话并开启新会话，all 停全部',
     usage: [
-      '/reset',
-      '/reset all',
+      '/clear',
+      '/clear all',
       '',
       '停止当前会话，再在原工作区开启新会话。',
       '带 all：停掉所有已获取会话，再开启新会话。',
@@ -118,7 +121,7 @@ export function resetCommand({ manager }: CommandDeps): CategorizedCommand {
     ].join('\n'),
     handler: async (cmdCtx) => {
       const arg = (cmdCtx.command?.raw ?? '').trim();
-      const name = cmdCtx.command?.name ?? 'reset';
+      const name = cmdCtx.command?.name ?? 'clear';
 
       if (arg !== '') {
         if (arg.toLowerCase() !== 'all') {
