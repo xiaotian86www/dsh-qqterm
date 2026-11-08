@@ -353,7 +353,7 @@ QQ 里只有一个聊天窗口，多个已获取会话的输出、提问、审�
 - **开发快照**：保持基线版本不变，只加 `-dev.N` 后缀（例：官方 `0.5.5` → 快照 `0.5.5-dev.0`）；不要把 dev 快照抬成 `0.5.6`。
 - **正式发布**：更新 `CHANGELOG.md` 与 `CHANGELOG_EN.md`（Keep a Changelog 格式）→ 改版本号 → `pnpm build` → 打包/发布。
 - `prepublishOnly` 会再跑一次 build；发布前仍要确认 `lib/` 与 `src/` 一致。
-- 发布走内网 CI（`.orange-ci.yml` 引用 `git.woa.com` 配置），不要随意改动其 include。
+- 仓库不再带 CI 配置，没有自动流水线：发布由维护者本地 `pnpm build` 后打包/发布。
 - `ci:prepare-test-pkg` 会把包名改成 `@tencent/dsh-qqterm` 并改写 `cordis.patch.yml`，**只在一次性分支/临时目录运行**，不要把它的改动提交。
 - 宿主升级后：更新 `dsh.compatibility.dshReleases` 与 note，重新验收客户端槽位和扫码绑定全流程。
 
