@@ -350,4 +350,66 @@ describe('announce', () => {
 
     expect(bot.sendMarkdown).not.toHaveBeenCalled();
   });
+
+  it('连发两次重载时，第二轮不会顶掉第一轮的结果', async () => {
+    const path = statePath();
+    const bot = fakeBot();
+    // 本插件每轮都被替换：结果只能落盘，等新 fiber 的 ready 补发
+    let uid = 31;
+    const hmr = {
+      runExclusive: vi.fn(async (op: () => Promise<unknown>) => await op()),
+      reconcileProfile: vi.fn(async () => {
+        uid += 1;
+        return {};
+      }),
+    };
+    const reloader = createReloader(fakeContext({ hmr }, fakeLoader(() => uid)), logger, { statePath: path });
+
+    reloader.run({ targetId: 'u1' });
+    await vi.advanceTimersByTimeAsync(300);
+    expect(readReloadState(path)?.notify).toEqual({ targetId: 'u1' });
+
+    // 第二条 /bot-reload 到达：命令先补发上一轮，再开始新一轮
+    await reloader.announce(bot);
+    expect(bot.sendMarkdown).toHaveBeenCalledTimes(1);
+    expect(readReloadState(path)?.notify).toBeUndefined();
+
+    reloader.run({ targetId: 'u1' });
+    await vi.advanceTimersByTimeAsync(300);
+    await reloader.announce(bot);
+    expect(bot.sendMarkdown).toHaveBeenCalledTimes(2);
+  });
+
+  it('同一轮结果不会被补发两次', async () => {
+    const path = statePath();
+    let release: (value: unknown) => void = () => {};
+    const bot = {
+      sendMarkdown: vi.fn(
+        () => new Promise((resolve) => {
+          release = resolve;
+        }),
+      ),
+    } as unknown as QQBot & { sendMarkdown: ReturnType<typeof vi.fn> };
+    let uid = 41;
+    const hmr = {
+      runExclusive: vi.fn(async (op: () => Promise<unknown>) => await op()),
+      reconcileProfile: vi.fn(async () => {
+        uid = 42;
+        return {};
+      }),
+    };
+    const reloader = createReloader(fakeContext({ hmr }, fakeLoader(() => uid)), logger, { statePath: path });
+    reloader.run({ targetId: 'u1' });
+    await vi.advanceTimersByTimeAsync(300);
+
+    // ready 补发与「下次命令前补发」同时到达
+    const first = reloader.announce(bot);
+    const second = reloader.announce(bot);
+    expect(bot.sendMarkdown).toHaveBeenCalledTimes(1);
+
+    release({});
+    await first;
+    await second;
+    expect(readReloadState(path)?.notify).toBeUndefined();
+  });
 });

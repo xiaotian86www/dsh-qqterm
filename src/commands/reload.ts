@@ -37,6 +37,11 @@ export function reloadCommand({ config, reloader }: CommandDeps): CategorizedCom
         bot?: QQBot;
       }).replyTarget;
       const bot = (cmdCtx as unknown as { bot?: QQBot }).bot;
+
+      // 上一轮的结果可能还没送到（新 fiber 的 ready 补发之前又收到这条命令）：
+      // run() 会把状态改写成 running，那一轮的「应用了什么」就再也读不到了。
+      if (bot !== undefined) await reloader.announce(bot);
+
       const targetId = replyTarget?.targetId;
       reloader.run(
         targetId === undefined || targetId === ''

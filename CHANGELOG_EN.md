@@ -10,6 +10,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- **Sending `/bot-reload` twice no longer loses the first result**: the first command's outcome could only be written to disk and sent by the new instance on `ready`; if a second command arrived before that, its state was immediately rewritten as "running" and the first round's "what was applied" was gone for good — the user only saw one "nothing to apply". The command now delivers any pending result before scheduling a new round, and concurrent deliveries still send only once.
+
 - **No more dead "待恢复" current row after `/new` or `/clear`**: these commands used to mint a new session id into `model-prefs.json` right away, while the session itself was only created on the next message. In between, `/sessions` showed `**当前**: #id · 待恢复` with a "恢复当前" button that could only answer "no matching session". They now just clear the current pointer, so `/sessions` adds no current row and the next message creates a fresh session; archiving the current session also clears the pointer. `/sessions resume` and `/to` are unchanged.
 
 - **Messages sent during a `/bot-reload` or restart window are no longer lost**: the gateway session ticket (`session_id` plus the last received sequence) is now stored in `~/.dsh-qqbot/gateway/session.json`, so a new instance resumes the QQ gateway session and receives whatever was sent while the plugin was reloading; shutdown now stops receiving before tearing down sessions, so messages that arrived but were not handled are not marked as consumed. Previously the ticket lived only in memory, so every reload started a fresh connection, the platform never replayed the gap, and that message was gone for good.

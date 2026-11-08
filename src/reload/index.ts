@@ -186,8 +186,15 @@ export function createReloader(ctx: Context, logger: Logger, options?: ReloaderO
   const loader = services.get?.('loader') as LoaderLike | undefined;
   const statePath = options?.statePath ?? reloadStatePath(resolveProfileDir(ctx));
 
+  /**
+   * 结果投递串行化：新 fiber 的 ready 补发与「下次命令前补发」可能同时触发，
+   * 两条都会把上一轮的结果发一遍。后到的那条直接让位，先到的负责送达。
+   */
+  let delivering = false;
+
   /** 发结果通知；成功才清 notify，失败留给下一个 ready 重试 */
   const deliver = async (bot: QQBot, state: ReloadState): Promise<void> => {
+    if (delivering) return;
     const notice = state.notify;
     if (notice === undefined || notice.targetId === '') return;
     if (Date.now() - state.startedAt > STALE_MS) {
@@ -196,12 +203,19 @@ export function createReloader(ctx: Context, logger: Logger, options?: ReloaderO
     }
     const text = resultText(state);
     if (text === undefined) return;
+    delivering = true;
     try {
       // 被动回复凭证由 ReplyStore 提供（msg_id 已落盘），这里只给投递目标
       await bot.sendMarkdown({ scope: 'c2c', targetId: notice.targetId }, text);
-      writeReloadState(statePath, { ...state, notify: undefined }, logger);
+      // 只清这一轮的 notify：发送期间可能已有新一轮写下了自己的通知
+      const latest = readReloadState(statePath, logger);
+      if (latest !== undefined && latest.startedAt === state.startedAt) {
+        writeReloadState(statePath, { ...latest, notify: undefined }, logger);
+      }
     } catch (err) {
       logger.warn(`热重载结果通知失败: ${errorText(err)}`);
+    } finally {
+      delivering = false;
     }
   };
 
