@@ -27,7 +27,6 @@ const APP_ID = 'app1';
 const PEER = 'user1';
 /** 聊天会话只有一个 */
 const KEY = `qqbot:${APP_ID}:chat`;
-const MINTED = /^session-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const REPLY: ReplyTarget = { scope: 'c2c', targetId: PEER };
 const PEER_B = 'user2';
 const REPLY_B: ReplyTarget = { scope: 'c2c', targetId: PEER_B };
@@ -501,7 +500,7 @@ describe('switchSession', () => {
 });
 
 describe('archiveSession', () => {
-  it('归档当前会话：释放记录、写归档集、把映射换成新会话', async () => {
+  it('归档当前会话：释放记录、写归档集、清空映射', async () => {
     const id = 'session-doomed';
     new PrefsStore().setSessionId(KEY, id);
     const ctx = createCtx({ sessions: [{ id, cwd: WORKSPACE() }] });
@@ -518,8 +517,8 @@ describe('archiveSession', () => {
     expect(handles[0]?.dispose).toHaveBeenCalled();
     expect(manager.getSessionRecord('c2c', PEER)).toBeUndefined();
     // 映射不能还指着归档会话，否则下一条消息会被宿主的 pre-step 闸门拒掉
-    expect(persistedId()).toMatch(MINTED);
-    expect(persistedId()).not.toBe(id);
+    expect(persistedId()).toBeUndefined();
+    expect(manager.currentSessionId()).toBeUndefined();
   });
 
   it('归档别的会话：映射不指向它就保持不变', async () => {
@@ -764,7 +763,7 @@ describe('changeChatWorkspace（换工作区）', () => {
     });
     const { registry } = createRegistry();
     registry.resume.mockImplementation(async ({ resumeSessionId }: { resumeSessionId: string }) => {
-      // 老会话能 resume，/new 铸出来的新 id 不在盘上 → 走创建分支
+      // 老会话能 resume；/new 清掉指针后没有会话，直接走创建分支
       if (resumeSessionId === 'session-a') return fakeHandle('session-a', WORKSPACE());
       throw new Error('session not found');
     });
@@ -955,7 +954,7 @@ describe('多会话：已获取集合 / /to / 切走不释放', () => {
     expect(agent.cancel).not.toHaveBeenCalled();
   });
 
-  it('resetCurrentSession 停掉当前 owned 会话并换新 id，其它已获取会话不动', async () => {
+  it('resetCurrentSession 停掉当前 owned 会话并清空指针，其它已获取会话不动', async () => {
     const { registry } = liveRegistry();
     const ctx = createCtx({ sessions: [{ id: 'session-current', cwd: WORKSPACE() }] });
     const { manager } = createManager(ctx, registry);
@@ -971,7 +970,7 @@ describe('多会话：已获取集合 / /to / 切走不释放', () => {
     expect(current.handle?.dispose).toHaveBeenCalled();
     expect(manager.findBySessionId(current.sessionId)).toBeUndefined();
     expect(manager.findBySessionId(TARGET)).toBeDefined();
-    expect(manager.currentSessionId()).not.toBe(current.sessionId);
+    expect(manager.currentSessionId()).toBeUndefined();
     expect(manager.getSessionRecord('c2c', PEER)).toBeUndefined();
     expect(cancelPending).toHaveBeenCalledWith(current.sessionId);
   });
@@ -991,16 +990,16 @@ describe('多会话：已获取集合 / /to / 切走不释放', () => {
     expect(manager.findBySessionId(TARGET)).toBeUndefined();
   });
 
-  it('resetCurrentSession 没有当前会话时只换新 id', async () => {
+  it('resetCurrentSession 没有当前会话时保持空指针', async () => {
     const ctx = createCtx({ sessions: [] });
     const { manager } = createManager(ctx);
-    const before = manager.currentSessionId();
+    expect(manager.currentSessionId()).toBeUndefined();
 
     expect(await manager.resetCurrentSession()).toBe(false);
-    expect(manager.currentSessionId()).not.toBe(before);
+    expect(manager.currentSessionId()).toBeUndefined();
   });
 
-  it('resetAllSessions 停掉 owned 与借来的全部会话，再换新 id', async () => {
+  it('resetAllSessions 停掉 owned 与借来的全部会话，并清空指针', async () => {
     const { agent, registry } = liveRegistry();
     const ctx = createCtx({ sessions: [{ id: 'session-current', cwd: WORKSPACE() }] });
     const { manager } = createManager(ctx, registry);
@@ -1014,7 +1013,7 @@ describe('多会话：已获取集合 / /to / 切走不释放', () => {
     expect(current.handle?.dispose).toHaveBeenCalled();
     expect(agent.cancel).toHaveBeenCalledWith({ kind: 'user' });
     expect(manager.size).toBe(0);
-    expect(manager.currentSessionId()).not.toBe(current.sessionId);
+    expect(manager.currentSessionId()).toBeUndefined();
     expect(manager.getSessionRecord('c2c', PEER)).toBeUndefined();
   });
 

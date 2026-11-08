@@ -311,7 +311,7 @@ describe('getOrCreate — E1 resume 失败按会话是否存在分流', () => {
 });
 
 describe('getOrCreate — E2 并发改写映射', () => {
-  it('E2-1 resume 期间 /new 写入新 id → 采用 prefs 最新 id 新建，内存与 prefs 一致', async () => {
+  it('E2-1 resume 期间 /new 清空指针 → 不写占位 id，resume 失败后按候选 id 创建', async () => {
     const pending = deferred<DshAgentHandle>();
     const { registry } = createRegistry(() => pending.promise);
     const manager = createManager(registry);
@@ -319,14 +319,14 @@ describe('getOrCreate — E2 并发改写映射', () => {
     const creating = manager.getOrCreate('c2c', PEER, PEER, REPLY);
     await vi.waitFor(() => expect(registry.resume).toHaveBeenCalled());
     const candidate = registry.resume.mock.calls[0]![0].resumeSessionId;
-    await manager.remove(); // /new：同步把 prefs 写为新铸 id
+    await manager.remove(); // /new：清指针，不铸 id
+    expect(persistedId()).toBeUndefined();
     pending.reject(notFound(candidate));
     const record = await creating;
 
-    expect(record.sessionId).toMatch(MINTED);
-    expect(record.sessionId).not.toBe(candidate);
-    expect(createdIds(registry)).toEqual([record.sessionId]);
-    expect(persistedId()).toBe(record.sessionId); // 重启后仍是同一会话
+    expect(record.sessionId).toBe(candidate);
+    expect(createdIds(registry)).toEqual([candidate]);
+    expect(persistedId()).toBe(candidate); // 只落真实存在的会话
   });
 
   it('preset 没有压缩能力时返回 no-compaction', async () => {
@@ -880,7 +880,7 @@ describe('restoreCurrentSession — 启动恢复上次会话', () => {
     expect(new PrefsStore().getTarget(KEY)).toBe(PEER_B);
   });
 
-  it('盘上已不存在：不 resume、不创建，清除死指针并返回 none（重启前 /new 留下的占位指针也走这条路）', async () => {
+  it('盘上已不存在：不 resume、不创建，清除死指针并返回 none', async () => {
     new PrefsStore().setSessionId(KEY, 'session-gone');
     new PrefsStore().setTarget(KEY, PEER);
     const { registry } = createRegistry(async ({ resumeSessionId }) => fakeHandle(resumeSessionId));

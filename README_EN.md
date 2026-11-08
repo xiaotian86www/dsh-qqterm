@@ -223,13 +223,13 @@ Notes:
 
 - **Handle rule**: every row shows an 8-char short id (like `#3f2a9b1c`; the `#` is optional) that works from any view; an **index only means a row of the `/sessions` held list**, and it stays continuous across groups and pages. `all` / `archived` / the archive picker show no indexes.
 - **Paging**: multi-page views use `上一页 · 第 1/2 页 · 下一页` in the footer, omitting the missing direction; the page number is not in the title and "N more" is not shown.
-- Status words appear only in the held list: `生成中` (agent running), `空闲` (held but idle); a current pointer that has not been acquired yet shows `待恢复`. Other views only mark acquired sessions with `📌` (QQ holds it), with no current marker and no status.
+- Status words appear only in the held list: `生成中` (agent running), `空闲` (held but idle); a current pointer that has not been acquired yet shows `待恢复`. After `/new` there is no current pointer, so no such line is added. Other views only mark acquired sessions with `📌` (QQ holds it), with no current marker and no status.
 - Private chat only, and the operator must be the single bound user (`access.owner`) — titles and archive state touch other chats' data; with no owner configured the command is disabled (`/bot-me` shows your OpenID).
 - Archiving goes through the host `workspaceRegistry.archiveSession` and only writes the registry-global archive set — **no file is deleted**. This plugin offers no hard delete; clean up on disk from the Web side or by hand.
 - Archiving goes through the host `workspaceRegistry.archiveSession`; `workspaceRegistry` is part of the plugin's `inject`, so a profile missing it keeps the plugin inactive rather than exposing a half-working command.
-- Archiving disposes the session's agent in this process; if it is the current session, the chat mapping is also repointed to a new session — an archived session is rejected by the host `agent/pre-step` gate, so a chat left bound to it would stop getting replies.
+- Archiving disposes the session's agent in this process; if it is the current session, the chat mapping is cleared and the next message lands in a brand-new session — an archived session is rejected by the host `agent/pre-step` gate, so a chat left bound to it would stop getting replies.
 - **Several sessions can stay live at once**: a session joins the acquired set when a normal message, `/sessions resume`, or `/to` actually gets its agent. Output, questions, and approvals from every acquired session go back to QQ; the current session is untagged, while messages from other sessions get a separate source line `#shortid · title` before the body and a `/to` reply link at the end. The acquired set is runtime-only — after a restart only the current session is restored from `model-prefs.json`.
-- **Switching does not release**: `/sessions resume` only moves the current pointer; the old session keeps running and its output keeps flowing to QQ. `/new` behaves the same. On unload the plugin disposes only the agents it created; borrowed Web/TUI agents are just dereferenced.
+- **Switching does not release**: `/sessions resume` only moves the current pointer; the old session keeps running and its output keeps flowing to QQ. `/new` only clears the current pointer, and the old session keeps running too. On unload the plugin disposes only the agents it created; borrowed Web/TUI agents are just dereferenced.
 - **Questions are routed per session**: the current session answers with plain text; buttons from other sessions carry the session id and work when clicked; questions without buttons append a `/to #id ` link. A plain message that did not come through a link is never forwarded to the current model — the user is told to use a button or `/to`.
 - The held list is ordered "current → other held (by acquisition time)". The time column is the **creation time** (the host header stores no "last used" timestamp).
 - After a cross-workspace resume the agent works inside **that session's own directory**, and the file-send allowlist follows it.
@@ -282,7 +282,7 @@ src/
 
 ## Session Routing
 
-The chat session key is `qqbot:${appId}:chat`; it only decides which session is *current*. Acquired sessions can be multiple. A UUID session id is minted for new sessions and persisted to `model-prefs.json`; after a restart only the current session resumes from that id. No mapping means a fresh chat session.
+The chat session key is `qqbot:${appId}:chat`; it only decides which session is *current*. Acquired sessions can be multiple. A UUID session id is minted the first time the current session is actually used and persisted to `model-prefs.json`; after a restart only the current session resumes from that id. No mapping means a fresh chat session. `/new` and `/clear` only clear that mapping (and, for `/clear`, the current session) — they never pre-mint a session that does not exist yet.
 
 Resolution strategy: acquired record → in-process live agent → persisted resume → fresh create (current session only; `/sessions resume` never creates).
 

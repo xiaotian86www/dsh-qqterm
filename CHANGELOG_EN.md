@@ -10,6 +10,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- **No more dead "待恢复" current row after `/new` or `/clear`**: these commands used to mint a new session id into `model-prefs.json` right away, while the session itself was only created on the next message. In between, `/sessions` showed `**当前**: #id · 待恢复` with a "恢复当前" button that could only answer "no matching session". They now just clear the current pointer, so `/sessions` adds no current row and the next message creates a fresh session; archiving the current session also clears the pointer. `/sessions resume` and `/to` are unchanged.
+
 - **Messages sent during a `/bot-reload` or restart window are no longer lost**: the gateway session ticket (`session_id` plus the last received sequence) is now stored in `~/.dsh-qqbot/gateway/session.json`, so a new instance resumes the QQ gateway session and receives whatever was sent while the plugin was reloading; shutdown now stops receiving before tearing down sessions, so messages that arrived but were not handled are not marked as consumed. Previously the ticket lived only in memory, so every reload started a fresh connection, the platform never replayed the gap, and that message was gone for good.
 - **Messages still reach the original message after a restart or a hot reload**: passive-reply credentials (msg_id plus the number of uses) are now kept in `~/.dsh-qqbot/reply-ids.json`, so the first reply after a restart or `/bot-reload` is still a passive reply instead of degrading to a proactive push immediately, and per-message reply counts carry across restarts instead of resetting and hitting platform limits sooner. Once the platform window (30 minutes for private chat) or the reply count is exhausted it still degrades automatically; `event_id` stays in memory only (the platform does not promise it across restarts).
 - **Every send path shares one credential store**: command replies, image/video/voice/file sends, streaming output and slash-command receipts inside the SDK all resolve credentials through the same entry point, so the per-path caches are gone — command replies no longer bypass the limiter, and the "no msgid after a restart" problem disappears.
@@ -21,6 +23,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **A failed approval delivery no longer swallows the request**: when the QQ card cannot be delivered (network, rate limit, rejected card), the approval is handed back to the host's other answerers so the Web GUI can still prompt; previously the plugin answered "unavailable" and the user saw nothing on either side, with the tool call failing without explanation.
 
 ### Changed
+
+- **The empty list no longer adds a "current workspace" row**: when `/sessions` had no working sessions it used to show the workspace the next message would land in (the host default workspace if no session had ever been created). The session list only talks about sessions now; the empty state is just "还没有工作中会话".
 
 - **`/clear` is now the primary command**: the QQ command panel and `/bot-help` both show `/clear`, while `/reset` remains an alias — both spellings work, and `/clear all` equals `/reset all`.
 

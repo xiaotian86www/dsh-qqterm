@@ -315,13 +315,6 @@ function pageLinks(
   return links;
 }
 
-/** 当前工作区摘要（/sessions 顶部那行） */
-interface WorkspaceSummary {
-  title: string;
-  path: string;
-  missing: boolean;
-}
-
 export function sessionsCommand({ manager, config, logger }: CommandDeps): CategorizedCommand {
   return {
     name: ['sessions', 'session'],
@@ -373,16 +366,6 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Categ
         }
       };
 
-      /** 当前工作区信息：标题 + 路径 + 目录是否还在 */
-      const loadWorkspaceInfo = async (): Promise<WorkspaceSummary | undefined> => {
-        try {
-          return await manager.currentWorkspaceInfo(scope, peerId);
-        } catch (err) {
-          logger?.debug?.(`/sessions 读取工作区信息失败: ${err instanceof Error ? err.message : String(err)}`);
-          return undefined;
-        }
-      };
-
       /** 全量会话（跨工作区、按 id 去重），用于 id 前缀解析与归档页 */
       const flattenGroups = (groups: readonly WorkspaceGroup[]): WorkspaceSession[] => {
         const seen = new Set<string>();
@@ -419,8 +402,7 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Categ
           case 'list': {
             const loaded = await loadHeld();
             if (typeof loaded === 'string') return loaded;
-            const workspace = await loadWorkspaceInfo();
-            return renderHeldList(loaded, workspace, manager.currentSessionId(), page);
+            return renderHeldList(loaded, manager.currentSessionId(), page);
           }
 
           case 'workspace':
@@ -699,7 +681,6 @@ function groupHeldOrder(entries: readonly WorkspaceSession[]): WorkspaceSession[
  */
 function renderHeldList(
   entries: readonly WorkspaceSession[],
-  workspace: WorkspaceSummary | undefined,
   currentId: string | undefined,
   page: number,
 ): string {
@@ -725,11 +706,6 @@ function renderHeldList(
   if (currentLineId !== undefined) {
     const status = currentEntry === undefined ? '待恢复' : statusOf(currentEntry);
     fields.push(`**当前**: ${displayId(currentLineId)} · ${status}`);
-  }
-  // 空列表没有分组可看，补一行当前工作区，说明下一条消息会落在哪
-  if (total === 0 && workspace !== undefined) {
-    if (fields.length > 0) fields.push('');
-    fields.push(...workspaceHeader(workspace.title, workspace.path, workspace.missing));
   }
 
   const lines: string[] = [

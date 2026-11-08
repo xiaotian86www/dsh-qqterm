@@ -1,8 +1,8 @@
 /**
  * 会话相关命令
  *
- * - /new：开始新会话（换新 sessionId），可顺带指定工作区
- * - /reset（别名 /clear）：停掉当前会话，再在原工作区开新会话
+ * - /new：清空当前会话（下一条消息新建），可顺带指定工作区
+ * - /reset（别名 /clear）：停掉当前会话，再在原工作区重新开始
  * - /compact：原地压缩会话历史（保留 sessionId，摘要替换旧历史）
  *
  * 两者都对应底层 dsh agent 能力，分类为 agent（通用能力）。
@@ -100,7 +100,7 @@ function describeChangeFailure(outcome: ChangeWorkspaceOutcome): string {
  * 主名用 `clear`：指令面板与 `/bot-help` 都取第一个名字，`clear` 比 `reset`
  * 更像是「清掉当前对话」；`reset` 作为别名继续可用，行为完全一致。
  *
- * 与 `/new` 的区别：`/new` 只把 current 指向新会话，旧会话继续在后台跑；
+ * 与 `/new` 的区别：`/new` 只清掉当前指针，旧会话继续在后台跑；
  * `/clear` 会 cancel 并释放当前会话，旧会话不再回 QQ。`/clear all` 停掉所有
  * 已获取会话。其它已获取会话不受影响（不带 all 时）。不支持工作区参数，
  * 换工作区用 `/new <工作区|路径>`。

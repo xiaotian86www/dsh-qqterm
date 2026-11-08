@@ -44,7 +44,7 @@ function entry(over: Partial<WorkspaceSession> = {}): WorkspaceSession {
 }
 
 type ManagerStub = Partial<Record<
-  'listWorkspaceSessions' | 'listHeldSessions' | 'listWorkspaceGroups' | 'currentWorkspaceInfo'
+  'listWorkspaceSessions' | 'listHeldSessions' | 'listWorkspaceGroups'
   | 'currentSessionId' | 'switchSession' | 'renameSession' | 'archiveSession' | 'unarchiveSession' | 'directoryForAgent',
   unknown
 >>;
@@ -66,7 +66,6 @@ function makeManager(over: ManagerStub = {}) {
       // 真实 manager 会给每条补所属工作区标题，归档页靠它区分同名会话
       sessions: (await list()).map((item) => ({ ...item, workspace: 'repo' })),
     }]),
-    currentWorkspaceInfo: vi.fn(async () => ({ title: 'repo', path: '/repo', missing: false })),
     currentSessionId: vi.fn(() => undefined),
     switchSession: vi.fn(async () => ({ ok: true })),
     renameSession: vi.fn(() => ({ ok: true, title: '改好的名字' })),
@@ -305,9 +304,24 @@ describe('/sessions 持有视图', () => {
     const text = await run(manager, '');
     expect(text).toContain('工作中会话（0 个工作区 · 0 个会话）');
     expect(text).toContain('还没有工作中会话');
+    expect(text).not.toContain('**repo**');
     expect(text).toContain('<qqbot-cmd-input text="/sessions archive" show="归档"/>');
     expect(text).toContain('<qqbot-cmd-input text="/sessions all" show="全部会话"/>');
     expect(text).not.toContain('/sessions workspace');
+  });
+
+  it('/new 之后没有当前指针：不补当前行，也不发「恢复当前」', async () => {
+    const manager = makeManager({
+      listHeldSessions: vi.fn(async () => [entry({ held: true, title: '后台会话' })]),
+      currentSessionId: vi.fn(() => undefined),
+    });
+    const text = await run(manager, '');
+
+    expect(text).toContain('后台会话');
+    expect(text).not.toContain('**当前**');
+    expect(text).not.toContain('待恢复');
+    expect(text).not.toContain('show="恢复当前"');
+    expect(text).not.toContain(' ✅');
   });
 
   it('列举持有会话失败时回显原因而不是抛错', async () => {

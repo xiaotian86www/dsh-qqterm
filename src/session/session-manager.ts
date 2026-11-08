@@ -187,7 +187,7 @@ function toHostSelection(input: {
 export class SessionManager {
   /** 已获取集合：sessionId → 记录（普通消息 / resume / /to 实际拿到 agent 的） */
   private readonly records = new Map<string, SessionRecord>();
-  /** 每个聊天当前接的会话：chatKey → sessionId（未落记录时也可以指向新铸的 id） */
+  /** 每个聊天当前接的会话：chatKey → sessionId；无会话就是没有这一项 */
   private readonly currentByKey = new Map<string, string>();
   /**
    * 同 key 正在进行的 getOrCreate（singleflight）。
@@ -769,7 +769,11 @@ export class SessionManager {
     return this.currentRecord();
   }
 
-  /** 当前聊天接的会话 id（内存指针优先，其次 prefs 里落盘的映射） */
+  /**
+   * 当前聊天接的会话 id（内存指针优先，其次 prefs 里落盘的映射）。
+   *
+   * 两处都为空 = 这个聊天还没有会话（首次使用或刚 `/new`），不是错误状态。
+   */
   currentSessionId(key: string = this.sessionKey()): string | undefined {
     return this.currentByKey.get(key) ?? this.modelResolver.getSessionId(key);
   }
@@ -1111,6 +1115,18 @@ export class SessionManager {
     this.persistSessionId(key, sessionId);
   }
 
+  /**
+   * 清掉当前指针：“这个聊天现在没有会话，下一条消息再建”。
+   *
+   * 内存与 prefs 一起清，避免 `currentSessionId()` 的两处来源指向不同状态；
+   * 目录保留，新会话仍落在上次的工作区。删空不是中间态，而是与“从未聊过”
+   * 完全相同的空状态——不需要为它另设展示分支。
+   */
+  private clearCurrent(key: string): void {
+    this.currentByKey.delete(key);
+    if (this.modelResolver.getSessionId(key) !== undefined) this.modelResolver.clearSessionId(key);
+  }
+
   /** getOrCreate 的实际打开流程（已通过 singleflight 保证同 key 串行） */
   private async openSession(
     key: string,
@@ -1119,9 +1135,9 @@ export class SessionManager {
     senderId: string,
     replyTarget: ReplyTarget,
   ): Promise<SessionRecord> {
-    // prefs 命中 = 已知存量会话；miss = 全新会话，铸一个新 id 去试 resume（自然 miss）后创建
+    // prefs 命中 = 已知存量会话；miss = 全新会话（含刚按过 `/new`），铸一个新 id 后创建
     const mapped = this.modelResolver.getSessionId(key);
-    let sessionId = SessionId(mapped ?? mintSessionId());
+    const sessionId = SessionId(mapped ?? mintSessionId());
     this.logger.info(`getOrCreate: key=${key} sessionId=${sessionId}`);
 
     // 这个聊天的工作目录：新会话落在它里面，恢复的会话以它自己的 header 为准
@@ -1167,7 +1183,6 @@ export class SessionManager {
         this.logger.info(`resumed session: key=${key} preset=${agentPreset ?? 'none'} route=${resumedRoute.provider}/${resumedRoute.model}`);
       } catch (err) {
         if (!(await this.mayCreateAfterResumeFailure(key, sessionId, err))) throw err;
-        sessionId = this.resolveCreateId(key, sessionId);
         mkdirSync(directory, { recursive: true });
         const createOptions = this.agentOptionsFor();
         const created = await this.agents.create({
@@ -1244,22 +1259,6 @@ export class SessionManager {
   }
 
   /**
-   * 确认候选会话缺失后决定用哪个 id 新建。
-   *
-   * resume 等待期间 prefs 被并发改写（`/new` 换新会话）：采用 prefs 的最新 id，
-   * 否则内存与 prefs 指向不同会话，重启后用户被切走；否则沿用候选 id 新建，
-   * prefs 无需改写。
-   */
-  private resolveCreateId(key: string, candidate: SessionId): SessionId {
-    const latest = this.modelResolver.getSessionId(key);
-    if (latest !== undefined && latest !== candidate) {
-      this.logger.info(`adopting concurrently written session id: key=${key} sessionId=${latest}`);
-      return SessionId(latest);
-    }
-    return candidate;
-  }
-
-  /**
    * 按 sessionId 查已获取记录。
    *
    * 宿主把同一个 id 换成了另一个 live agent（外部 dispose 后重开）时，旧记录
@@ -1289,20 +1288,20 @@ export class SessionManager {
   }
 
   /**
-   * `/new`：只把当前指针换到一个新铸的 id。
+   * `/new`：清掉当前指针，下一条消息再建会话。
    *
    * 旧会话仍然 live、仍在已获取集合里，继续把输出发回 QQ（带 `#短id`）；
-   * 不 cancel、不 dispose、不清 pending。
+   * 不 cancel、不 dispose、不清 pending。这里不预先铸 id：没有会话就是没有
+   * 指针，`/sessions` 不会显示一条点「恢复」必然失败的当前项。
    */
   async remove(): Promise<void> {
     const key = this.sessionKey();
-    const nextId = mintSessionId();
-    this.setCurrent(key, nextId);
-    this.logger.info(`new session started: key=${key} (previously acquired sessions stay live)`);
+    this.clearCurrent(key);
+    this.logger.info(`new session: key=${key} (current cleared; previously acquired sessions stay live)`);
   }
 
   /**
-   * `/clear` `/reset`：停掉当前会话，再换一个新铸的 id。
+   * `/clear` `/reset`：停掉当前会话，再清空指针。
    *
    * 与 `remove()` 的区别：这里会把当前会话从已获取集合里摘掉——cancel 正在
    * 生成的回合，有 handle 的 dispose，借来的只丢引用；它不再回 QQ。其它已获取
@@ -1313,11 +1312,11 @@ export class SessionManager {
   async resetCurrentSession(): Promise<boolean> {
     const key = this.sessionKey();
     const record = this.currentRecord(key);
-    // 先挪指针再释放：dispose 可能要等，期间新消息不能又落回旧会话
-    this.setCurrent(key, mintSessionId());
+    // 先清指针再释放：dispose 可能要等，期间新消息不能又落回旧会话
+    this.clearCurrent(key);
 
     if (!record) {
-      this.logger.info(`new session started: key=${key} (no current session to stop)`);
+      this.logger.info(`new session: key=${key} (no current session to stop)`);
       return false;
     }
 
@@ -1327,18 +1326,18 @@ export class SessionManager {
   }
 
   /**
-   * `/clear all` `/reset all`：停掉所有已获取会话，再换一个新铸的 id。
+   * `/clear all` `/reset all`：停掉所有已获取会话，再清空指针。
    *
    * 不分 running / idle：全部 cancel、清 pending、有 handle 的 dispose，
-   * 清空已获取集合后开新会话。工作区不变。
+   * 清空已获取集合后回到“没有会话”。工作区不变。
    *
    * @returns 被停掉的会话数
    */
   async resetAllSessions(): Promise<number> {
     const key = this.sessionKey();
     const records = [...this.records.values()];
-    // 先挪指针：循环里的 await 期间新消息不能落回任何一个旧会话
-    this.setCurrent(key, mintSessionId());
+    // 先清指针：循环里的 await 期间新消息不能落回任何一个旧会话
+    this.clearCurrent(key);
 
     for (const record of records) {
       await this.dropRecord(record, { cancel: true, dispose: true });
@@ -2002,11 +2001,11 @@ export class SessionManager {
       return outcome;
     }
 
-    // 3) 悬空映射换成新 id，下一条消息落到全新会话
+    // 3) 清掉指向归档会话的映射，下一条消息落到全新会话
     let remapped = 0;
     const key = this.sessionKey();
     if (this.currentSessionId(key) === sessionId) {
-      this.setCurrent(key, mintSessionId());
+      this.clearCurrent(key);
       remapped = 1;
     }
 
