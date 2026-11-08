@@ -6,7 +6,6 @@
  */
 import type { MiddlewareContext } from '@tencent-connect/qqbot-nodejs';
 import type { SessionManager } from '../session/index.ts';
-import { cacheMsgId } from '../transport/msgid-cache.ts';
 
 export function questionAnswer(manager: SessionManager) {
   return async (ctx: MiddlewareContext, next: () => Promise<void>): Promise<void> => {
@@ -16,11 +15,10 @@ export function questionAnswer(manager: SessionManager) {
       return;
     }
     // 链路前面已由 accessPolicy 拦掉非私聊消息，这里 scope 恒为 c2c
-    const replyTarget = { scope: 'c2c' as const, targetId: ctx.replyTarget.targetId, msgId: ctx.replyTarget.msgId };
+    const replyTarget = { scope: 'c2c' as const, targetId: ctx.replyTarget.targetId };
     if (questionChannel.tryAnswer('c2c', replyTarget.targetId, ctx.message.content.trim(), replyTarget)) {
-      // 答案消息被截获（不再走到 bot.on('message')），在此补录其 msgId，
-      // 供被动回复超限时切换到缓存的最近 msgId。
-      cacheMsgId('c2c', ctx.replyTarget.targetId, ctx.replyTarget.msgId);
+      // 答案消息被截获（不再走到 bot.on('message')）；回复凭证已由链路上的
+      // replyRecorder 登记过，这里不再单独补录。
       ctx.stop('question-answer');
       return;
     }

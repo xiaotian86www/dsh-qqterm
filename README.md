@@ -287,9 +287,8 @@ src/
 │   ├── outbound.ts             # session/event → QQ sendMarkdown
 │   ├── outbound-buffer.ts      # 流式缓冲
 │   ├── streaming-writer.ts     # 流式写入
-│   ├── reply-target.ts         # 回复目标解析
-│   ├── msgid-cache.ts          # 被动回复 msgid 缓存
-│   ├── reply-limiter.ts        # 被动回复限流
+│   ├── reply-store.ts          # 被动回复凭证（msgid/eventid + 用量，msgid 落盘）
+│   ├── reply-bot.ts            # bot 实例装饰：所有发送统一取被动凭证
 │   ├── tool-presenter.ts       # 工具调用展示
 │   └── chunker.ts              # Markdown 文本切分
 ├── session/                    # 会话管理层

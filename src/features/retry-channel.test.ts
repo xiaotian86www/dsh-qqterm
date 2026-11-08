@@ -42,7 +42,7 @@ function makeRecord(opts?: {
     sessionKey,
     sessionId: sessionKey,
     scope,
-    replyTarget: { scope, targetId: 'x', msgId: 'm' },
+    replyTarget: { scope, targetId: 'x' },
     agent: { followup: vi.fn() },
   };
   const peerId = opts?.peerId === undefined ? 'U1' : opts.peerId;

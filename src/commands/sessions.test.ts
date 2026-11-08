@@ -296,7 +296,7 @@ describe('/sessions 持有视图', () => {
       'user1',
       'session-00000010',
       'user1',
-      expect.objectContaining({ scope: 'c2c', targetId: 'user1', msgId: 'm1' }),
+      expect.objectContaining({ scope: 'c2c', targetId: 'user1' }),
     );
   });
 
@@ -506,7 +506,7 @@ describe('/sessions resume', () => {
       'user1',
       heldId,
       'user1',
-      expect.objectContaining({ scope: 'c2c', targetId: 'user1', msgId: 'm1' }),
+      expect.objectContaining({ scope: 'c2c', targetId: 'user1' }),
     );
     expect(text).toContain('#held01');
     expect(text).not.toContain('#work01');
@@ -525,7 +525,7 @@ describe('/sessions resume', () => {
       'user1',
       'session-held01',
       'user1',
-      expect.objectContaining({ scope: 'c2c', targetId: 'user1', msgId: 'm1' }),
+      expect.objectContaining({ scope: 'c2c', targetId: 'user1' }),
     );
     expect(text).toContain('已恢复会话');
   });
@@ -539,7 +539,7 @@ describe('/sessions resume', () => {
       'user1',
       entry().id,
       'user1',
-      expect.objectContaining({ scope: 'c2c', targetId: 'user1', msgId: 'm1' }),
+      expect.objectContaining({ scope: 'c2c', targetId: 'user1' }),
     );
     expect(text).toContain('已恢复会话');
     expect(text).toContain('`#11111111`');

@@ -96,7 +96,7 @@ export function toCommand({ manager, logger }: CommandDeps): CategorizedCommand 
         cmdCtx.message.senderId ?? peerId,
         sessionId,
         text,
-        { scope, targetId: peerId, msgId: cmdCtx.message.messageId },
+        { scope, targetId: peerId },
       );
 
       if (outcome.ok) {

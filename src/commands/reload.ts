@@ -31,22 +31,17 @@ export function reloadCommand({ config, reloader }: CommandDeps): CategorizedCom
       // 先回复再调度：重载会 dispose 当前 fiber，回复必须在此之前送出
       await sendMarkdownChunked(cmdCtx, '🔄 正在应用插件变更…', config.textChunkLimit);
 
-      // 被动回复凭证只在内存里，重载后拿不到：现在就写进状态文件
+      // 被动回复凭证由 ReplyStore 落盘，重载后新 fiber 自己读；这里只留投递目标
       const replyTarget = (cmdCtx as unknown as {
-        replyTarget?: { targetId?: string; msgId?: string; eventId?: string };
+        replyTarget?: { targetId?: string };
         bot?: QQBot;
       }).replyTarget;
       const bot = (cmdCtx as unknown as { bot?: QQBot }).bot;
       const targetId = replyTarget?.targetId;
-      const msgId = replyTarget?.msgId ?? cmdCtx.message?.messageId;
       reloader.run(
         targetId === undefined || targetId === ''
           ? undefined
-          : {
-              targetId,
-              ...(msgId === undefined ? {} : { msgId }),
-              ...(replyTarget?.eventId === undefined ? {} : { eventId: replyTarget.eventId }),
-            },
+          : { targetId },
         bot,
       );
 

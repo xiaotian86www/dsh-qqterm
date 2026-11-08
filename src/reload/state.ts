@@ -17,12 +17,9 @@ import type { Logger } from '../types.ts';
 
 export type ReloadPhase = 'running' | 'done' | 'failed';
 
-/** 重载结果的通知目标：重载后只剩这三个值能定位「回复哪条消息」 */
+/** 重载结果的通知目标：重载后只剩 targetId 能定位「回复给谁」 */
 export interface ReloadNotice {
   targetId: string;
-  /** 被动回复凭证：msg_id 与 event_id 二选一，都没有就只能走主动推送 */
-  msgId?: string;
-  eventId?: string;
 }
 
 export interface ReloadState {

@@ -79,11 +79,7 @@ export async function handleInbound(
   const scope: ChatScope = 'c2c';
   const peerId = msg.senderId;
 
-  const replyTarget: ReplyTarget = {
-    scope,
-    targetId: peerId,
-    msgId: msg.messageId,
-  };
+  const replyTarget: ReplyTarget = { scope, targetId: peerId };
 
   // ── 组装 agentBody（下载结果经 mwState.downloadedFiles 提供） ──
   const agentBody = assembleAgentBody(msg, mwState, logger);

@@ -202,10 +202,10 @@ class OutboundRouter {
     buffer.append(text);
   }
 
-  /** 是否启用流式：配置开启 + 有 msgId（被动回复才能流式）+ 当前会话 */
+  /** 是否启用流式：配置开启 + 发送层确认有被动凭证 + 当前会话 */
   private shouldStream(record: SessionRecord): boolean {
     return this.config.streaming
-      && !!record.replyTarget.msgId
+      && this.bot.canStream(record.replyTarget)
       && this.manager.isCurrentSession(record.sessionId);
   }
 

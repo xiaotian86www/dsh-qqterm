@@ -149,7 +149,7 @@ export function compactCommand({ manager }: CommandDeps): CategorizedCommand {
       const msg = cmdCtx.message;
       const outcome = await manager.compact(scope, peerId, {
         senderId: msg.senderId,
-        replyTarget: { scope, targetId: peerId, msgId: msg.messageId },
+        replyTarget: { scope, targetId: peerId },
       });
 
       if (outcome.ok) {

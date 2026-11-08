@@ -22,7 +22,6 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type { QQBot } from '@tencent-connect/qqbot-nodejs';
 import { getProfileDir } from '../shared/index.ts';
-import { sendResolvedMarkdown } from '../transport/reply-target.ts';
 import type { Logger } from '../types.ts';
 import {
   describeReloadState,
@@ -198,11 +197,8 @@ export function createReloader(ctx: Context, logger: Logger, options?: ReloaderO
     const text = resultText(state);
     if (text === undefined) return;
     try {
-      await sendResolvedMarkdown(
-        bot,
-        { scope: 'c2c', targetId: notice.targetId, msgId: notice.msgId, eventId: notice.eventId },
-        text,
-      );
+      // 被动回复凭证由 ReplyStore 提供（msg_id 已落盘），这里只给投递目标
+      await bot.sendMarkdown({ scope: 'c2c', targetId: notice.targetId }, text);
       writeReloadState(statePath, { ...state, notify: undefined }, logger);
     } catch (err) {
       logger.warn(`热重载结果通知失败: ${errorText(err)}`);

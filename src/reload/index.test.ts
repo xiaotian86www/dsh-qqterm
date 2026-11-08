@@ -69,7 +69,7 @@ describe('createReloader', () => {
     const reloader = createReloader(fakeContext({}), logger, { statePath: path });
     expect(reloader.available).toBe(false);
 
-    reloader.run({ targetId: 'u1', msgId: 'm1' });
+    reloader.run({ targetId: 'u1' });
     await vi.advanceTimersByTimeAsync(500);
 
     expect(readReloadState(path)?.phase).toBe('running');
@@ -81,10 +81,10 @@ describe('createReloader', () => {
     const reloader = createReloader(fakeContext({ hmr }), logger, { statePath: path });
     expect(reloader.available).toBe(true);
 
-    reloader.run({ targetId: 'u1', msgId: 'm1' });
+    reloader.run({ targetId: 'u1' });
     expect(readReloadState(path)).toMatchObject({
       phase: 'running',
-      notify: { targetId: 'u1', msgId: 'm1' },
+      notify: { targetId: 'u1' },
     });
 
     await vi.advanceTimersByTimeAsync(100);
@@ -95,7 +95,7 @@ describe('createReloader', () => {
     expect(hmr.reconcileProfile).toHaveBeenCalledTimes(1);
     expect(readReloadState(path)).toMatchObject({
       phase: 'done',
-      notify: { targetId: 'u1', msgId: 'm1' },
+      notify: { targetId: 'u1' },
     });
   });
 
@@ -137,7 +137,7 @@ describe('createReloader', () => {
     };
     const reloader = createReloader(fakeContext({ hmr }), logger, { statePath: path });
 
-    reloader.run({ targetId: 'u1', msgId: 'm1' });
+    reloader.run({ targetId: 'u1' });
     await vi.advanceTimersByTimeAsync(300);
 
     expect(hmr.reconcileProfile).toHaveBeenCalledTimes(1);
@@ -154,7 +154,7 @@ describe('createReloader', () => {
     };
     const reloader = createReloader(fakeContext({ hmr }), logger, { statePath: path });
 
-    reloader.run({ targetId: 'u1', msgId: 'm1' });
+    reloader.run({ targetId: 'u1' });
     await vi.advanceTimersByTimeAsync(300);
 
     expect(hmr.reconcileProfile).toHaveBeenCalledTimes(1);
@@ -189,10 +189,11 @@ describe('createReloader', () => {
     const ctx = fakeContext({ hmr: fakeHmr() }, fakeLoader(() => 7));
     const reloader = createReloader(ctx, logger, { statePath: path });
 
-    reloader.run({ targetId: 'u1', msgId: 'm1' }, bot);
+    reloader.run({ targetId: 'u1' }, bot);
     await vi.advanceTimersByTimeAsync(300);
 
     expect(bot.sendMarkdown).toHaveBeenCalledTimes(1);
+    expect(bot.sendMarkdown.mock.calls[0]?.[0]).toEqual({ scope: 'c2c', targetId: 'u1' });
     expect(bot.sendMarkdown.mock.calls[0]?.[1]).toBe('✅ 没有需要应用的变更');
     expect(readReloadState(path)?.notify).toBeUndefined();
   });
@@ -216,7 +217,7 @@ describe('createReloader', () => {
     };
     const reloader = createReloader(fakeContext({ hmr }, loader), logger, { statePath: path });
 
-    reloader.run({ targetId: 'u1', msgId: 'm1' }, bot);
+    reloader.run({ targetId: 'u1' }, bot);
     await vi.advanceTimersByTimeAsync(300);
 
     expect(bot.sendMarkdown.mock.calls[0]?.[1]).toBe('✅ 已应用变更: other-plugin');
@@ -236,11 +237,11 @@ describe('createReloader', () => {
     };
     const reloader = createReloader(fakeContext({ hmr }, fakeLoader(() => uid)), logger, { statePath: path });
 
-    reloader.run({ targetId: 'u1', msgId: 'm1' }, bot);
+    reloader.run({ targetId: 'u1' }, bot);
     await vi.advanceTimersByTimeAsync(300);
 
     expect(bot.sendMarkdown).not.toHaveBeenCalled();
-    expect(readReloadState(path)?.notify).toEqual({ targetId: 'u1', msgId: 'm1' });
+    expect(readReloadState(path)?.notify).toEqual({ targetId: 'u1' });
   });
 
   it('loader 一个条目都读不出时退回兜底文案，不谎报「没有变更」', async () => {
@@ -249,7 +250,7 @@ describe('createReloader', () => {
     const loader = { entries: () => [] as { options: { id: string }; fiber: { uid: number } }[] };
     const reloader = createReloader(fakeContext({ hmr: fakeHmr() }, loader), logger, { statePath: path });
 
-    reloader.run({ targetId: 'u1', msgId: 'm1' }, bot);
+    reloader.run({ targetId: 'u1' }, bot);
     await vi.advanceTimersByTimeAsync(300);
 
     expect(bot.sendMarkdown.mock.calls[0]?.[1]).toBe('✅ 已应用变更');
@@ -263,7 +264,7 @@ describe('announce', () => {
     const bot = fakeBot();
     const reloader = createReloader(fakeContext({ hmr: fakeHmr() }), logger, { statePath: path });
 
-    reloader.run({ targetId: 'u1', msgId: 'm1' });
+    reloader.run({ targetId: 'u1' });
     await vi.advanceTimersByTimeAsync(300);
 
     await reloader.announce(bot);
@@ -285,7 +286,7 @@ describe('announce', () => {
       { statePath: path },
     );
 
-    reloader.run({ targetId: 'u1', msgId: 'm1' });
+    reloader.run({ targetId: 'u1' });
     await vi.advanceTimersByTimeAsync(300);
     await reloader.announce(bot);
 
@@ -303,7 +304,7 @@ describe('announce', () => {
     };
     const reloader = createReloader(fakeContext({ hmr }), logger, { statePath: path });
 
-    reloader.run({ targetId: 'u1', msgId: 'm1' });
+    reloader.run({ targetId: 'u1' });
     await vi.advanceTimersByTimeAsync(300);
     await reloader.announce(bot);
 
@@ -326,7 +327,7 @@ describe('announce', () => {
     const bot = fakeBot();
     const reloader = createReloader(fakeContext({ hmr: fakeHmr() }), logger, { statePath: path });
 
-    reloader.run({ targetId: 'u1', msgId: 'm1' });
+    reloader.run({ targetId: 'u1' });
     await vi.advanceTimersByTimeAsync(300);
     // 把开始时间改成 20 分钟前，模拟「隔了很久才重启」
     await vi.advanceTimersByTimeAsync(20 * 60_000);
@@ -342,7 +343,7 @@ describe('announce', () => {
     const hmr = { runExclusive: vi.fn(() => new Promise<never>(() => {})), reconcileProfile: vi.fn() };
     const reloader = createReloader(fakeContext({ hmr }), logger, { statePath: path });
 
-    reloader.run({ targetId: 'u1', msgId: 'm1' }); // 还没到调度时间
+    reloader.run({ targetId: 'u1' }); // 还没到调度时间
     const pending = reloader.announce(bot);
     await vi.advanceTimersByTimeAsync(6_000);
     await pending;

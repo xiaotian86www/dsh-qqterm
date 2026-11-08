@@ -5,13 +5,15 @@
 /** 会话作用域（只支持 C2C 私聊） */
 export type ChatScope = 'c2c';
 
-/** QQ 回复目标 */
+/**
+ * QQ 回复目标 — 只有「发给谁」。
+ *
+ * 被动回复凭证（msg_id / event_id）由 transport/reply-store 统一管理，
+ * 上层不持有、不传递；需要发消息时直接把这个目标交给 bot 方法即可。
+ */
 export interface ReplyTarget {
   scope: ChatScope;
   targetId: string;
-  msgId?: string;
-  /** 互动事件 id（带 INTERACTION_CREATE 前缀），填 event_id 字段，与 msgId 互斥 */
-  eventId?: string;
 }
 
 /** SDK 原始消息附件（snake_case 字段，来自 QQ 网关 C2C_MESSAGE_CREATE） */

@@ -24,7 +24,7 @@ const { SessionManager } = await import('./session-manager.ts');
 
 const APP_ID = 'app1';
 const PEER = 'user1';
-const REPLY: ReplyTarget = { scope: 'c2c', targetId: PEER, msgId: 'm1' };
+const REPLY: ReplyTarget = { scope: 'c2c', targetId: PEER };
 
 function fakeAgent(id: string): DshAgent {
   return {

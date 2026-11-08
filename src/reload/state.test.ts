@@ -41,7 +41,7 @@ describe('readReloadState / writeReloadState', () => {
     const state = {
       phase: 'done' as const,
       startedAt: 1_700_000_000_000,
-      notify: { targetId: 'u1', msgId: 'm1' },
+      notify: { targetId: 'u1' },
       restartReason: 'package-moved',
     };
 

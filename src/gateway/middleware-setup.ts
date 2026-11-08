@@ -25,13 +25,16 @@ import { buildCommandList } from '../commands/index.ts';
 import type { CategorizedCommand } from '../commands/types.ts';
 import { attachmentProcessor } from '../middleware/attachment.ts';
 import { questionAnswer } from '../middleware/question-answer.ts';
+import { replyRecorder } from '../middleware/reply-recorder.ts';
 import { collectCommandNames, rejectUnknownCommands } from '../middleware/unknown-command.ts';
+import type { ReplyStore } from '../transport/reply-store.ts';
 
 export function setupMiddlewares(
   bot: QQBot,
   config: ImQQBotConfig,
   manager: SessionManager,
   logger: Logger,
+  replyStore: ReplyStore,
   reloader?: Reloader,
 ): CategorizedCommand[] {
   // 1. 错误兜底（最外层洋葱皮）
@@ -61,6 +64,10 @@ export function setupMiddlewares(
       }
     },
   }));
+
+  // 3.5. 被动回复凭证：登记 msgId。必须在命令分发之前——命令消息会被
+  //      slashCommand 截获，不会走到 bot.on('message')。
+  bot.use(replyRecorder(replyStore));
 
   // 4. 内容清洗（去 @marker、表情标签、多余空白）
   bot.use(contentSanitizer({

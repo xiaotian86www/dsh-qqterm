@@ -251,9 +251,8 @@ src/
 │   ├── outbound.ts             # session/event → QQ sendMarkdown
 │   ├── outbound-buffer.ts      # Streaming buffer
 │   ├── streaming-writer.ts     # Streaming writer
-│   ├── reply-target.ts         # Reply target resolution
-│   ├── msgid-cache.ts          # Passive reply msgid cache
-│   ├── reply-limiter.ts        # Passive reply rate limiter
+│   ├── reply-store.ts          # Passive reply ids (msgid/eventid + usage, msgid persisted)
+│   ├── reply-bot.ts            # Bot decorator: every send resolves the reply id
 │   ├── tool-presenter.ts       # Tool-call presentation
 │   └── chunker.ts              # Markdown chunking
 ├── session/                    # Session management

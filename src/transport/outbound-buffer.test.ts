@@ -30,7 +30,7 @@ function createRecord(target: ReplyTarget): SessionRecord {
   } as unknown as SessionRecord;
 }
 
-const c2cTarget: ReplyTarget = { scope: 'c2c', targetId: 'user1', msgId: 'msg1' };
+const c2cTarget: ReplyTarget = { scope: 'c2c', targetId: 'user1' };
 
 describe('OutboundBuffer', () => {
   beforeEach(() => {

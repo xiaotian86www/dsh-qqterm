@@ -13,14 +13,15 @@ function createSession(): StreamSessionLike {
   return { update: vi.fn().mockResolvedValue(undefined), complete: vi.fn().mockResolvedValue(undefined) };
 }
 
-function createBot(session: StreamSessionLike): QQBotSender {
+function createBot(session: StreamSessionLike, canStream = true): QQBotSender {
   return {
     sendMarkdown: vi.fn().mockResolvedValue(undefined),
+    canStream: vi.fn(() => canStream),
     openStream: vi.fn(() => session),
   };
 }
 
-const c2cTarget: ReplyTarget = { scope: 'c2c', targetId: 'user1', msgId: 'msg1' };
+const c2cTarget: ReplyTarget = { scope: 'c2c', targetId: 'user1' };
 
 function createRecord(
   target: ReplyTarget,
@@ -54,9 +55,10 @@ function setup(opts?: {
   deliverer?: { deliver: ReturnType<typeof vi.fn> };
   current?: boolean;
   retryChannel?: { offer: ReturnType<typeof vi.fn> };
+  canStream?: boolean;
 }) {
   const session = createSession();
-  const bot = createBot(session);
+  const bot = createBot(session, opts?.canStream ?? true);
   const record = 'record' in (opts ?? {}) ? opts!.record : createRecord(c2cTarget);
   const manager = {
     findBySessionId: vi.fn((id: string) => (id === 'sess-qq' ? record : undefined)),
@@ -148,8 +150,8 @@ describe('OutboundRouter.routeStreamFrame', () => {
     expect(bot.sendMarkdown).not.toHaveBeenCalled();
   });
 
-  it('没有 msgId 时不流式：帧累积后由 assistant/message 静态发送', async () => {
-    const { outbound, bot } = setup({ record: createRecord({ scope: 'c2c', targetId: 'user1' }) });
+  it('发送层没有可用凭证时不流式：帧累积后由 assistant/message 静态发送', async () => {
+    const { outbound, bot } = setup({ canStream: false });
 
     outbound.routeStreamFrame('sess-qq', start('a1'));
     outbound.routeStreamFrame('sess-qq', delta('a1', 'static reply'));
@@ -399,6 +401,7 @@ describe('OutboundRouter: deliverables/presented', () => {
     const textTask = new Promise<void>((resolve) => { resolveText = resolve; });
     const bot: QQBotSender = {
       sendMarkdown: vi.fn(() => textTask),
+      canStream: vi.fn(() => true),
       openStream: vi.fn(() => createSession()),
     };
     const record = createRecord(c2cTarget);

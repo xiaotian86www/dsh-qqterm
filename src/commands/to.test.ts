@@ -82,7 +82,7 @@ describe('/to', () => {
       'user1',
       TARGET,
       '继续修登录',
-      { scope: 'c2c', targetId: 'user1', msgId: 'm1' },
+      { scope: 'c2c', targetId: 'user1' },
     );
   });
 

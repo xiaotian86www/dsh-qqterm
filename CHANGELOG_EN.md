@@ -10,6 +10,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- **Messages still reach the original message after a restart or a hot reload**: passive-reply credentials (msg_id plus the number of uses) are now kept in `~/.dsh-qqbot/reply-ids.json`, so the first reply after a restart or `/bot-reload` is still a passive reply instead of degrading to a proactive push immediately, and per-message reply counts carry across restarts instead of resetting and hitting platform limits sooner. Once the platform window (30 minutes for private chat) or the reply count is exhausted it still degrades automatically; `event_id` stays in memory only (the platform does not promise it across restarts).
+- **Every send path shares one credential store**: command replies, image/video/voice/file sends, streaming output and slash-command receipts inside the SDK all resolve credentials through the same entry point, so the per-path caches are gone — command replies no longer bypass the limiter, and the "no msgid after a restart" problem disappears.
+
+- **Upper layers no longer hold msgid**: session records, command replies, attachments and streaming sends only carry "who to send to"; collecting, picking and counting msg_ids all live in `ReplyStore` plus the decorated bot instance, and the send layer degrades uniformly once credentials are used up or expired, so business code no longer has to decide.
+
 - **The version number no longer goes stale after a hot reload**: `/bot-version` and `/bot-help` read `package.json` on every call, so once `/bot-reload` swaps the other files they report the version actually installed instead of a constant computed at module load.
 
 - **A failed approval delivery no longer swallows the request**: when the QQ card cannot be delivered (network, rate limit, rejected card), the approval is handed back to the host's other answerers so the Web GUI can still prompt; previously the plugin answered "unavailable" and the user saw nothing on either side, with the tool call failing without explanation.

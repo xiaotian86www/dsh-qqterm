@@ -459,7 +459,7 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Categ
               peerId,
               target.entry.id,
               cmdCtx.message.senderId ?? peerId,
-              { scope, targetId: peerId, msgId: cmdCtx.message.messageId },
+              { scope, targetId: peerId },
             );
             if (outcome.ok) {
               const unarchived = outcome.unarchived ? '（已取消归档）' : '';

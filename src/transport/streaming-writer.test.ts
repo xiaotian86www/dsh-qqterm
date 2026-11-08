@@ -18,7 +18,7 @@ function createBot(openStreamImpl?: () => StreamSessionLike): QQBotSender {
   };
 }
 
-const target: ReplyTarget = { scope: 'c2c', targetId: 'user1', msgId: 'msg1' };
+const target: ReplyTarget = { scope: 'c2c', targetId: 'user1' };
 
 describe('StreamingWriter', () => {
   beforeEach(() => {

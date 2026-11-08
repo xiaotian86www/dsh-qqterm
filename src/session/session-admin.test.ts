@@ -28,9 +28,9 @@ const PEER = 'user1';
 /** 聊天会话只有一个 */
 const KEY = `qqbot:${APP_ID}:chat`;
 const MINTED = /^session-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const REPLY: ReplyTarget = { scope: 'c2c', targetId: PEER, msgId: 'm1' };
+const REPLY: ReplyTarget = { scope: 'c2c', targetId: PEER };
 const PEER_B = 'user2';
-const REPLY_B: ReplyTarget = { scope: 'c2c', targetId: PEER_B, msgId: 'm2' };
+const REPLY_B: ReplyTarget = { scope: 'c2c', targetId: PEER_B };
 
 const WORKSPACE = () => join(env.home, 'workspace');
 

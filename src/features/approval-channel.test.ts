@@ -37,7 +37,7 @@ function makeConfig(owner = 'peer-qq'): ApprovalChannelConfigLike {
 }
 
 function makeRecord(key: string, scope: ChatScope = 'c2c'): ApprovalSessionRecordLike {
-  return { sessionKey: key, scope, replyTarget: { scope, targetId: 'x', msgId: 'm' } };
+  return { sessionKey: key, scope, replyTarget: { scope, targetId: 'x' } };
 }
 
 function createManager(opts?: {
