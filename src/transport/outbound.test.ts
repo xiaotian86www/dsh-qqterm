@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createOutboundHandler } from './outbound.ts';
 import type { QQBotSender, StreamSessionLike } from './outbound-buffer.ts';
 import type { SessionManager, SessionRecord } from '../session/index.ts';
-import type { ImQQBotConfig } from '../config.ts';
+import type { QQTermConfig } from '../config.ts';
 import type { Logger, ReplyTarget } from '../types.ts';
 
 function createLogger(): Logger {
@@ -39,19 +39,19 @@ function createRecord(
   } as unknown as SessionRecord;
 }
 
-function createConfig(overrides?: Partial<ImQQBotConfig>): ImQQBotConfig {
+function createConfig(overrides?: Partial<QQTermConfig>): QQTermConfig {
   return {
     streaming: true,
     textChunkLimit: 4500,
     showToolResults: false,
     ...overrides,
-  } as unknown as ImQQBotConfig;
+  } as unknown as QQTermConfig;
 }
 
 /** 组装 handler：manager 按 sessionId 返回 record（默认 c2c 私聊） */
 function setup(opts?: {
   record?: SessionRecord | undefined;
-  config?: ImQQBotConfig;
+  config?: QQTermConfig;
   deliverer?: { deliver: ReturnType<typeof vi.fn> };
   current?: boolean;
   retryChannel?: { offer: ReturnType<typeof vi.fn> };
@@ -430,7 +430,7 @@ describe('OutboundRouter: deliverables/presented', () => {
   it('配置关闭时不投递', async () => {
     const deliver = vi.fn().mockResolvedValue(undefined);
     const { outbound } = setup({
-      config: createConfig({ sendFile: { restrictPaths: true, extraRoots: [], sendPresentedFiles: false, maxFiles: 4 } as ImQQBotConfig['sendFile'] }),
+      config: createConfig({ sendFile: { restrictPaths: true, extraRoots: [], sendPresentedFiles: false, maxFiles: 4 } as QQTermConfig['sendFile'] }),
       deliverer: { deliver },
     });
 

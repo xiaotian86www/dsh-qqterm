@@ -6,12 +6,12 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { SlashCommandHandlerContext } from '@tencent-connect/qqbot-nodejs';
-import { ConfigSchema, type ImQQBotConfig } from '../config.ts';
+import { ConfigSchema, type QQTermConfig } from '../config.ts';
 import type { SessionManager, SessionRecord, WorkspaceGroup, WorkspaceSession } from '../session/index.ts';
 import type { Logger } from '../types.ts';
 import { toCommand } from './to.ts';
 
-const config = ConfigSchema({ appId: 'app', appSecret: 'secret' } as ImQQBotConfig);
+const config = ConfigSchema({ appId: 'app', appSecret: 'secret' } as QQTermConfig);
 const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
 
 const TARGET = 'session-3f2a9b1c-1111-1111-1111-111111111111';

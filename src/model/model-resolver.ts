@@ -15,7 +15,7 @@
  * 新会话自然走上面的默认链。
  */
 import type { Context } from '@deepseek-ai/cordis';
-import type { ImQQBotConfig } from '../config.ts';
+import type { QQTermConfig } from '../config.ts';
 import type { Logger } from '../types.ts';
 import type { ModelRoute, ModelEntry, EffortOption, ReasoningInfo } from './types.ts';
 import { PrefsStore } from './prefs-store.ts';
@@ -49,14 +49,14 @@ export class ModelResolver {
 
   constructor(
     ctx: Context,
-    config: ImQQBotConfig,
+    config: QQTermConfig,
     logger?: Logger,
   ) {
     this.ctx = ctx;
     this.logger = logger;
     this.prefs = new PrefsStore(
       config.debug ? (msg) => this.logger?.debug(msg) : undefined,
-      { onError: (msg) => this.logger?.warn(`im-qqbot: ${msg}`) },
+      { onError: (msg) => this.logger?.warn(`qqterm: ${msg}`) },
     );
     this.settings = new SettingsReader();
   }

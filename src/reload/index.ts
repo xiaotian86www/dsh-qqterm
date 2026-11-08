@@ -38,7 +38,7 @@ import {
 } from './state.ts';
 
 /** 本插件在组合里的 entry id（bundle patch 与用户配置都按它定位，是兼容契约） */
-const ENTRY_ID = 'im-qqbot';
+const ENTRY_ID = 'qqterm';
 
 /** 宿主 HMR 服务的最小接口（只用这两个方法） */
 interface HmrLike {
@@ -80,7 +80,7 @@ export interface Reloader {
 
 /** 构造参数 */
 export interface ReloaderOptions {
-  /** 状态文件路径（单测注入临时目录，避免读写真实的 ~/.dsh-qqbot） */
+  /** 状态文件路径（单测注入临时目录，避免读写真实的 ~/.dsh-qqterm） */
   statePath?: string;
 }
 

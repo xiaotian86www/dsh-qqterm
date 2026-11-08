@@ -6,13 +6,13 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import type { SlashCommandHandlerContext } from '@tencent-connect/qqbot-nodejs';
-import { ConfigSchema, type ImQQBotConfig } from '../config.ts';
+import { ConfigSchema, type QQTermConfig } from '../config.ts';
 import type { SessionManager } from '../session/index.ts';
 import type { Logger } from '../types.ts';
 import { statusCommand } from './status.ts';
 
 const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
-const config = ConfigSchema({ appId: 'app', appSecret: 'secret' } as ImQQBotConfig);
+const config = ConfigSchema({ appId: 'app', appSecret: 'secret' } as QQTermConfig);
 
 const SESSION_ID = 'session-9d2c4410-1111-1111-1111-111111111111';
 

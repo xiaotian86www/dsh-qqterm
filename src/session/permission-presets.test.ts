@@ -9,7 +9,7 @@ import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Context } from '@deepseek-ai/cordis';
-import { ConfigSchema, type ImQQBotConfig } from '../config.ts';
+import { ConfigSchema, type QQTermConfig } from '../config.ts';
 import type { Logger, ReplyTarget } from '../types.ts';
 import type { DshAgent, DshAgentRegistry, PermissionPresetsLike } from './types.ts';
 
@@ -116,14 +116,14 @@ function createManager(
     appSecret: 'secret',
     provider: 'p',
     model: 'm',
-  } as ImQQBotConfig);
+  } as QQTermConfig);
   const manager = new SessionManager(createCtx(permissions), registry as unknown as DshAgentRegistry, config, logger);
   managers.push(manager);
   return manager;
 }
 
 beforeEach(() => {
-  env.home = mkdtempSync(join(tmpdir(), 'im-qqbot-permission-'));
+  env.home = mkdtempSync(join(tmpdir(), 'qqterm-permission-'));
   mkdirSync(join(env.home, 'workspace'), { recursive: true });
 });
 

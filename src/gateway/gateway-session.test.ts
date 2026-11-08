@@ -7,7 +7,7 @@ import { createGatewaySession } from './gateway-session.ts';
 const dirs: string[] = [];
 
 function tempDir(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'dsh-qqbot-gateway-'));
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-qqterm-gateway-'));
   dirs.push(dir);
   return dir;
 }

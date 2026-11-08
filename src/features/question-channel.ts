@@ -189,13 +189,13 @@ export class QuestionChannel {
       // 投递失败才退回 Web：已送达的问题不能再次弹出（见 QuestionDeliveryError）
       return self.askViaQQ(record, request).catch((err: unknown) => {
         if (err instanceof QuestionDeliveryError) {
-          self.logger.warn(`im-qqbot: QQ question delivery failed, falling back to the host answerer: ${err.message}`);
+          self.logger.warn(`qqterm: QQ question delivery failed, falling back to the host answerer: ${err.message}`);
           return nextFn();
         }
         throw err;
       });
     }, { global: true, prepend: true });
-    this.logger.info('im-qqbot: QQ question channel installed (user-questions/request)');
+    this.logger.info('qqterm: QQ question channel installed (user-questions/request)');
   }
 
   public uninstall(): void {
@@ -227,7 +227,7 @@ export class QuestionChannel {
   /** `/to #id` 空文本：下一条该 peer 的普通文本作为这个会话的答案 */
   public beginAnswerMode(peerId: string, sessionId: string): void {
     this.answerTargets.set(peerId, sessionId);
-    this.logger.info(`im-qqbot: answer mode armed peer=${peerId} sessionId=${sessionId}`);
+    this.logger.info(`qqterm: answer mode armed peer=${peerId} sessionId=${sessionId}`);
   }
 
   /** 显式答复指定会话（`/to #id <答案>`），不依赖 current */
@@ -410,7 +410,7 @@ export class QuestionChannel {
       }
       entry.timer = setTimeout(() => this.onTimeout(sessionId), this.config.askTimeoutMs);
       this.pending.set(sessionId, entry);
-      this.logger.info(`im-qqbot: question sent to QQ, waiting for answer sessionId=${sessionId}`);
+      this.logger.info(`qqterm: question sent to QQ, waiting for answer sessionId=${sessionId}`);
     });
   }
 
@@ -436,7 +436,7 @@ export class QuestionChannel {
     this.clearAnswerTargets(sessionId);
     this.clearTimer(entry);
     this.removeAbort(entry);
-    this.logger.info(`im-qqbot: question answered via QQ sessionId=${sessionId}`);
+    this.logger.info(`qqterm: question answered via QQ sessionId=${sessionId}`);
     entry.resolve({ answers: entry.collected });
   }
 
@@ -453,14 +453,14 @@ export class QuestionChannel {
           return;
         } catch (err) {
           // 同上：宿主 logger 在 headless profile 不可见，stderr 才是唯一线索
-          console.warn('[im-qqbot] keyboard send failed:', err);
-          this.logger.warn(`im-qqbot: keyboard send failed, fallback to text: ${err instanceof Error ? err.message : String(err)}`);
+          console.warn('[qqterm] keyboard send failed:', err);
+          this.logger.warn(`qqterm: keyboard send failed, fallback to text: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
       await this.sender.sendMarkdown(record.replyTarget, formatQuestion(question, false, context));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      this.logger.error(`im-qqbot: question send failed sessionId=${sessionId}: ${msg}`);
+      this.logger.error(`qqterm: question send failed sessionId=${sessionId}: ${msg}`);
       throw new QuestionDeliveryError(`failed to deliver question to QQ: ${msg}`);
     }
   }

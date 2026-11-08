@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const INTRANET_NAME = '@tencent/dsh-qqbot';
+const INTRANET_NAME = '@tencent/dsh-qqterm';
 
 // 1. 修改 package.json 的 name
 const pkgPath = join(root, 'package.json');
@@ -18,6 +18,6 @@ if (patchFile) {
   const patch = readFileSync(patchPath, 'utf8');
   writeFileSync(
     patchPath,
-    patch.replace(/name:\s*'@tencent-connect\/dsh-qqbot'/, `name: '${INTRANET_NAME}'`),
+    patch.replace(/name:\s*'@tencent-connect\/dsh-qqterm'/, `name: '${INTRANET_NAME}'`),
   );
 }

@@ -9,7 +9,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import type { SlashCommandHandlerContext } from '@tencent-connect/qqbot-nodejs';
-import { ConfigSchema, type ImQQBotConfig } from '../config.ts';
+import { ConfigSchema, type QQTermConfig } from '../config.ts';
 import type { SessionManager } from '../session/index.ts';
 import type { Logger } from '../types.ts';
 import { lsCommand, resolveLsTarget } from './ls.ts';
@@ -27,7 +27,7 @@ const config = ConfigSchema({
   appId: 'app',
   appSecret: 'secret',
   access: { owner: 'user1' },
-} as ImQQBotConfig);
+} as QQTermConfig);
 
 let root = '';
 
@@ -60,7 +60,7 @@ function buttonText(command: string, show: string): string {
 }
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), 'im-qqbot-ls-'));
+  root = mkdtempSync(join(tmpdir(), 'qqterm-ls-'));
   for (const name of ['alpha', 'beta', 'zeta']) mkdirSync(join(root, name));
   mkdirSync(join(root, 'alpha', 'inner'));
   writeFileSync(join(root, 'gamma.txt'), 'x');

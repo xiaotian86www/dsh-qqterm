@@ -16,7 +16,7 @@ import {
 const dirs: string[] = [];
 
 function tempDir(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'dsh-qqbot-reload-'));
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-qqterm-reload-'));
   dirs.push(dir);
   return dir;
 }

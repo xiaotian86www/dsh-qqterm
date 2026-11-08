@@ -7,14 +7,14 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import type { SlashCommandHandlerContext } from '@tencent-connect/qqbot-nodejs';
-import { ConfigSchema, type ImQQBotConfig } from '../config.ts';
+import { ConfigSchema, type QQTermConfig } from '../config.ts';
 import type { Reloader } from '../reload/index.ts';
 import type { SessionManager } from '../session/index.ts';
 import type { Logger } from '../types.ts';
 import { reloadCommand } from './reload.ts';
 
 const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
-const config = ConfigSchema({ appId: 'app', appSecret: 'secret' } as ImQQBotConfig);
+const config = ConfigSchema({ appId: 'app', appSecret: 'secret' } as QQTermConfig);
 
 interface Harness {
   command: ReturnType<typeof reloadCommand>;

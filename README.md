@@ -1,12 +1,12 @@
 <div align="center">
 
-<img width="120" src="https://img.shields.io/badge/🤖-QQ_Bot-blue?style=for-the-badge" alt="QQ Bot" />
+<img width="120" src="https://img.shields.io/badge/🤖-QQ_SuperTerm-blue?style=for-the-badge" alt="QQ SuperTerm" />
 
-**基于 [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) (dsh) 的 QQ Bot 插件，将 DeepSeek AI 助手接入 QQ 私聊。**
+**QQ 超级终端：基于 [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) (dsh) 的 QQ 渠道终端，在 QQ 私聊里操作 DeepSeek Harness。**
 
-[![npm version](https://img.shields.io/npm/v/@tencent-connect/dsh-qqbot)](https://www.npmjs.com/package/@tencent-connect/dsh-qqbot)
+[![npm version](https://img.shields.io/npm/v/@tencent-connect/dsh-qqterm)](https://www.npmjs.com/package/@tencent-connect/dsh-qqterm)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
-[![GitHub stars](https://img.shields.io/github/stars/tencent-connect/dsh-qqbot)](https://github.com/tencent-connect/dsh-qqbot)
+[![GitHub stars](https://img.shields.io/github/stars/tencent-connect/dsh-qqterm)](https://github.com/tencent-connect/dsh-qqterm)
 [![QQ Bot](https://img.shields.io/badge/QQ_Bot-API_v2-red)](https://bot.q.qq.com/wiki/)
 
 <br/>
@@ -27,7 +27,7 @@
 ## 架构
 
 ```
-QQ 用户 → QQ WebSocket → dsh-qqbot → ctx.agents → dsh agent loop → LLM
+QQ 用户 → QQ WebSocket → dsh-qqterm → ctx.agents → dsh agent loop → LLM
                                  ↑                           │
                                  └── session/event ──────────┘
                                        (assistant reply → QQ sendMarkdown)
@@ -39,11 +39,11 @@ QQ 用户 → QQ WebSocket → dsh-qqbot → ctx.agents → dsh agent loop → L
 
 无需命令行，全程在应用内完成：
 
-1. **安装**：左侧栏点击「插件」→「添加插件」→ 输入 `@tencent-connect/dsh-qqbot@latest` → 安装并立即启动
+1. **安装**：左侧栏点击「插件」→「添加插件」→ 输入 `@tencent-connect/dsh-qqterm@latest` → 安装并立即启动
 
 <img src="./assets/docs/install.png" alt="端内添加插件" width="560" />
 
-2. **连接**：左下角头像 → 设置 →「QQ 机器人」→ 手机 QQ 扫码连接
+2. **连接**：左下角头像 → 设置 →「QQ 超级终端」→ 手机 QQ 扫码连接
 
 <img src="./assets/docs/setting.png" alt="设置页扫码连接" width="560" />
 
@@ -53,7 +53,7 @@ QQ 用户 → QQ WebSocket → dsh-qqbot → ctx.agents → dsh agent loop → L
 
 ```bash
 # 安装到 profile
-npx @deepseek-ai/dsh plugin --profile qqbot add @tencent-connect/dsh-qqbot
+npx @deepseek-ai/dsh plugin --profile qqbot add @tencent-connect/dsh-qqterm
 
 # 启动
 npx @deepseek-ai/dsh --profile qqbot
@@ -71,11 +71,11 @@ npx @deepseek-ai/dsh --profile qqbot
 
 ```bash
 # 构建
-cd /path/to/dsh-qqbot
+cd /path/to/dsh-qqterm
 pnpm install && pnpm build
 
 # 安装到 profile（本地路径）
-npx @deepseek-ai/dsh plugin --profile qqbot add /path/to/dsh-qqbot
+npx @deepseek-ai/dsh plugin --profile qqbot add /path/to/dsh-qqterm
 
 # 启动
 export QQBOT_APPID="你的AppID" QQBOT_SECRET="你的AppSecret"
@@ -86,8 +86,16 @@ npx @deepseek-ai/dsh --profile qqbot
 
 ```bash
 export QQBOT_APPID="你的AppID" QQBOT_SECRET="你的AppSecret"
-npx @deepseek-ai/dsh web --patch /path/to/dsh-qqbot/cordis.dev.yml
+npx @deepseek-ai/dsh web --patch /path/to/dsh-qqterm/cordis.dev.yml
 ```
+
+### 从旧版本升级（0.6.0）
+
+0.6.0 起项目改名为 **QQ 超级终端**（`dsh-qqterm`），与原 `dsh-qqbot` 彻底分开，不做兼容层：
+
+1. 包名换成 `@tencent-connect/dsh-qqterm`，重装到原 profile。
+2. profile 的 `cordis.patch.yml` 里把 `- id: im-qqbot` 改成 `- id: qqterm`，`config` 原样保留。
+3. 把 `~/.dsh-qqbot` 整个目录改名为 `~/.dsh-qqterm`（会话指针、被动回复凭据、网关票据、媒体缓存都在里面），旧目录不会自动迁移。
 
 ## 配置项
 
@@ -128,7 +136,7 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqbot/cordis.dev.yml
 
 ### 访问控制（access）
 
-QQ 机器人只服务一个用户：其他私聊一律拒绝，群聊不支持。扫码绑定会把扫码者自动写成唯一用户；手动绑定或换人时在设置页填 OpenID（`/bot-me` 可查）。
+超级终端只服务一个用户：其他私聊一律拒绝，群聊不支持。扫码绑定会把扫码者自动写成唯一用户；手动绑定或换人时在设置页填 OpenID（`/bot-me` 可查）。
 
 | 配置 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
@@ -166,7 +174,7 @@ QQ 机器人只服务一个用户：其他私聊一律拒绝，群聊不支持�
 |------|------|--------|------|
 | `panel.autoSync` | boolean | `true` | 机器人就绪后自动把当前指令同步到指令面板 |
 
-指令面板就是手机 QQ 里输入 `/` 后弹出的指令列表。开启 `panel.autoSync` 后，每次机器人就绪都会把插件内置命令（含说明）推到私聊全局面板；没有面板时创建，已有本插件建的面板（`remark` 为 `im-qqbot:commands`）时原地更新。改完命令想立即重推，发 `/bot-sync`（仅绑定用户可用）。
+指令面板就是手机 QQ 里输入 `/` 后弹出的指令列表。开启 `panel.autoSync` 后，每次机器人就绪都会把插件内置命令（含说明）推到私聊全局面板；没有面板时创建，已有本插件建的面板（`remark` 为 `qqterm:commands`）时原地更新。改完命令想立即重推，发 `/bot-sync`（仅绑定用户可用）。
 
 ### 自定义菜单（menu）
 
@@ -211,7 +219,7 @@ QQ 机器人只服务一个用户：其他私聊一律拒绝，群聊不支持�
 
 - **没有 `cwd` 配置**：会话的工作目录由宿主决定，插件不再写死一个目录。
 - **新会话落在宿主的默认工作区**（首次使用时建在 `Documents/deepseek-harness/default-workspace`）；宿主没有默认工作区时退回 dsh 的启动目录。
-- **工作区跟着会话走**：`/sessions resume` 切到哪个会话，这个聊天的工作目录就变成那个会话的目录；之后 `/new` 也留在同一个工作区，重启后依然记得（记录在 `~/.dsh-qqbot/model-prefs.json` 的 `dirs` 里）。
+- **工作区跟着会话走**：`/sessions resume` 切到哪个会话，这个聊天的工作目录就变成那个会话的目录；之后 `/new` 也留在同一个工作区，重启后依然记得（记录在 `~/.dsh-qqterm/model-prefs.json` 的 `dirs` 里）。
 - **显示名用目录名**：插件不再给工作区起 `QQBot` 这种名字，宿主按目录最后一段自动命名；老版本留下的 `QQBot` 标题会在下次挂载时迁移成目录名（用户自己改过的名字不动）。
 
 ### 换工作区（`/new <工作区>`）
@@ -272,7 +280,7 @@ src/
 ├── setup/                      # 凭据绑定（扫码）
 │   ├── index.ts                # 绑定编排（ensureCredentials）
 │   ├── binding-service.ts      # 扫码状态机（宿主内唯一事实源）
-│   ├── bind-routes.ts          # 端内绑定页路由（/qqbot/im-qqbot/bind）
+│   ├── bind-routes.ts          # 端内绑定页路由（/qqterm/bind）
 │   ├── presenters.ts           # 呈现策略（终端/浏览器降级）
 │   ├── qr-svg.ts               # 二维码 SVG 渲染（宿主侧）
 │   └── persist.ts              # 凭据写入 cordis.patch.yml
@@ -318,7 +326,7 @@ src/
 
 ## 会话路由
 
-聊天会话的 key 固定为 `qqbot:${appId}:chat`，它只决定「当前接哪个会话」；已获取的会话可以有多份。当前会话在第一次真正用到时铸造 UUID 会话 id 并持久化到 `model-prefs.json`，重启后只有当前会话按持久化 id 恢复；没有映射即视为全新会话。`/new`、`/clear` 只是清掉这个映射（以及当前会话），不会预先铸造一个还没有创建的会话。
+聊天会话的 key 固定为 `qqterm:${appId}:chat`，它只决定「当前接哪个会话」；已获取的会话可以有多份。当前会话在第一次真正用到时铸造 UUID 会话 id 并持久化到 `model-prefs.json`，重启后只有当前会话按持久化 id 恢复；没有映射即视为全新会话。`/new`、`/clear` 只是清掉这个映射（以及当前会话），不会预先铸造一个还没有创建的会话。
 
 解析策略：已获取记录 → 进程内 live agent → 持久化恢复 → 全新创建（仅当前会话；`/sessions resume` 失败不创建）。
 
@@ -348,7 +356,7 @@ pnpm dev
 
 # 用 --patch 方式调试
 export QQBOT_APPID="xxx" QQBOT_SECRET="xxx"
-npx @deepseek-ai/dsh web --patch /path/to/dsh-qqbot/cordis.dev.yml
+npx @deepseek-ai/dsh web --patch /path/to/dsh-qqterm/cordis.dev.yml
 ```
 
 ## License

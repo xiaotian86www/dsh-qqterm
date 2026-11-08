@@ -47,7 +47,7 @@ function makeRecord(sessionId: string, status: 'idle' | 'running' = 'running'): 
     runMaintenance: vi.fn(),
   };
   const record: SessionRecord = {
-    sessionKey: 'qqbot:app:chat',
+    sessionKey: 'qqterm:app:chat',
     sessionId,
     agent: agent as unknown as SessionRecord['agent'],
     replyTarget: { scope: 'c2c', targetId: 'u1', msgId: 'm1' },

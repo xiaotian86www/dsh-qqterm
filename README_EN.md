@@ -1,12 +1,12 @@
 <div align="center">
 
-<img width="120" src="https://img.shields.io/badge/🤖-QQ_Bot-blue?style=for-the-badge" alt="QQ Bot" />
+<img width="120" src="https://img.shields.io/badge/🤖-QQ_SuperTerm-blue?style=for-the-badge" alt="QQ SuperTerm" />
 
-**A QQ Bot plugin for [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) (dsh), connecting DeepSeek AI assistants to QQ private chats.**
+**QQ SuperTerm: a QQ channel terminal for [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) (dsh) that operates DeepSeek Harness from QQ private chats.**
 
-[![npm version](https://img.shields.io/npm/v/@tencent-connect/dsh-qqbot)](https://www.npmjs.com/package/@tencent-connect/dsh-qqbot)
+[![npm version](https://img.shields.io/npm/v/@tencent-connect/dsh-qqterm)](https://www.npmjs.com/package/@tencent-connect/dsh-qqterm)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
-[![GitHub stars](https://img.shields.io/github/stars/tencent-connect/dsh-qqbot)](https://github.com/tencent-connect/dsh-qqbot)
+[![GitHub stars](https://img.shields.io/github/stars/tencent-connect/dsh-qqterm)](https://github.com/tencent-connect/dsh-qqterm)
 [![QQ Bot](https://img.shields.io/badge/QQ_Bot-API_v2-red)](https://bot.q.qq.com/wiki/)
 
 <br/>
@@ -27,7 +27,7 @@ Scan to join the QQ group / channel
 ## Architecture
 
 ```
-QQ User → QQ WebSocket → dsh-qqbot → ctx.agents → dsh agent loop → LLM
+QQ User → QQ WebSocket → dsh-qqterm → ctx.agents → dsh agent loop → LLM
                                  ↑                           │
                                  └── session/event ──────────┘
                                        (assistant reply → QQ sendMarkdown)
@@ -39,11 +39,11 @@ QQ User → QQ WebSocket → dsh-qqbot → ctx.agents → dsh agent loop → LLM
 
 No command line needed — everything happens inside the app:
 
-1. **Install**: click "Plugins" in the left sidebar → "Add plugin" → enter `@tencent-connect/dsh-qqbot@latest` → install and start now
+1. **Install**: click "Plugins" in the left sidebar → "Add plugin" → enter `@tencent-connect/dsh-qqterm@latest` → install and start now
 
 <img src="./assets/docs/install.png" alt="In-app plugin install" width="560" />
 
-2. **Connect**: avatar at the bottom-left → Settings → "QQ Bots" → scan the QR code with mobile QQ
+2. **Connect**: avatar at the bottom-left → Settings → "QQ SuperTerm" → scan the QR code with mobile QQ
 
 <img src="./assets/docs/setting.png" alt="Settings QR binding" width="560" />
 
@@ -53,7 +53,7 @@ Credentials are saved automatically after the scan; later launches need no re-sc
 
 ```bash
 # Add to a profile
-npx @deepseek-ai/dsh plugin --profile qqbot add @tencent-connect/dsh-qqbot
+npx @deepseek-ai/dsh plugin --profile qqbot add @tencent-connect/dsh-qqterm
 
 # Start
 npx @deepseek-ai/dsh --profile qqbot
@@ -71,11 +71,11 @@ In environments without the in-app binding page (pure CLI), set `QQBOT_BIND_OPEN
 
 ```bash
 # Build
-cd /path/to/dsh-qqbot
+cd /path/to/dsh-qqterm
 pnpm install && pnpm build
 
 # Add to a profile (local path)
-npx @deepseek-ai/dsh plugin --profile qqbot add /path/to/dsh-qqbot
+npx @deepseek-ai/dsh plugin --profile qqbot add /path/to/dsh-qqterm
 
 # Start
 export QQBOT_APPID="yourAppID" QQBOT_SECRET="yourAppSecret"
@@ -86,8 +86,16 @@ npx @deepseek-ai/dsh --profile qqbot
 
 ```bash
 export QQBOT_APPID="yourAppID" QQBOT_SECRET="yourAppSecret"
-npx @deepseek-ai/dsh web --patch /path/to/dsh-qqbot/cordis.dev.yml
+npx @deepseek-ai/dsh web --patch /path/to/dsh-qqterm/cordis.dev.yml
 ```
+
+### Upgrading from older versions (0.6.0)
+
+Starting with 0.6.0 the project is named **QQ SuperTerm** (`dsh-qqterm`) and is fully separated from the old `dsh-qqbot`; there is no compatibility layer:
+
+1. Switch the package to `@tencent-connect/dsh-qqterm` and reinstall it into the profile.
+2. In the profile's `cordis.patch.yml`, change `- id: im-qqbot` to `- id: qqterm` and keep `config` as-is.
+3. Rename `~/.dsh-qqbot` to `~/.dsh-qqterm` (session pointers, passive-reply credentials, gateway tickets, and media cache live there). The old directory is not migrated automatically.
 
 ## Configuration
 
@@ -185,7 +193,7 @@ A workspace is the host's durable grouping record for "one directory + the sessi
 
 - **No `cwd` config**: the session's working directory comes from the host; the plugin no longer pins a directory.
 - **New sessions land in the host's default workspace** (`Documents/deepseek-harness/default-workspace` on first use); when there is no default workspace it falls back to the dsh launch directory.
-- **The workspace follows the session**: `/sessions resume` moves this chat into that session's directory; a later `/new` stays in the same workspace, and it survives a restart (persisted in the `dirs` section of `~/.dsh-qqbot/model-prefs.json`).
+- **The workspace follows the session**: `/sessions resume` moves this chat into that session's directory; a later `/new` stays in the same workspace, and it survives a restart (persisted in the `dirs` section of `~/.dsh-qqterm/model-prefs.json`).
 - **Titles come from directory names**: the plugin no longer names workspaces `QQBot`; the host derives the title from the last path segment. Legacy `QQBot` titles are migrated on the next attach (titles the user changed are left alone).
 
 ### Switching workspace (`/new <workspace>`)
@@ -282,7 +290,7 @@ src/
 
 ## Session Routing
 
-The chat session key is `qqbot:${appId}:chat`; it only decides which session is *current*. Acquired sessions can be multiple. A UUID session id is minted the first time the current session is actually used and persisted to `model-prefs.json`; after a restart only the current session resumes from that id. No mapping means a fresh chat session. `/new` and `/clear` only clear that mapping (and, for `/clear`, the current session) — they never pre-mint a session that does not exist yet.
+The chat session key is `qqterm:${appId}:chat`; it only decides which session is *current*. Acquired sessions can be multiple. A UUID session id is minted the first time the current session is actually used and persisted to `model-prefs.json`; after a restart only the current session resumes from that id. No mapping means a fresh chat session. `/new` and `/clear` only clear that mapping (and, for `/clear`, the current session) — they never pre-mint a session that does not exist yet.
 
 Resolution strategy: acquired record → in-process live agent → persisted resume → fresh create (current session only; `/sessions resume` never creates).
 
@@ -312,7 +320,7 @@ pnpm dev
 
 # Debug via --patch
 export QQBOT_APPID="xxx" QQBOT_SECRET="xxx"
-npx @deepseek-ai/dsh web --patch /path/to/dsh-qqbot/cordis.dev.yml
+npx @deepseek-ai/dsh web --patch /path/to/dsh-qqterm/cordis.dev.yml
 ```
 
 ## License

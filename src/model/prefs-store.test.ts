@@ -120,8 +120,8 @@ describe('PrefsStore 并发安全（E3）', () => {
 
 describe('PrefsStore 回复目标', () => {
   it('写入后重启可读回（启动恢复用）', () => {
-    store().setTarget('qqbot:app:chat', 'openid-1');
-    expect(store().getTarget('qqbot:app:chat')).toBe('openid-1');
+    store().setTarget('qqterm:app:chat', 'openid-1');
+    expect(store().getTarget('qqterm:app:chat')).toBe('openid-1');
   });
 
   it('值不变不写盘（每条消息都调 touch，只有换人时才该写）', () => {

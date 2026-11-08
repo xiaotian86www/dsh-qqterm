@@ -1,12 +1,12 @@
 /**
- * dsh-im-qqbot — QQ Bot IM channel plugin for deepseek-harness
+ * dsh-qqterm — QQ Bot IM channel plugin for deepseek-harness
  *
  * Cordis 插件入口。将 QQ 消息平台作为 dsh 的前端协议驱动。
  * 网关组装（中间件编排 + 事件 + 出站 + 生命周期）见 src/gateway/；
  * 凭据绑定编排（扫码状态机 + 端内绑定页路由）见 src/setup/。
  */
 import type { Context } from '@deepseek-ai/cordis';
-import { ConfigSchema, type ImQQBotConfig } from './config.ts';
+import { ConfigSchema, type QQTermConfig } from './config.ts';
 import { bootstrapGateway } from './gateway/index.ts';
 import type { DshAgentRegistry } from './session/index.ts';
 import { getProfileDir, resolveEnv } from './shared/index.ts';
@@ -14,7 +14,7 @@ import { ensureCredentials, persistCredentialsToProfile, registerBoundCredential
 import type { Logger } from './types.ts';
 
 // ── Cordis 插件元数据 ──
-export const name = 'im-qqbot';
+export const name = 'qqterm';
 export const inject = [
   'agents',
   'llm',
@@ -37,10 +37,10 @@ export const inject = [
 ];
 export const Config = ConfigSchema;
 
-export type { ImQQBotConfig } from './config.ts';
+export type { QQTermConfig } from './config.ts';
 
 // ── 插件主体 ──
-export async function apply(ctx: Context, config: ImQQBotConfig): Promise<void> {
+export async function apply(ctx: Context, config: QQTermConfig): Promise<void> {
   const agents = (ctx as unknown as Record<string, unknown>).agents as DshAgentRegistry;
   const logger: Logger = ((ctx as unknown as Record<string, unknown>).logger as Logger) ?? console;
 
@@ -95,7 +95,7 @@ export async function apply(ctx: Context, config: ImQQBotConfig): Promise<void> 
   // 已绑定：注册常驻路由（状态回显 + 手动编辑/更换凭据 + 配置编辑）
   registerBoundCredentialRoutes(ctx, logger, appId, { ...config });
 
-  const resolvedConfig: ImQQBotConfig = { ...config, appId, appSecret };
+  const resolvedConfig: QQTermConfig = { ...config, appId, appSecret };
 
   await bootstrapGateway(ctx, agents, resolvedConfig, logger);
 }

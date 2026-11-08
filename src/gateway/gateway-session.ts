@@ -25,7 +25,7 @@ export interface GatewaySession {
 
 /**
  * @param appId 机器人 appId，作为 KV key 的一部分，多机器人之间互不覆盖
- * @param dir 票据目录，单测注入临时目录；默认 ~/.dsh-qqbot/gateway
+ * @param dir 票据目录，单测注入临时目录；默认 ~/.dsh-qqterm/gateway
  */
 export function createGatewaySession(appId: string, dir: string = join(PLUGIN_HOME, 'gateway')): GatewaySession {
   const store = new FileKVStore({

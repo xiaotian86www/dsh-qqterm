@@ -25,7 +25,7 @@ export function ownerOnlyAuth(
     const owner = config.access.owner.trim();
     const senderId = ctx.message.senderId;
     if (owner !== '' && senderId === owner) return true;
-    logger?.warn(`im-qqbot: command auth denied: sender=${senderId ?? '(missing)'}`);
+    logger?.warn(`qqterm: command auth denied: sender=${senderId ?? '(missing)'}`);
     return DENIED;
   };
 }

@@ -6,7 +6,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { SlashCommandHandlerContext } from '@tencent-connect/qqbot-nodejs';
-import { ConfigSchema, type ImQQBotConfig } from '../config.ts';
+import { ConfigSchema, type QQTermConfig } from '../config.ts';
 import type { PermissionPresetEntry, PermissionSwitchOutcome, SessionManager } from '../session/index.ts';
 import type { Logger } from '../types.ts';
 import { permissionCommand } from './permission.ts';
@@ -23,7 +23,7 @@ const config = ConfigSchema({
   appId: 'app',
   appSecret: 'secret',
   access: { owner: 'owner' },
-} as ImQQBotConfig);
+} as QQTermConfig);
 const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
 
 const PRESETS: PermissionPresetEntry[] = [
@@ -85,7 +85,7 @@ describe('/permission 命令声明与鉴权', () => {
       appId: 'app',
       appSecret: 'secret',
       access: { owner: '' },
-    } as ImQQBotConfig);
+    } as QQTermConfig);
     const command = permissionCommand({ manager: makeManager(), config: empty, logger });
     const authorized = command.authorized as (ctx: { message: { senderId?: string } }) => boolean | string;
     expect(authorized({ message: { senderId: 'anyone' } })).toBeTypeOf('string');

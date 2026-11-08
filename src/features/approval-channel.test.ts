@@ -29,7 +29,7 @@ function createSender(sent: SentMessage[]) {
   };
 }
 
-const sessionKey = (scope: ChatScope, peerId: string): string => `qqbot:app:${scope}:${peerId}`;
+const sessionKey = (scope: ChatScope, peerId: string): string => `qqterm:app:${scope}:${peerId}`;
 
 /** 默认绑定 peer-qq；传空字符串模拟未配置 owner */
 function makeConfig(owner = 'peer-qq'): ApprovalChannelConfigLike {

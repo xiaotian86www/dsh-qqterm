@@ -12,7 +12,7 @@ import type { CategorizedCommand } from '../commands/types.ts';
 import type { Logger, OpenApiLike } from '../types.ts';
 
 /** 面板归属标记：列表里靠它认出「这个面板是本插件建的」 */
-export const PANEL_REMARK = 'im-qqbot:commands';
+export const PANEL_REMARK = 'qqterm:commands';
 
 /** 单个面板最多的元素数 */
 export const PANEL_MAX_ITEMS = 20;
@@ -164,7 +164,7 @@ export async function syncCommandPanels(
     if (existing !== undefined) {
       await api.put(`/v2/panels/${existing}`, { panel });
       results.push({ scope, action: 'updated', panelId: existing, count: items.length });
-      logger?.debug?.(`[im-qqbot] 指令面板已更新: ${scope} ${existing} (${items.length} 项)`);
+      logger?.debug?.(`[qqterm] 指令面板已更新: ${scope} ${existing} (${items.length} 项)`);
       continue;
     }
 
@@ -175,7 +175,7 @@ export async function syncCommandPanels(
     });
     const panelId = created?.panel_id ?? '';
     results.push({ scope, action: 'created', panelId, count: items.length });
-    logger?.debug?.(`[im-qqbot] 指令面板已创建: ${scope} ${panelId} (${items.length} 项)`);
+    logger?.debug?.(`[qqterm] 指令面板已创建: ${scope} ${panelId} (${items.length} 项)`);
   }
 
   return results;

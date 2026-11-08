@@ -54,7 +54,7 @@ export async function ensureCredentials(
   options: EnsureCredentialsOptions,
 ): Promise<SetupCredentials | null> {
   const logger = options.logger;
-  const source = options.source ?? 'dsh-qqbot';
+  const source = options.source ?? 'dsh-qqterm';
 
   // 单例接管：HMR 双 fiber 窗口下，新实例终止旧实例的轮询
   const service = new BindingService({ source, logger });
@@ -67,7 +67,7 @@ export async function ensureCredentials(
   (ctx as unknown as { effect(fn: () => () => void, name?: string): void }).effect(() => () => {
     service.dispose();
     if (activeService === service) activeService = null;
-  }, 'im-qqbot.binding');
+  }, 'qqterm.binding');
 
   // 呈现策略：
   // - 终端通道（CLI / dsh web 运营者）；Desktop 无可见终端，跳过
@@ -93,7 +93,7 @@ export async function ensureCredentials(
     // 插件卸载时连带注销路由
     (ctx as unknown as { effect(fn: () => () => void, name?: string): void }).effect(() => {
       return disposeRoutes;
-    }, 'im-qqbot.bind-routes');
+    }, 'qqterm.bind-routes');
   }
 
   return service.start();
@@ -114,7 +114,7 @@ export function registerBoundCredentialRoutes(ctx: Context, logger: Logger, appI
   });
   (ctx as unknown as { effect(fn: () => () => void, name?: string): void }).effect(() => {
     return disposeRoutes;
-  }, 'im-qqbot.bind-routes');
+  }, 'qqterm.bind-routes');
 }
 
 /** 手动凭据持久化（失败时返回可展示的错误） */

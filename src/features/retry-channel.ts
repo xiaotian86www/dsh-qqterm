@@ -111,13 +111,13 @@ export class RetryChannel {
       delivered = true;
     } catch (err) {
       // 键盘通道不可用时，正文仍然要有下一步（发 /retry），不能静默丢消息
-      console.warn('[im-qqbot] retry keyboard send failed:', err);
-      this.logger.warn(`im-qqbot: retry keyboard send failed, fallback to text: ${err instanceof Error ? err.message : String(err)}`);
+      console.warn('[qqterm] retry keyboard send failed:', err);
+      this.logger.warn(`qqterm: retry keyboard send failed, fallback to text: ${err instanceof Error ? err.message : String(err)}`);
       try {
         await this.sender.sendMarkdown(record.replyTarget, this.decorate(sessionId, formatRetryOffer(failure, retries, false)));
         delivered = true;
       } catch (fallbackErr) {
-        this.logger.error(`im-qqbot: retry notice send failed: ${fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)}`);
+        this.logger.error(`qqterm: retry notice send failed: ${fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)}`);
       }
     }
     // 降级成纯文本时不再有待确认状态：按钮不存在，等待也没有意义
@@ -181,11 +181,11 @@ export class RetryChannel {
       record.agent.followup(createQQUserMessage(prompt));
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      this.logger.error(`im-qqbot: retry followup failed sessionId=${sessionId}: ${message}`);
+      this.logger.error(`qqterm: retry followup failed sessionId=${sessionId}: ${message}`);
       void this.send(record, sessionId, `⚠️ 重发失败: ${message}\n稍等片刻再发一次。`);
       return;
     }
-    this.logger.info(`im-qqbot: prompt resent via retry button sessionId=${sessionId}`);
+    this.logger.info(`qqterm: prompt resent via retry button sessionId=${sessionId}`);
     void this.send(record, sessionId, '✅ 已重发上一条消息');
   }
 
@@ -194,7 +194,7 @@ export class RetryChannel {
     if (!entry) return;
     this.pending.delete(sessionId);
     entry.timer = undefined;
-    this.logger.debug(`im-qqbot: retry offer expired sessionId=${sessionId}`);
+    this.logger.debug(`qqterm: retry offer expired sessionId=${sessionId}`);
   }
 
   /** 会话内提示：非当前会话加来源行（与问答 / 审批同一套标记） */
@@ -208,7 +208,7 @@ export class RetryChannel {
       .sendMarkdown(record.replyTarget, this.decorate(sessionId, body))
       .then(() => {})
       .catch((err: unknown) => {
-        this.logger.error(`im-qqbot: retry reply send failed: ${err instanceof Error ? err.message : String(err)}`);
+        this.logger.error(`qqterm: retry reply send failed: ${err instanceof Error ? err.message : String(err)}`);
       });
   }
 }

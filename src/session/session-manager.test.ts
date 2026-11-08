@@ -10,7 +10,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Context } from '@deepseek-ai/cordis';
-import { ConfigSchema, type ImQQBotConfig } from '../config.ts';
+import { ConfigSchema, type QQTermConfig } from '../config.ts';
 import type { Logger, ReplyTarget } from '../types.ts';
 import type { DshAgent, DshAgentHandle, DshAgentRegistry } from './types.ts';
 
@@ -28,7 +28,7 @@ const APP_ID = 'app1';
 const PEER = 'user1';
 const PEER_B = 'user2';
 /** 聊天会话只有一个：固定 key */
-const KEY = `qqbot:${APP_ID}:chat`;
+const KEY = `qqterm:${APP_ID}:chat`;
 const MINTED = /^session-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const REPLY: ReplyTarget = { scope: 'c2c', targetId: PEER };
 const REPLY_B: ReplyTarget = { scope: 'c2c', targetId: PEER_B };
@@ -186,7 +186,7 @@ function createManagerWithCtx(
     appSecret: 'secret',
     provider: 'p',
     model: 'm',
-  } as ImQQBotConfig);
+  } as QQTermConfig);
   const manager = new SessionManager(ctx, registry as DshAgentRegistry, config, logger);
   managers.push(manager);
   return manager;
@@ -206,7 +206,7 @@ function createdIds(registry: { create: { mock: { calls: Array<[{ sessionId: str
 }
 
 beforeEach(() => {
-  env.home = mkdtempSync(join(tmpdir(), 'im-qqbot-session-'));
+  env.home = mkdtempSync(join(tmpdir(), 'qqterm-session-'));
   mkdirSync(join(env.home, 'workspace'), { recursive: true });
 });
 

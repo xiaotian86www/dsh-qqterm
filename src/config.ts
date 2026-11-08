@@ -1,5 +1,5 @@
 /**
- * dsh-im-qqbot 插件配置 Schema
+ * dsh-qqterm 插件配置 Schema
  */
 import Schema from '@deepseek-ai/schemastery';
 
@@ -66,7 +66,7 @@ export interface RetryOfferConfig {
   timeoutMs: number;
 }
 
-export interface ImQQBotConfig {
+export interface QQTermConfig {
   /** QQ Bot AppID */
   appId: string;
   /** QQ Bot AppSecret */
@@ -108,7 +108,7 @@ export const AccessControlSchema: Schema<AccessControlConfig> = Schema.object({
   owner: Schema.string().default('').description('唯一允许的用户（QQ OpenID），空=拒绝所有人'),
 });
 
-export const ConfigSchema: Schema<ImQQBotConfig> = Schema.object({
+export const ConfigSchema: Schema<QQTermConfig> = Schema.object({
   appId: Schema.string().default('').description('QQ 机器人 AppID'),
   appSecret: Schema.string().default('').description('QQ 机器人 AppSecret'),
   directPrompt: Schema.string().description('私聊额外system prompt'),

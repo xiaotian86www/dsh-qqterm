@@ -6,7 +6,7 @@ import { DeliverablesDeliverer } from './deliverables.ts';
 import type { MediaSenderLike } from '../media/send-media.ts';
 import type { QQBotSender } from './outbound-buffer.ts';
 import type { SessionRecord } from '../session/index.ts';
-import type { ImQQBotConfig } from '../config.ts';
+import type { QQTermConfig } from '../config.ts';
 import type { Logger } from '../types.ts';
 
 const logger: Logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
@@ -24,11 +24,11 @@ function createMediaBot(): MediaSenderLike {
   };
 }
 
-function createConfig(): ImQQBotConfig {
+function createConfig(): QQTermConfig {
   return {
     textChunkLimit: 4500,
     sendFile: { restrictPaths: true, extraRoots: [], sendPresentedFiles: true, maxFiles: 4 },
-  } as unknown as ImQQBotConfig;
+  } as unknown as QQTermConfig;
 }
 
 function createRecord(): SessionRecord {
@@ -37,7 +37,7 @@ function createRecord(): SessionRecord {
 
 describe('DeliverablesDeliverer', () => {
   it('存在的文件按扩展名分发发送', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'dsh-qqbot-dlv-'));
+    const dir = await mkdtemp(join(tmpdir(), 'dsh-qqterm-dlv-'));
     const png = join(dir, 'a.png');
     const md = join(dir, 'b.md');
     await writeFile(png, 'x');
@@ -55,7 +55,7 @@ describe('DeliverablesDeliverer', () => {
   });
 
   it('缺失文件降级为文字提示，不阻断其余文件', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'dsh-qqbot-dlv-'));
+    const dir = await mkdtemp(join(tmpdir(), 'dsh-qqterm-dlv-'));
     const ok = join(dir, 'ok.txt');
     await writeFile(ok, 'x');
 
@@ -73,7 +73,7 @@ describe('DeliverablesDeliverer', () => {
   });
 
   it('白名单外的路径直接进未送达清单，不调用发送器', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'dsh-qqbot-dlv-'));
+    const dir = await mkdtemp(join(tmpdir(), 'dsh-qqterm-dlv-'));
     const outside = join(tmpdir(), `outside-${Date.now()}.txt`);
     await writeFile(outside, 'x');
 
@@ -89,7 +89,7 @@ describe('DeliverablesDeliverer', () => {
   });
 
   it('maxFiles 截断单轮投递数量，超限文件进未送达提示', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'dsh-qqbot-dlv-'));
+    const dir = await mkdtemp(join(tmpdir(), 'dsh-qqterm-dlv-'));
     const files = await Promise.all(['a', 'b', 'c'].map(async (n) => {
       const p = join(dir, `${n}.txt`);
       await writeFile(p, n);
@@ -111,7 +111,7 @@ describe('DeliverablesDeliverer', () => {
   });
 
   it('非当前会话的未送达提示也带来源头与回复链接', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'dsh-qqbot-dlv-'));
+    const dir = await mkdtemp(join(tmpdir(), 'dsh-qqterm-dlv-'));
     const mediaBot = createMediaBot();
     const sender = createSender();
     const deliverer = new DeliverablesDeliverer(

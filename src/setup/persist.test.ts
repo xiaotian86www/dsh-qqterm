@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+﻿import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, readFileSync, writeFileSync, existsSync, utimesSync, statSync, rmSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -16,7 +16,7 @@ let dir: string;
 let patchPath: string;
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'im-qqbot-persist-'));
+  dir = mkdtempSync(join(tmpdir(), 'qqterm-persist-'));
   patchPath = join(dir, 'cordis.patch.yml');
 });
 
@@ -34,7 +34,7 @@ const SHARED_PATCH = [
   "  name: '@deepseek-ai/dsh-client-ui-settings'",
   '  config:',
   '    enabled: false',
-  '- id: im-qqbot',
+  '- id: qqterm',
   '  config:',
   '    directPrompt: 旧提示词',
   '    appId: old-app # 旧凭据',
@@ -61,12 +61,12 @@ describe('persistCredentialsToProfile', () => {
     expect(after).not.toContain('old-app');
     expect(after).toContain('appId: test-app');
 
-    expect(entryIds(after)).toEqual(['insert', 'ui-settings', 'im-qqbot', 'llm-deepseek']);
+    expect(entryIds(after)).toEqual(['insert', 'ui-settings', 'qqterm', 'llm-deepseek']);
   });
 
   it('userOpenid 覆盖为唯一 owner（旧扫码者与旧模式键不残留），保留其他配置', () => {
     writeFileSync(patchPath, [
-      '- id: im-qqbot',
+      '- id: qqterm',
       '  config:',
       '    appId: old-app',
       '    streaming: false',
@@ -88,7 +88,7 @@ describe('persistCredentialsToProfile', () => {
 
   it('userOpenid 相同时幂等（不重复）', () => {
     writeFileSync(patchPath, [
-      '- id: im-qqbot',
+      '- id: qqterm',
       '  config:',
       '    access:',
       '      c2cAllow: [qr-user]',
@@ -113,14 +113,14 @@ describe('persistCredentialsToProfile', () => {
   it('文件不存在时安全重建（新条目）', () => {
     expect(persistCredentialsToProfile(credentials, dir, log)).toBe(true);
     const after = readFileSync(patchPath, 'utf8');
-    expect(after).toContain('- id: im-qqbot');
+    expect(after).toContain('- id: qqterm');
     expect(after).toContain('appId: test-app');
-    expect(entryIds(after)).toEqual(['im-qqbot']);
+    expect(entryIds(after)).toEqual(['qqterm']);
   });
 
   it('覆盖 !!js loader 表达式为字面量，保留其余注释', () => {
     writeFileSync(patchPath, [
-      '- id: im-qqbot',
+      '- id: qqterm',
       '  config:',
       "    appId: !!js 'env.APP_ID' # identifier",
       "    appSecret: !!js 'env.SECRET'",
@@ -136,7 +136,7 @@ describe('persistCredentialsToProfile', () => {
 
   it('锚点共享的 config 拒绝写入（fail-closed，原文件不变）', () => {
     const content = [
-      '- id: im-qqbot',
+      '- id: qqterm',
       '  config: &shared { appId: old, appSecret: old }',
       '- id: other',
       '  config: *shared',
@@ -149,7 +149,7 @@ describe('persistCredentialsToProfile', () => {
   });
 
   it('非法 YAML / 顶层非数组 / config 非映射：拒绝写入，原文件不变', () => {
-    for (const content of ['- [', 'config: {}', '- id: im-qqbot\n  config: wrong']) {
+    for (const content of ['- [', 'config: {}', '- id: qqterm\n  config: wrong']) {
       writeFileSync(patchPath, content, 'utf8');
       expect(persistCredentialsToProfile(credentials, dir, log)).toBe(false);
       expect(readFileSync(patchPath, 'utf8')).toBe(content);
@@ -158,7 +158,7 @@ describe('persistCredentialsToProfile', () => {
 
   it('写入后目录内不留本插件的临时/回滚文件', () => {
     persistCredentialsToProfile(credentials, dir, log);
-    const leftovers = readdirSync(dir).filter((name) => name.includes('imqqbot'));
+    const leftovers = readdirSync(dir).filter((name) => name.includes('qqterm'));
     expect(leftovers).toEqual([]);
   });
 });
@@ -174,7 +174,7 @@ describe('removeCredentialsFromProfile', () => {
     expect(after).toContain('- insert:');
     expect(after).not.toContain('test-app');
     expect(after).not.toContain('old-app');
-    expect(entryIds(after)).toEqual(['insert', 'ui-settings', 'im-qqbot', 'llm-deepseek']);
+    expect(entryIds(after)).toEqual(['insert', 'ui-settings', 'qqterm', 'llm-deepseek']);
   });
 
   it('凭据已不存在时仍强制写回（mtime 更新触发宿主 HMR）', () => {
@@ -204,11 +204,11 @@ describe('updateProfileConfig', () => {
     expect(after).toContain('directPrompt: 新提示词');
     expect(after).toContain('owner: u1');
     expect(after).toContain('appId: old-app');
-    expect(entryIds(after)).toEqual(['insert', 'ui-settings', 'im-qqbot', 'llm-deepseek']);
+    expect(entryIds(after)).toEqual(['insert', 'ui-settings', 'qqterm', 'llm-deepseek']);
   });
 
   it('提交键与现值相同（幂等）：不产生写动作，mtime 不变', () => {
-    writeFileSync(patchPath, '- id: im-qqbot\n  config:\n    streaming: false\n', 'utf8');
+    writeFileSync(patchPath, '- id: qqterm\n  config:\n    streaming: false\n', 'utf8');
     const past = new Date(Date.now() - 1000);
     utimesSync(patchPath, past, past);
 
@@ -219,7 +219,7 @@ describe('updateProfileConfig', () => {
   it('条目不存在时追加，跳过凭据键', () => {
     expect(updateProfileConfig({ appId: 'x', streaming: false }, dir, log)).toBe(true);
     const after = readFileSync(patchPath, 'utf8');
-    expect(after).toContain('- id: im-qqbot');
+    expect(after).toContain('- id: qqterm');
     expect(after).toContain('streaming: false');
     expect(after).not.toContain('appId: x');
   });

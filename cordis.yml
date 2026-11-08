@@ -1,4 +1,4 @@
-# dsh-im-qqbot 组合配置示例
+# dsh-qqterm 组合配置示例
 #
 # 运行: pnpm dsh --config ./cordis.yml
 #
@@ -93,14 +93,14 @@
     root: ./.dsh-sessions
 
 # ── QQ Bot IM 驱动 ──
-- id: im-qqbot
-  name: '@tencent-connect/dsh-qqbot'
+- id: qqterm
+  name: '@tencent-connect/dsh-qqterm'
   config:
     appId: ${QQBOT_APPID}
     appSecret: ${QQBOT_SECRET}
     provider: deepseek
     model: deepseek-chat
-    cwd: ${DSH_CWD:-/tmp/dsh-qqbot}
+    cwd: ${DSH_CWD:-/tmp/dsh-qqterm}
     requireMention: true
     textChunkLimit: 4500
     showToolResults: false

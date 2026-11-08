@@ -6,7 +6,7 @@
  * 每个文件独立投递，失败降级为文字提示，不阻断其余文件。
  */
 import { basename, isAbsolute, resolve } from 'node:path';
-import type { ImQQBotConfig } from '../config.ts';
+import type { QQTermConfig } from '../config.ts';
 import type { SessionRecord } from '../session/index.ts';
 import type { Logger } from '../types.ts';
 import { isPathAllowed, resolveAgentCwd, sendMediaFile, type MediaSenderLike } from '../media/send-media.ts';
@@ -22,7 +22,7 @@ export interface DeliverablesDelivererLike {
 export class DeliverablesDeliverer implements DeliverablesDelivererLike {
   private readonly sender: QQBotSender;
   private readonly mediaBot: MediaSenderLike;
-  private readonly config: ImQQBotConfig;
+  private readonly config: QQTermConfig;
   private readonly logger: Logger;
   private readonly dirOf?: (record: SessionRecord) => string | undefined;
   /** 非当前会话的文字提示装饰（来源头 + 回复链接）；文件本身无法带标记 */
@@ -31,7 +31,7 @@ export class DeliverablesDeliverer implements DeliverablesDelivererLike {
   public constructor(
     sender: QQBotSender,
     mediaBot: MediaSenderLike,
-    config: ImQQBotConfig,
+    config: QQTermConfig,
     logger: Logger,
     dirOf?: (record: SessionRecord) => string | undefined,
     decorateOf?: (record: SessionRecord, text: string) => string,
@@ -68,11 +68,11 @@ export class DeliverablesDeliverer implements DeliverablesDelivererLike {
       if (result.outcome === 'sent') {
         sent++;
         this.logger.info(
-          `im-qqbot: 交付物已发送 ${display} (${result.size} bytes) → `
+          `qqterm: 交付物已发送 ${display} (${result.size} bytes) → `
           + `${record.replyTarget.scope}:${record.replyTarget.targetId}`,
         );
       } else if (result.outcome === 'failed') {
-        this.logger.warn(`im-qqbot: 交付物发送失败 ${display}: ${result.error}`);
+        this.logger.warn(`qqterm: 交付物发送失败 ${display}: ${result.error}`);
         missed.push(display);
       } else {
         missed.push(display);
@@ -87,11 +87,11 @@ export class DeliverablesDeliverer implements DeliverablesDelivererLike {
           await this.sender.sendMarkdown(record.replyTarget, chunk);
         } catch (err) {
           this.logger.error(
-            `im-qqbot: deliverables notice failed: ${err instanceof Error ? err.message : String(err)}`,
+            `qqterm: deliverables notice failed: ${err instanceof Error ? err.message : String(err)}`,
           );
         }
       }
     }
-    this.logger.debug(`im-qqbot: deliverables delivered sent=${sent} missed=${missed.length}`);
+    this.logger.debug(`qqterm: deliverables delivered sent=${sent} missed=${missed.length}`);
   }
 }

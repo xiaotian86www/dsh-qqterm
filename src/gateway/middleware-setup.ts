@@ -17,7 +17,7 @@ import {
   quoteRef,
   envelopeFormatter,
 } from '@tencent-connect/qqbot-nodejs';
-import type { ImQQBotConfig } from '../config.ts';
+import type { QQTermConfig } from '../config.ts';
 import type { SessionManager } from '../session/index.ts';
 import type { Reloader } from '../reload/index.ts';
 import type { Logger } from '../types.ts';
@@ -31,7 +31,7 @@ import type { ReplyStore } from '../transport/reply-store.ts';
 
 export function setupMiddlewares(
   bot: QQBot,
-  config: ImQQBotConfig,
+  config: QQTermConfig,
   manager: SessionManager,
   logger: Logger,
   replyStore: ReplyStore,
@@ -56,7 +56,7 @@ export function setupMiddlewares(
     },
     onBlock: (mCtx, reason) => {
       if (owner === '') {
-        logger.info(`im-qqbot: 未配置白名单用户，已拒绝私聊: sender=${mCtx.message.senderId ?? '(missing)'}`);
+        logger.info(`qqterm: 未配置白名单用户，已拒绝私聊: sender=${mCtx.message.senderId ?? '(missing)'}`);
         return;
       }
       if (config.debug) {

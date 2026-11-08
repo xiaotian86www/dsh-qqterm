@@ -5,13 +5,13 @@
  */
 import type { QQBot, SlashCommand } from '@tencent-connect/qqbot-nodejs';
 import type { SessionManager } from '../session/index.ts';
-import type { ImQQBotConfig } from '../config.ts';
+import type { QQTermConfig } from '../config.ts';
 import type { Reloader } from '../reload/index.ts';
 import type { Logger } from '../types.ts';
 
 export interface CommandDeps {
   manager: SessionManager;
-  config: ImQQBotConfig;
+  config: QQTermConfig;
   logger?: Logger;
   /** QQBot 实例：指令面板这类要直连 OpenAPI 的命令用，单测可缺省 */
   bot?: QQBot;

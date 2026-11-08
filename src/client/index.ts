@@ -1,7 +1,7 @@
-/**
- * im-qqbot 浏览器半边 —— QQ Bot 端内扫码绑定入口
+﻿/**
+ * qqterm 浏览器半边 —— QQ Bot 端内扫码绑定入口
  *
- * 宿主插件在凭据缺失时注册 /qqbot/im-qqbot/bind 状态路由；本插件在
+ * 宿主插件在凭据缺失时注册 /qqterm/bind 状态路由；本插件在
  * Web / Desktop 提供两个展示位：
  *
  * 1. 设置页「QQ Bot」栏目（settings.section 席位）——注册即展示，
@@ -18,17 +18,17 @@ import { BIND_STATE_PATH } from '../shared/bind-protocol.ts';
 import { BindPanelBody, useBindState, QQ_BOT_LOGO_PATH, installPanelStyles } from './bind-page.ts';
 import { ConfigPanel } from './config-panel.ts';
 
-export const name = 'im-qqbot-client';
+export const name = 'qqterm-client';
 export const inject = ['slots', 'sidebarRight', 'sidebarRightTabs'];
 
 /** 侧栏 Tab 类型（ui-sidebar-right 契约的局部投影） */
-const TAB_KIND = 'qqbot-bind';
+const TAB_KIND = 'qqterm-bind';
 /** 席位注册 key（Tab 类型 id，席位按其分发；只需全局唯一，与包名解耦） */
-const TAB_ID = 'im-qqbot/bind';
+const TAB_ID = 'qqterm/bind';
 /** 本插件包名（插件详情页按其匹配来源包，只在对应详情页渲染操作按钮） */
-const PACKAGE_NAME = '@tencent-connect/dsh-qqbot';
+const PACKAGE_NAME = '@tencent-connect/dsh-qqterm';
 /** 主面板 id（layout.selectPanel 导航目标；keyed main 席位按其分发） */
-const IM_MAIN_PANEL_ID = 'im-qqbot';
+const IM_MAIN_PANEL_ID = 'qqterm';
 
 /** ui-sidebar-right 的 Tab 注册表服务（局部投影） */
 interface TabRegistryLike {
@@ -90,8 +90,8 @@ function QQBotSettingsSection(): ReactNode {
 
 /** 主面板页面：与设置栏目同一内容，包一层滚动留白容器（plugins.detail.actions 的跳转目标） */
 function QQBotPage(): ReactNode {
-  return createElement('div', { className: 'imqb-pluginPage' },
-    createElement('div', { className: 'imqb-pluginPageContent' },
+  return createElement('div', { className: 'qqterm-bind-pluginPage' },
+    createElement('div', { className: 'qqterm-bind-pluginPageContent' },
       createElement(QQBotSettingsSection)),
   );
 }
@@ -114,7 +114,7 @@ function OpenQqBotAction({ subject, packageName, onOpen }: {
   if (subject.pkg?.name !== packageName) return null;
   if (subject.kind === 'row' && subject.row?.moduleName !== packageName) return null;
   return createElement('button', {
-    type: 'button', className: 'imqb-pluginOpen', onClick: onOpen,
+    type: 'button', className: 'qqterm-bind-pluginOpen', onClick: onOpen,
   }, '设置');
 }
 
@@ -130,7 +130,7 @@ export function apply(ctx: Context): void {
   // 1. 设置页「QQ Bot」栏目（主展示位：注册即展示，无时序依赖）
   if (slots !== undefined) {
     disposers.push(    slots.inject('settings.section', () => slots.register(
-      { name: 'settings.section', id: 'qqbot', order: 7, label: 'QQ 机器人' },
+      { name: 'settings.section', id: 'qqterm', order: 7, label: 'QQ 超级终端' },
       QQBotSettingsSection,
     )));
   }
@@ -140,11 +140,11 @@ export function apply(ctx: Context): void {
     disposers.push(tabs.register({
       id: TAB_ID,
       kind: TAB_KIND,
-      title: () => 'QQ 机器人绑定',
+      title: () => 'QQ 超级终端绑定',
       guide: [{
         id: 'bind',
         order: 90,
-        title: () => 'QQ 机器人绑定',
+        title: () => 'QQ 超级终端绑定',
         description: () => '扫码或手动填写，绑定 QQ 机器人',
         icon: BindGuideIcon,
       }],
@@ -174,7 +174,7 @@ export function apply(ctx: Context): void {
       ));
       const stopActions = pageSlots.inject('plugins.detail.actions', () => pageSlots.register(
         {
-          name: 'plugins.detail.actions', id: 'im-qqbot-open', order: 20,
+          name: 'plugins.detail.actions', id: 'qqterm-open', order: 20,
           inject: () => ({
             packageName: PACKAGE_NAME,
             onOpen: () => layout.selectPanel(IM_MAIN_PANEL_ID),
@@ -186,7 +186,7 @@ export function apply(ctx: Context): void {
       const stopSidebar = pageSlots.inject('sidebar.panellist', () => pageSlots.register(
         {
           name: 'sidebar.panellist', id: IM_MAIN_PANEL_ID,
-          order: 10, label: 'QQ 机器人',
+          order: 10, label: 'QQ 超级终端',
         },
         QqBotSidebarIcon,
       ));
@@ -200,7 +200,7 @@ export function apply(ctx: Context): void {
 
   (ctx as unknown as { effect(fn: () => () => void, name?: string): void }).effect(() => () => {
     for (const dispose of disposers.reverse()) dispose();
-  }, 'im-qqbot-client.binding');
+  }, 'qqterm-client.binding');
 }
 
 /**
@@ -237,7 +237,7 @@ function watchAndPrompt(right: SidebarRightLike | undefined): () => void {
             opened = true;
           } catch (err) {
             // 启动早期 Session surface 可能尚未挂载：保留机会，3s 后随轮询重试
-            console.error('[im-qqbot] 打开绑定页失败，稍后重试', err);
+            console.error('[qqterm] 打开绑定页失败，稍后重试', err);
           }
         }
         schedule(3000);

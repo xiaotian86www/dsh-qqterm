@@ -1,4 +1,4 @@
-/**
+﻿/**
  * QQ 机器人配置面板 — 必要配置的 UI 编辑
  *
  * UI 复刻 DSW 通用设置（settings-form 原语）的视觉风格：
@@ -7,7 +7,7 @@
  * 文字类配置用单行输入；
  * 保存按钮为 DSW 反色主按钮（label-primary 底 + bg-layer-3 字）。
  *
- * 数据流：GET /qqbot/im-qqbot/config 回显当前生效配置（appSecret
+ * 数据流：GET /qqterm/config 回显当前生效配置（appSecret
  * 已由宿主剔除）→ 表单编辑 → dirty diff → POST 仅提交变更键 →
  * 宿主白名单 + Schema 校验 → 最小写入 profile patch → HMR 重载生效。
  *
@@ -32,7 +32,7 @@ type ConfigWire = {
 };
 
 /** 样式注入标记（幂等） */
-const STYLE_ID = 'im-qqbot-config-panel-styles';
+const STYLE_ID = 'qqterm-config-panel-styles';
 
 /** DSW 通用设置风格（settings-form / Switch / SegmentedControl 原语复刻） */
 function useConfigPanelStyles(): void {
@@ -42,65 +42,65 @@ function useConfigPanelStyles(): void {
     const style = document.createElement('style');
     style.id = STYLE_ID;
     style.textContent = `
-.imqb2-form { display: flex; flex-direction: column; width: 100%; }
-.imqb2-group-title {
+.qqterm-config-form { display: flex; flex-direction: column; width: 100%; }
+.qqterm-config-group-title {
   padding: 14px 0 2px; font-size: 12px; font-weight: 600; line-height: 18px;
   color: var(--dsw-alias-label-tertiary); text-transform: uppercase; letter-spacing: .04em;
 }
-.imqb2-field { display: flex; flex-direction: column; gap: 6px; padding: 12px 0; }
-.imqb2-field + .imqb2-field { border-top: 0.5px solid var(--dsw-alias-border-l2); }
-.imqb2-head { display: flex; align-items: center; gap: 8px; min-height: 28px; }
-.imqb2-label {
+.qqterm-config-field { display: flex; flex-direction: column; gap: 6px; padding: 12px 0; }
+.qqterm-config-field + .qqterm-config-field { border-top: 0.5px solid var(--dsw-alias-border-l2); }
+.qqterm-config-head { display: flex; align-items: center; gap: 8px; min-height: 28px; }
+.qqterm-config-label {
   flex: 1; min-width: 0; font-size: 13px; font-weight: 500; line-height: 1.5;
   color: var(--dsw-alias-label-primary);
 }
-.imqb2-help { margin: 0; font-size: 12px; line-height: 1.6; color: var(--dsw-alias-label-secondary); }
-.imqb2-hint { margin: 0; font-size: 12px; line-height: 1.5; color: var(--dsw-alias-label-tertiary); }
+.qqterm-config-help { margin: 0; font-size: 12px; line-height: 1.6; color: var(--dsw-alias-label-secondary); }
+.qqterm-config-hint { margin: 0; font-size: 12px; line-height: 1.5; color: var(--dsw-alias-label-tertiary); }
 /* Switch（aria-checked 驱动，视觉态与无障碍态同源） */
-.imqb2-switch {
+.qqterm-config-switch {
   box-sizing: border-box; position: relative; flex: 0 0 auto;
   width: 36px; height: 20px; padding: 2px; border: 0; border-radius: 999px;
   background: var(--dsw-alias-border-l3); cursor: pointer; font: inherit;
 }
-.imqb2-switch[aria-checked='true'] { background: var(--dsw-alias-brand-primary); }
-.imqb2-switch:disabled { cursor: default; opacity: 0.5; }
-.imqb2-switch:focus-visible {
+.qqterm-config-switch[aria-checked='true'] { background: var(--dsw-alias-brand-primary); }
+.qqterm-config-switch:disabled { cursor: default; opacity: 0.5; }
+.qqterm-config-switch:focus-visible {
   outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
   outline-offset: 2px;
 }
-.imqb2-switch-thumb {
+.qqterm-config-switch-thumb {
   display: block; width: 16px; height: 16px; border-radius: 50%;
   background: var(--dsw-alias-switch-thumb, #ffffff);
   transition: transform 120ms ease;
 }
-.imqb2-switch[aria-checked='true'] .imqb2-switch-thumb {
+.qqterm-config-switch[aria-checked='true'] .qqterm-config-switch-thumb {
   background: var(--dsw-alias-label-primary-foreground, #ffffff);
   transform: translateX(16px);
 }
 /* 输入（官方 fields.input 复刻） */
-.imqb2-input {
+.qqterm-config-input {
   box-sizing: border-box; width: 100%; height: 34px; padding: 0 12px;
   border: 0.5px solid var(--dsw-alias-border-l4); border-radius: var(--dsw-radius-md, 8px);
   background: var(--dsw-alias-bg-layer-3); font: inherit; font-size: 13px; line-height: 1.5;
   color: var(--dsw-alias-label-primary); outline: none;
 }
-.imqb2-input:focus { outline: none; border-color: var(--dsw-alias-state-business-primary); }
-.imqb2-input:disabled { color: var(--dsw-alias-label-tertiary); cursor: default; }
-.imqb2-textarea { height: auto; min-height: 68px; padding: 8px 12px; resize: vertical; line-height: 1.5; }
+.qqterm-config-input:focus { outline: none; border-color: var(--dsw-alias-state-business-primary); }
+.qqterm-config-input:disabled { color: var(--dsw-alias-label-tertiary); cursor: default; }
+.qqterm-config-textarea { height: auto; min-height: 68px; padding: 8px 12px; resize: vertical; line-height: 1.5; }
 /* 分段控件样式已移除：访问控制只保留唯一用户输入 */
 /* 底栏（官方 SettingsForm.footer 复刻） */
-.imqb2-footer { display: flex; align-items: center; gap: 8px; padding-top: 16px; }
-.imqb2-note { flex: 1; min-width: 0; margin: 0; font-size: 12px; line-height: 1.5; color: var(--dsw-alias-label-tertiary); }
-.imqb2-note--error { color: var(--dsw-alias-state-error-primary, var(--dsw-alias-label-error)); }
-.imqb2-note--ok { color: var(--dsw-alias-label-secondary); }
-.imqb2-save {
+.qqterm-config-footer { display: flex; align-items: center; gap: 8px; padding-top: 16px; }
+.qqterm-config-note { flex: 1; min-width: 0; margin: 0; font-size: 12px; line-height: 1.5; color: var(--dsw-alias-label-tertiary); }
+.qqterm-config-note--error { color: var(--dsw-alias-state-error-primary, var(--dsw-alias-label-error)); }
+.qqterm-config-note--ok { color: var(--dsw-alias-label-secondary); }
+.qqterm-config-save {
   appearance: none; flex: none; border: 1px solid transparent;
   border-radius: var(--dsw-radius-md, 8px); padding: 5px 14px;
   font: inherit; font-size: 13px; line-height: 1.5; cursor: pointer;
   background: var(--dsw-alias-label-primary); color: var(--dsw-alias-bg-layer-3);
 }
-.imqb2-save:disabled { opacity: 0.4; cursor: default; }
-.imqb2-save:focus-visible {
+.qqterm-config-save:disabled { opacity: 0.4; cursor: default; }
+.qqterm-config-save:focus-visible {
   outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
   outline-offset: 1px;
 }
@@ -116,21 +116,21 @@ function Switch({ checked, label, onChange }: {
 }): ReactNode {
   return createElement('button', {
     type: 'button', role: 'switch', 'aria-checked': checked, 'aria-label': label,
-    className: 'imqb2-switch',
+    className: 'qqterm-config-switch',
     onClick: () => { onChange(!checked); },
-  }, createElement('span', { className: 'imqb2-switch-thumb' }));
+  }, createElement('span', { className: 'qqterm-config-switch-thumb' }));
 }
 
 /** 开关行（label 左 + Switch 右 + 可选 help） */
 function SwitchRow({ label, help, checked, onChange }: {
   label: string; help?: string; checked: boolean; onChange: (next: boolean) => void;
 }): ReactNode {
-  return createElement('div', { className: 'imqb2-field' },
-    createElement('div', { className: 'imqb2-head' },
-      createElement('span', { className: 'imqb2-label' }, label),
+  return createElement('div', { className: 'qqterm-config-field' },
+    createElement('div', { className: 'qqterm-config-head' },
+      createElement('span', { className: 'qqterm-config-label' }, label),
       createElement(Switch, { checked, label, onChange }),
     ),
-    help === undefined ? null : createElement('p', { className: 'imqb2-help' }, help),
+    help === undefined ? null : createElement('p', { className: 'qqterm-config-help' }, help),
   );
 }
 
@@ -138,13 +138,13 @@ function SwitchRow({ label, help, checked, onChange }: {
 function FieldRow({ label, help, value, placeholder, onChange }: {
   label: string; help?: string; value: string; placeholder?: string; onChange: (next: string) => void;
 }): ReactNode {
-  return createElement('div', { className: 'imqb2-field' },
-    createElement('span', { className: 'imqb2-label' }, label),
+  return createElement('div', { className: 'qqterm-config-field' },
+    createElement('span', { className: 'qqterm-config-label' }, label),
     createElement('input', {
-      className: 'imqb2-input', value, placeholder, spellCheck: false,
+      className: 'qqterm-config-input', value, placeholder, spellCheck: false,
       onChange: (event: ChangeEvent<HTMLInputElement>) => { onChange(event.currentTarget.value); },
     }),
-    help === undefined ? null : createElement('p', { className: 'imqb2-hint' }, help),
+    help === undefined ? null : createElement('p', { className: 'qqterm-config-hint' }, help),
   );
 }
 
@@ -152,13 +152,13 @@ function FieldRow({ label, help, value, placeholder, onChange }: {
 function AreaRow({ label, help, value, rows, onChange }: {
   label: string; help?: string; value: string; rows?: number; onChange: (next: string) => void;
 }): ReactNode {
-  return createElement('div', { className: 'imqb2-field' },
-    createElement('span', { className: 'imqb2-label' }, label),
+  return createElement('div', { className: 'qqterm-config-field' },
+    createElement('span', { className: 'qqterm-config-label' }, label),
     createElement('textarea', {
-      className: 'imqb2-input imqb2-textarea', value, rows: rows ?? 3,
+      className: 'qqterm-config-input qqterm-config-textarea', value, rows: rows ?? 3,
       onChange: (event: ChangeEvent<HTMLTextAreaElement>) => { onChange(event.currentTarget.value); },
     }),
-    help === undefined ? null : createElement('p', { className: 'imqb2-hint' }, help),
+    help === undefined ? null : createElement('p', { className: 'qqterm-config-hint' }, help),
   );
 }
 
@@ -243,18 +243,18 @@ export function ConfigPanel(props: { bindPhase?: string } = {}): ReactElement {
   }, [busy, form, initial]);
 
   if (loadError !== null) {
-    return createElement('p', { className: 'imqb2-hint', style: { padding: '12px 0' } },
+    return createElement('p', { className: 'qqterm-config-hint', style: { padding: '12px 0' } },
       `配置加载失败: ${loadError}`);
   }
   if (initial === null || form === null) {
-    return createElement('p', { className: 'imqb2-hint', style: { padding: '12px 0' } }, '正在加载配置…');
+    return createElement('p', { className: 'qqterm-config-hint', style: { padding: '12px 0' } }, '正在加载配置…');
   }
 
   const dirty = (Object.keys(form) as Array<keyof ConfigWire>).some((key) => !shallowEqual(form[key], initial[key]));
   const access: AccessControlWire = form.access ?? { owner: '' };
 
-  return createElement('form', { className: 'imqb2-form', onSubmit: submit },
-    createElement('div', { className: 'imqb2-group-title' }, '服务范围'),
+  return createElement('form', { className: 'qqterm-config-form', onSubmit: submit },
+    createElement('div', { className: 'qqterm-config-group-title' }, '服务范围'),
     createElement(FieldRow, {
       label: '允许的用户',
       help: '只允许这一个 QQ 用户；留空则拒绝所有人',
@@ -263,7 +263,7 @@ export function ConfigPanel(props: { bindPhase?: string } = {}): ReactElement {
       onChange: (v) => { patch('access', { owner: v }); },
     }),
 
-    createElement('div', { className: 'imqb2-group-title' }, '基础设置'),
+    createElement('div', { className: 'qqterm-config-group-title' }, '基础设置'),
     createElement(SwitchRow, {
       label: '流式输出', checked: form.streaming ?? true,
       help: '回复内容分段实时推送到聊天',
@@ -275,20 +275,20 @@ export function ConfigPanel(props: { bindPhase?: string } = {}): ReactElement {
       onChange: (v) => { patch('showToolResults', v); },
     }),
 
-    createElement('div', { className: 'imqb2-group-title' }, '个性化提示词'),
+    createElement('div', { className: 'qqterm-config-group-title' }, '个性化提示词'),
     createElement(AreaRow, {
       label: '私聊额外 system prompt', value: form.directPrompt ?? '',
       onChange: (v) => { patch('directPrompt', v); },
     }),
 
-    createElement('div', { className: 'imqb2-footer' },
+    createElement('div', { className: 'qqterm-config-footer' },
       result !== null
-        ? createElement('p', { className: `imqb2-note${result.ok ? ' imqb2-note--ok' : ' imqb2-note--error'}` },
+        ? createElement('p', { className: `qqterm-config-note${result.ok ? ' qqterm-config-note--ok' : ' qqterm-config-note--error'}` },
             (result.ok ? '' : '⚠️ ') + result.message)
         : dirty
-          ? createElement('p', { className: 'imqb2-note' }, '保存后插件将重载，进行中的机器人会话将重置')
-          : createElement('p', { className: 'imqb2-note' }),
-      createElement('button', { className: 'imqb2-save', type: 'submit', disabled: busy || !dirty },
+          ? createElement('p', { className: 'qqterm-config-note' }, '保存后插件将重载，进行中的机器人会话将重置')
+          : createElement('p', { className: 'qqterm-config-note' }),
+      createElement('button', { className: 'qqterm-config-save', type: 'submit', disabled: busy || !dirty },
         busy ? '正在保存…' : '保存'),
     ),
   );

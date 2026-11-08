@@ -6,7 +6,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { SlashCommandHandlerContext } from '@tencent-connect/qqbot-nodejs';
-import { ConfigSchema, type ImQQBotConfig } from '../config.ts';
+import { ConfigSchema, type QQTermConfig } from '../config.ts';
 import type { EffortSwitchOutcome, EffortView, SessionManager } from '../session/index.ts';
 import type { Logger } from '../types.ts';
 import { reasoningCommand } from './reasoning.ts';
@@ -23,7 +23,7 @@ const config = ConfigSchema({
   appId: 'app',
   appSecret: 'secret',
   access: { owner: 'owner' },
-} as ImQQBotConfig);
+} as QQTermConfig);
 const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
 
 const OPTIONS = [

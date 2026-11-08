@@ -6,10 +6,10 @@
  */
 import type { MiddlewareContext } from '@tencent-connect/qqbot-nodejs';
 import { downloadMediaAttachments } from '../transport/attachment.ts';
-import type { ImQQBotConfig } from '../config.ts';
+import type { QQTermConfig } from '../config.ts';
 import type { Logger, QuotedAttachment, RawAttachment } from '../types.ts';
 
-export function attachmentProcessor(config: ImQQBotConfig, logger: Logger) {
+export function attachmentProcessor(config: QQTermConfig, logger: Logger) {
   return async (ctx: MiddlewareContext, next: () => Promise<void>): Promise<void> => {
     const msg = ctx.message as { attachments?: RawAttachment[] };
 
@@ -33,7 +33,7 @@ export function attachmentProcessor(config: ImQQBotConfig, logger: Logger) {
         ctx.state.downloadedQuoteFiles = downloadedQuote;
       }
     } catch (err) {
-      logger.warn(`im-qqbot: attachment download failed: ${err instanceof Error ? err.message : String(err)}`);
+      logger.warn(`qqterm: attachment download failed: ${err instanceof Error ? err.message : String(err)}`);
     }
 
     await next();

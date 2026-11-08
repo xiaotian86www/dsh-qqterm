@@ -1,6 +1,6 @@
 {
   "meta": {
-    "title": "QQ Bot (dsh-qqbot)",
-    "description": "Chat with DeepSeek Harness in QQ private chats."
+    "title": "QQ SuperTerm (dsh-qqterm)",
+    "description": "Operate DeepSeek Harness from QQ private chats."
   }
 }

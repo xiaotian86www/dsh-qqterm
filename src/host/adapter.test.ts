@@ -209,7 +209,7 @@ describe('attachSessionToWorkspace', () => {
 
   it('旧的硬编码标题 QQBot 就地迁移成目录名', async () => {
     const ws = {
-      path: 'D:\\thirdparty\\dsh-qqbot',
+      path: 'D:\\thirdparty\\dsh-qqterm',
       title: 'QQBot',
       attachSession: vi.fn().mockResolvedValue(undefined),
       setTitle: vi.fn().mockResolvedValue(undefined),
@@ -217,15 +217,15 @@ describe('attachSessionToWorkspace', () => {
     const registry = { create: vi.fn().mockResolvedValue(ws) };
     const adapter = createHostAdapter(makeCtx({ workspaceRegistry: registry }));
 
-    await adapter.attachSessionToWorkspace('sess-1', 'D:\\thirdparty\\dsh-qqbot');
+    await adapter.attachSessionToWorkspace('sess-1', 'D:\\thirdparty\\dsh-qqterm');
 
-    expect(ws.setTitle).toHaveBeenCalledWith('dsh-qqbot');
+    expect(ws.setTitle).toHaveBeenCalledWith('dsh-qqterm');
     expect(ws.attachSession).toHaveBeenCalledWith('sess-1');
   });
 
   it('用户自己改过的工作区标题不动', async () => {
     const ws = {
-      path: 'D:\\thirdparty\\dsh-qqbot',
+      path: 'D:\\thirdparty\\dsh-qqterm',
       title: '我的项目',
       attachSession: vi.fn().mockResolvedValue(undefined),
       setTitle: vi.fn().mockResolvedValue(undefined),
@@ -233,7 +233,7 @@ describe('attachSessionToWorkspace', () => {
     const registry = { create: vi.fn().mockResolvedValue(ws) };
     const adapter = createHostAdapter(makeCtx({ workspaceRegistry: registry }));
 
-    await adapter.attachSessionToWorkspace('sess-1', 'D:\\thirdparty\\dsh-qqbot');
+    await adapter.attachSessionToWorkspace('sess-1', 'D:\\thirdparty\\dsh-qqterm');
 
     expect(ws.setTitle).not.toHaveBeenCalled();
   });

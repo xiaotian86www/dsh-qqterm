@@ -6,7 +6,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { SlashCommandHandlerContext } from '@tencent-connect/qqbot-nodejs';
-import { ConfigSchema, type ImQQBotConfig } from '../config.ts';
+import { ConfigSchema, type QQTermConfig } from '../config.ts';
 import type { SessionManager } from '../session/index.ts';
 import type { Logger } from '../types.ts';
 import { sessionStatusCommand } from './session-status.ts';
@@ -20,7 +20,7 @@ vi.mock('../shared/send-helper.ts', () => ({
 }));
 
 const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
-const config = ConfigSchema({ appId: 'app', appSecret: 'secret' } as ImQQBotConfig);
+const config = ConfigSchema({ appId: 'app', appSecret: 'secret' } as QQTermConfig);
 
 const SESSION_ID = 'session-9d2c4410-1111-1111-1111-111111111111';
 
@@ -86,7 +86,7 @@ function makeCtx(): SlashCommandHandlerContext {
 /** 跑一次命令，返回实际发送的 markdown 文本 */
 async function run(
   manager: SessionManager,
-  cfg: ImQQBotConfig = config,
+  cfg: QQTermConfig = config,
 ): Promise<string> {
   state.sent.length = 0;
   const command = sessionStatusCommand({ manager, config: cfg, logger });

@@ -37,7 +37,7 @@ function makeRecord(opts?: {
   lastPrompt?: string | null;
 }): RetrySessionRecordLike & { agent: { followup: ReturnType<typeof vi.fn> } } {
   const scope: ChatScope = 'c2c';
-  const sessionKey = opts?.sessionKey ?? 'qqbot:app:chat';
+  const sessionKey = opts?.sessionKey ?? 'qqterm:app:chat';
   const record: RetrySessionRecordLike & { agent: { followup: ReturnType<typeof vi.fn> } } = {
     sessionKey,
     sessionId: sessionKey,

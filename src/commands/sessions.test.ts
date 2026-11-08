@@ -7,7 +7,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { SlashCommandHandlerContext } from '@tencent-connect/qqbot-nodejs';
-import { ConfigSchema, type ImQQBotConfig } from '../config.ts';
+import { ConfigSchema, type QQTermConfig } from '../config.ts';
 import type { SessionManager, WorkspaceSession } from '../session/index.ts';
 import type { Logger } from '../types.ts';
 import { resolveSessionTarget, sessionAdminAuth, sessionsCommand } from './sessions.ts';
@@ -20,7 +20,7 @@ vi.mock('../shared/send-helper.ts', () => ({
   },
 }));
 
-const config = ConfigSchema({ appId: 'app', appSecret: 'secret' } as ImQQBotConfig);
+const config = ConfigSchema({ appId: 'app', appSecret: 'secret' } as QQTermConfig);
 const logger: Logger = {
   info: vi.fn(),
   warn: vi.fn(),
@@ -427,10 +427,10 @@ describe('/sessions all', () => {
       listWorkspaceGroups: vi.fn(async () => [
         {
           id: 'ws-1',
-          title: 'dsh-qqbot',
-          path: 'D:\\thirdparty\\dsh-qqbot',
+          title: 'dsh-qqterm',
+          path: 'D:\\thirdparty\\dsh-qqterm',
           missing: false,
-          sessions: [entry({ id: 'session-aaa11111', title: '仓库里的', workspace: 'dsh-qqbot' })],
+          sessions: [entry({ id: 'session-aaa11111', title: '仓库里的', workspace: 'dsh-qqterm' })],
         },
         {
           id: 'ws-2',
@@ -445,7 +445,7 @@ describe('/sessions all', () => {
     const text = await run(manager, 'all');
 
     expect(text).toContain('全部会话（2 个工作区 · 2 个会话）');
-    expect(text).toContain('**dsh-qqbot**');
+    expect(text).toContain('**dsh-qqterm**');
     expect(text).toContain('**default-workspace**');
     expect(text).toContain('⚠️ 目录不存在');
     // 所有视图都只用短 id，不编号
@@ -1010,7 +1010,7 @@ describe('sessionAdminAuth', () => {
     appId: 'app',
     appSecret: 'secret',
     access: { owner: 'user1' },
-  } as ImQQBotConfig);
+  } as QQTermConfig);
 
   it('绑定用户放行', () => {
     expect(sessionAdminAuth(withAllow)({ message: { senderId: 'user1' } })).toBe(true);

@@ -1,6 +1,6 @@
 {
   "meta": {
-    "title": "QQ 机器人 (dsh-qqbot)",
-    "description": "在 QQ 私聊里直接对话 DeepSeek Harness。"
+    "title": "QQ 超级终端 (dsh-qqterm)",
+    "description": "在 QQ 私聊里操作 DeepSeek Harness。"
   }
 }

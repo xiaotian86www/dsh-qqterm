@@ -1,8 +1,8 @@
 {
-  "name": "@tencent-connect/dsh-qqbot",
-  "version": "0.5.5-dev.22",
+  "name": "@tencent-connect/dsh-qqterm",
+  "version": "0.6.0",
   "icon": "./assets/icons/qq_logo.svg",
-  "description": "在 QQ 私聊里直接对话 DeepSeek Harness。 Chat with DeepSeek Harness in QQ private chats.",
+  "description": "QQ 超级终端：在 QQ 私聊里操作 DeepSeek Harness。 QQ SuperTerm: operate DeepSeek Harness from QQ private chats.",
   "type": "module",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
@@ -33,6 +33,9 @@
     "deepseek-harness",
     "dsh",
     "dsh-plugin",
+    "qqterm",
+    "superterm",
+    "terminal",
     "qqbot",
     "qq",
     "cordis",
@@ -46,11 +49,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/tencent-connect/dsh-qqbot.git"
+    "url": "https://github.com/tencent-connect/dsh-qqterm.git"
   },
-  "homepage": "https://github.com/tencent-connect/dsh-qqbot#readme",
+  "homepage": "https://github.com/tencent-connect/dsh-qqterm#readme",
   "bugs": {
-    "url": "https://github.com/tencent-connect/dsh-qqbot/issues"
+    "url": "https://github.com/tencent-connect/dsh-qqterm/issues"
   },
   "dsh": {
     "bundle": {

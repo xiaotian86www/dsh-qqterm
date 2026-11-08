@@ -5,7 +5,7 @@
  * 事件解析归一化在 events.ts，路由按事件类型分发到私有方法。
  */
 import type { SessionManager, SessionRecord } from '../session/index.ts';
-import type { ImQQBotConfig } from '../config.ts';
+import type { QQTermConfig } from '../config.ts';
 import type { Logger } from '../types.ts';
 import { chunkMarkdownText } from './chunker.ts';
 import { chunkDecoratedSessionMessage, sessionTitleOf } from './session-source.ts';
@@ -87,7 +87,7 @@ class OutboundRouter {
   private readonly retryCounts = new Map<string, RetryEvent>();
   private readonly manager: SessionManager;
   private readonly bot: QQBotSender;
-  private readonly config: ImQQBotConfig;
+  private readonly config: QQTermConfig;
   private readonly logger: Logger;
   private readonly toolsRegistry: ToolsRegistryLike | undefined;
   private readonly deliverer: DeliverablesDelivererLike | undefined;
@@ -95,7 +95,7 @@ class OutboundRouter {
   public constructor(
     manager: SessionManager,
     bot: QQBotSender,
-    config: ImQQBotConfig,
+    config: QQTermConfig,
     logger: Logger,
     toolsRegistry: ToolsRegistryLike | undefined,
     deliverer?: DeliverablesDelivererLike,
@@ -322,7 +322,7 @@ class OutboundRouter {
       if (files.length > 0 && this.deliverer !== undefined) {
         await this.deliverer.deliver(record, files);
       }
-      this.logger.debug(`im-qqbot: turn/end sessionId=${sessionId}`);
+      this.logger.debug(`qqterm: turn/end sessionId=${sessionId}`);
     });
   }
 
@@ -352,7 +352,7 @@ class OutboundRouter {
   private enqueue(sessionId: string, task: () => Promise<void>): Promise<void> {
     const previous = this.sendChains.get(sessionId) ?? Promise.resolve();
     const next = previous.then(task).catch((err: unknown) => {
-      this.logger.error(`im-qqbot: send chain failed: ${err instanceof Error ? err.message : String(err)}`);
+      this.logger.error(`qqterm: send chain failed: ${err instanceof Error ? err.message : String(err)}`);
     });
     this.sendChains.set(sessionId, next);
     void next.then(() => {
@@ -384,7 +384,7 @@ class OutboundRouter {
       try {
         await this.bot.sendMarkdown(record.replyTarget, chunk);
       } catch (err) {
-        this.logger.error(`im-qqbot: ${tag} failed: ${err instanceof Error ? err.message : String(err)}`);
+        this.logger.error(`qqterm: ${tag} failed: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
   }
@@ -400,7 +400,7 @@ class OutboundRouter {
 export function createOutboundHandler(
   manager: SessionManager,
   bot: QQBotSender,
-  config: ImQQBotConfig,
+  config: QQTermConfig,
   logger: Logger,
   toolsRegistry?: ToolsRegistryLike,
   deliverer?: DeliverablesDelivererLike,

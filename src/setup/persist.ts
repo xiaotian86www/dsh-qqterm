@@ -1,4 +1,4 @@
-/**
+﻿/**
  * QQ Bot 凭据与配置持久化 — 写入 dsh profile 的 cordis.patch.yml
  *
  * 该文件是宿主的组合覆盖层，存在多个写者（宿主设置流程、本插件、用户手工编辑）。
@@ -34,18 +34,18 @@ const PARSE_OPTIONS: { customTags: Array<{ tag: string; resolve: (value: string)
 class PatchFormatError extends Error {}
 
 /** 插件在 patch 文件中的条目 id */
-const ENTRY_ID = 'im-qqbot';
+const ENTRY_ID = 'qqterm';
 
 /** 乐观并发重试次数（外部进程在读写窗口内改动的兜底；同进程写者被同步执行天然串行） */
 const WRITE_ATTEMPTS = 3;
 
 type PersistLogger = Pick<Logger, 'info' | 'warn'>;
 
-/** 编辑上下文：attached 表示 im-qqbot 条目已在文档中（false = 本次新追加） */
+/** 编辑上下文：attached 表示 qqterm 条目已在文档中（false = 本次新追加） */
 interface EditContext {
   config: YAMLMap;
   attached: boolean;
-  /** 把（编辑后的）config 作为新的 im-qqbot 条目追加进文档 */
+  /** 把（编辑后的）config 作为新的 qqterm 条目追加进文档 */
   appendEntry(): void;
 }
 
@@ -95,7 +95,7 @@ function editProfilePatch(
     }
 
     // 4. 原子写：同目录临时文件 + rename（同分区保证原子）
-    const tmpPath = `${patchPath}.imqqbot.tmp`;
+    const tmpPath = `${patchPath}.qqterm.tmp`;
     try {
       writeFileSync(tmpPath, next, 'utf8');
       renameSync(tmpPath, patchPath);
@@ -111,11 +111,11 @@ function editProfilePatch(
         throw new Error('写入后其他条目集合发生变化');
       }
       if (!verify(findEntryConfig(writtenDoc))) {
-        throw new Error('写入后 im-qqbot 条目校验失败');
+        throw new Error('写入后 qqterm 条目校验失败');
       }
     } catch (err) {
       log.warn(`写入验证失败，回滚 cordis.patch.yml: ${err instanceof Error ? err.message : String(err)}`);
-      const rollback = `${patchPath}.imqqbot.rollback`;
+      const rollback = `${patchPath}.qqterm.rollback`;
       writeFileSync(rollback, before, 'utf8');
       renameSync(rollback, patchPath);
       return false;
@@ -156,7 +156,7 @@ function collectEntryIds(doc: Document.Parsed): string[] {
   return ids;
 }
 
-/** 定位 im-qqbot 条目的 config（不存在返回 undefined）；config 非映射/被锚点共享 → fail-closed */
+/** 定位 qqterm 条目的 config（不存在返回 undefined）；config 非映射/被锚点共享 → fail-closed */
 function findEntryConfig(doc: Document.Parsed): YAMLMap | undefined {
   const seq = doc.contents;
   if (!isSeq(seq)) return undefined;
@@ -167,10 +167,10 @@ function findEntryConfig(doc: Document.Parsed): YAMLMap | undefined {
     const configNode = item.get('config', true);
     if (configNode === undefined) return undefined;
     if (!isMap(configNode)) {
-      throw new PatchFormatError('im-qqbot 条目的 config 不是映射');
+      throw new PatchFormatError('qqterm 条目的 config 不是映射');
     }
     if (configNode.anchor) {
-      throw new PatchFormatError('im-qqbot 的 config 被锚点共享（其他条目引用同一份），原地修改会影响引用方');
+      throw new PatchFormatError('qqterm 的 config 被锚点共享（其他条目引用同一份），原地修改会影响引用方');
     }
     return configNode;
   }
@@ -225,7 +225,7 @@ function ownerIs(config: YAMLMap, openid: string): boolean {
 /**
  * 将凭据写入 dsh profile 的 cordis.patch.yml。
  *
- * 更新或追加 im-qqbot 条目的 appId/appSecret，其余内容（其他插件条目、
+ * 更新或追加 qqterm 条目的 appId/appSecret，其余内容（其他插件条目、
  * insert 行、注释、锚点、`!!js` 表达式）原样保留。文件不存在时安全重建。
  */
 export function persistCredentialsToProfile(
@@ -281,7 +281,7 @@ export function persistCredentialsToProfile(
 /**
  * 从 dsh profile 的 cordis.patch.yml 中移除已保存的凭据（解绑）。
  *
- * 保留 im-qqbot 条目的其余 config（provider / access 等用户配置）与其他所有
+ * 保留 qqterm 条目的其余 config（provider / access 等用户配置）与其他所有
  * 条目。条目或字段不存在时仍强制写回一次——宿主 HMR 靠文件 mtime 触发
  * 重载，不写则 bound fiber 永不卸载，解绑后状态会停留在 bound。
  */
@@ -321,7 +321,7 @@ export function removeCredentialsFromProfile(
 }
 
 /**
- * 将配置更新合并进 dsh profile 的 cordis.patch.yml（im-qqbot 条目）。
+ * 将配置更新合并进 dsh profile 的 cordis.patch.yml（qqterm 条目）。
  *
  * 最小写入原则：只把「本次提交的顶层键」合并进条目 config——
  * 不固化 bundle patch 的默认值（保持其版本演进的覆盖能力），
@@ -337,7 +337,7 @@ export function updateProfileConfig(
   const log = logger ?? console;
   if (!profileDir) {
     log.warn('未定位到 profile 目录（源码直载或非常规安装），配置未保存');
-    log.warn('请手动编辑对应 profile 的 cordis.patch.yml（im-qqbot 条目的 config）后重启生效');
+    log.warn('请手动编辑对应 profile 的 cordis.patch.yml（qqterm 条目的 config）后重启生效');
     return false;
   }
 
@@ -389,7 +389,7 @@ function printYamlInstructions(credentials: SetupCredentials, patchPath: string)
   console.log('无法自动保存凭据，请手动打开以下文件添加配置:');
   console.log(`  ${patchPath}`);
   console.log('');
-  console.log('  - id: im-qqbot');
+  console.log('  - id: qqterm');
   console.log('    config:');
   console.log(`      appId: "${credentials.appId}"`);
   console.log(`      appSecret: "${credentials.appSecret}"`);

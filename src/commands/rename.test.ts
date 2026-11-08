@@ -6,7 +6,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import type { SlashCommandHandlerContext } from '@tencent-connect/qqbot-nodejs';
-import { ConfigSchema, type ImQQBotConfig } from '../config.ts';
+import { ConfigSchema, type QQTermConfig } from '../config.ts';
 import type { SessionManager } from '../session/index.ts';
 import type { Logger } from '../types.ts';
 import type { CommandDeps } from './types.ts';
@@ -19,7 +19,7 @@ const config = ConfigSchema({
   appId: 'app',
   appSecret: 'secret',
   access: { owner: 'user1' },
-} as ImQQBotConfig);
+} as QQTermConfig);
 
 const CURRENT = 'session-3f2a9b1c-1111-2222-3333-444455556666';
 

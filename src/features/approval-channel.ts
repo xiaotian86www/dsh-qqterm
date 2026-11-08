@@ -170,7 +170,7 @@ export class ApprovalChannel {
       if (record) return self.park(record, request, nextFn);
       return nextFn();
     }, { global: true, prepend: true });
-    this.logger.info('im-qqbot: QQ approval channel installed');
+    this.logger.info('qqterm: QQ approval channel installed');
   }
 
   /** 会话回收时清理其 pending 审批，避免 Promise 悬挂 */
@@ -208,7 +208,7 @@ export class ApprovalChannel {
 
     // nonce 必须匹配 pending：旧卡片/其它会话的卡片点击不 settle（#94-3）
     if (button.n !== entry.nonce) {
-      this.logger.warn(`im-qqbot: approval button nonce mismatch: sessionId=${sessionIdOf(entry.record)}`);
+      this.logger.warn(`qqterm: approval button nonce mismatch: sessionId=${sessionIdOf(entry.record)}`);
       return false;
     }
 
@@ -216,7 +216,7 @@ export class ApprovalChannel {
     const clicker = event.user_openid;
     const owner = this.config.access.owner.trim();
     if (owner === '' || clicker !== owner) {
-      this.logger.warn(`im-qqbot: approval button rejected (clicker not owner): user=${clicker ?? '(missing)'} sessionId=${sessionIdOf(entry.record)}`);
+      this.logger.warn(`qqterm: approval button rejected (clicker not owner): user=${clicker ?? '(missing)'} sessionId=${sessionIdOf(entry.record)}`);
       return false;
     }
 
@@ -248,9 +248,9 @@ export class ApprovalChannel {
       );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      this.logger.error(`im-qqbot: approval send failed sessionId=${sessionId}: ${msg}`);
+      this.logger.error(`qqterm: approval send failed sessionId=${sessionId}: ${msg}`);
       // 卡片没送到 QQ 时不能把请求吞掉：交回链上其他通道（Web GUI 仍可弹窗）。
-      this.logger.warn('im-qqbot: QQ approval delivery failed, falling back to the host answerer');
+      this.logger.warn('qqterm: QQ approval delivery failed, falling back to the host answerer');
       return delegate();
     }
 
@@ -266,7 +266,7 @@ export class ApprovalChannel {
         request.signal.addEventListener('abort', onAbort, { once: true });
       }
       this.pending.set(sessionId, entry);
-      this.logger.info(`im-qqbot: approval sent to QQ, waiting for decision sessionId=${sessionId}`);
+      this.logger.info(`qqterm: approval sent to QQ, waiting for decision sessionId=${sessionId}`);
     });
   }
 

@@ -5,7 +5,7 @@
  * 活不过一次 dispose，结果也只能靠落盘传给新 fiber。因此状态文件是这条链路
  * 唯一的事实来源，只存那一轮重载最必要的事实。
  *
- * 路径按 profile 隔离（`~/.dsh-qqbot/reload/<sha1(profileDir)>.json`）：web 与
+ * 路径按 profile 隔离（`~/.dsh-qqterm/reload/<sha1(profileDir)>.json`）：web 与
  * 开发 profile 经常同时开着，共用一份文件会互相覆盖 notify 与结果。
  */
 import { createHash } from 'node:crypto';

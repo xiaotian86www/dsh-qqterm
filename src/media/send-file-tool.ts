@@ -10,7 +10,7 @@ import { existsSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import type { Context } from '@deepseek-ai/cordis';
 import type { ContentBlock } from '@deepseek-ai/dsh-llm';
-import type { ImQQBotConfig } from '../config.ts';
+import type { QQTermConfig } from '../config.ts';
 import type { DshAgent, SessionManager } from '../session/index.ts';
 import type { Logger, ReplyTarget } from '../types.ts';
 import { isPathAllowed, resolveAgentCwd, sendMediaFile, type MediaSenderLike } from './send-media.ts';
@@ -53,7 +53,7 @@ export function registerSendFileTool(
   ctx: Context,
   bot: MediaSenderLike,
   manager: SessionManager,
-  config: ImQQBotConfig,
+  config: QQTermConfig,
   logger: Logger,
 ): void {
   const tools = (ctx as unknown as { tools: ToolsRegistryLike }).tools;
@@ -135,7 +135,7 @@ export function registerSendFileTool(
         throw new Error(`qqbot_send_file: 发送失败: ${result.error}`);
       }
 
-      logger.info(`im-qqbot: qqbot_send_file 发送 ${fileName} (${result.size} bytes) → ${replyTarget.scope}:${replyTarget.targetId}`);
+      logger.info(`qqterm: qqbot_send_file 发送 ${fileName} (${result.size} bytes) → ${replyTarget.scope}:${replyTarget.targetId}`);
 
       return {
         fileName,
@@ -148,5 +148,5 @@ export function registerSendFileTool(
   };
 
   tools.register(definition);
-  logger.info('im-qqbot: qqbot_send_file 工具已注册');
+  logger.info('qqterm: qqbot_send_file 工具已注册');
 }

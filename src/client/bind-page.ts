@@ -1,12 +1,12 @@
-/**
+﻿/**
  * 端内绑定面板 — 扫码 / 手动填写 / 已绑定编辑
  *
- * 宿主插件注册 /qqbot/im-qqbot/bind 路由（待绑定与已绑定 fiber 均常驻）：
+ * 宿主插件注册 /qqterm/bind 路由（待绑定与已绑定 fiber 均常驻）：
  * - 未绑定：waiting（二维码）/ starting / saving / failed 相位 + manual 提交
  * - 已绑定：bound 相位（回显脱敏 appId，secret 不回传）+ manual 更换 + 解绑
  * 扫码成功或手动保存均写入 profile patch 并经 HMR 重载生效。
  *
- * 样式为注入式 CSS 类（imqb-* 命名空间，随面板挂载注入一次）：
+ * 样式为注入式 CSS 类（qqterm-bind-* 命名空间，随面板挂载注入一次）：
  * hover/过渡/focus 样式无法用 inline style 表达，统一走类；
  * 颜色尽量取 DSW 主题变量（--dsw-alias-*），缺省值兜底。
  *
@@ -28,7 +28,7 @@ const ACTIVE_POLL_MS = 2000;
 const RETRY_POLL_MS = 3000;
 
 /** 样式注入标记（幂等） */
-const STYLE_ID = 'im-qqbot-bind-panel-styles';
+const STYLE_ID = 'qqterm-bind-panel-styles';
 
 /**
  * 注入面板样式（全局一次，幂等）。交互态（hover/active/focus）无法用 inline
@@ -42,43 +42,43 @@ export function installPanelStyles(): void {
   const style = document.createElement('style');
   style.id = STYLE_ID;
   style.textContent = `
-.imqb-panel {
+.qqterm-bind-panel {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 14px; padding: 24px; min-height: 320px; text-align: center; font-size: 14px;
 }
-.imqb-title { margin: 0; font-size: 16px; font-weight: 600; }
-.imqb-hint { margin: 0; opacity: 0.75; line-height: 1.6; }
-.imqb-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
-.imqb-link { font-size: 13px; opacity: 0.85; color: var(--dsw-alias-brand, #4d6bfe); text-decoration: none; }
-.imqb-link:hover { text-decoration: underline; }
-.imqb-icon { font-size: 32px; line-height: 1; }
-.imqb-qr { border-radius: 10px; background: #fff; padding: 10px; max-width: 100%; }
-.imqb-row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
-.imqb-btn, .imqb-pill {
+.qqterm-bind-title { margin: 0; font-size: 16px; font-weight: 600; }
+.qqterm-bind-hint { margin: 0; opacity: 0.75; line-height: 1.6; }
+.qqterm-bind-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+.qqterm-bind-link { font-size: 13px; opacity: 0.85; color: var(--dsw-alias-brand, #4d6bfe); text-decoration: none; }
+.qqterm-bind-link:hover { text-decoration: underline; }
+.qqterm-bind-icon { font-size: 32px; line-height: 1; }
+.qqterm-bind-qr { border-radius: 10px; background: #fff; padding: 10px; max-width: 100%; }
+.qqterm-bind-row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+.qqterm-bind-btn, .qqterm-bind-pill {
   font: inherit; cursor: pointer; color: inherit;
   transition: background-color .15s ease, border-color .15s ease, color .15s ease, opacity .15s ease;
 }
-.imqb-btn:disabled, .imqb-pill:disabled { opacity: 0.5; cursor: default; }
-.imqb-btn {
+.qqterm-bind-btn:disabled, .qqterm-bind-pill:disabled { opacity: 0.5; cursor: default; }
+.qqterm-bind-btn {
   padding: 7px 18px; border-radius: 8px; font-size: 13px;
   border: 1px solid var(--dsw-alias-border-l2, rgba(128, 128, 128, 0.4));
   background: transparent;
 }
-.imqb-btn:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover, rgba(128, 128, 128, 0.12)); }
-.imqb-btn--primary {
+.qqterm-bind-btn:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover, rgba(128, 128, 128, 0.12)); }
+.qqterm-bind-btn--primary {
   border-color: transparent;
   background: var(--dsw-alias-brand, #4d6bfe); color: #fff; font-weight: 500;
 }
-.imqb-btn--primary:hover:not(:disabled) { background: var(--dsw-alias-brand-strong, #3b5cf0); }
-.imqb-btn--danger { color: var(--dsw-alias-danger, #f26d6d); border-color: var(--dsw-alias-danger, rgba(242, 109, 109, 0.5)); }
-.imqb-btn--danger:hover:not(:disabled) { background: var(--dsw-alias-danger, rgba(242, 109, 109, 0.12)); }
-.imqb-ghost {
+.qqterm-bind-btn--primary:hover:not(:disabled) { background: var(--dsw-alias-brand-strong, #3b5cf0); }
+.qqterm-bind-btn--danger { color: var(--dsw-alias-danger, #f26d6d); border-color: var(--dsw-alias-danger, rgba(242, 109, 109, 0.5)); }
+.qqterm-bind-btn--danger:hover:not(:disabled) { background: var(--dsw-alias-danger, rgba(242, 109, 109, 0.12)); }
+.qqterm-bind-ghost {
   border: none; background: transparent; opacity: 0.65; padding: 4px 8px;
   font: inherit; font-size: 13px; cursor: pointer; color: inherit;
 }
-.imqb-ghost:hover { opacity: 1; text-decoration: underline; }
+.qqterm-bind-ghost:hover { opacity: 1; text-decoration: underline; }
 /* 插件详情「设置」按钮：30px，略高于旁边的 sm 次要按钮 */
-.imqb-pluginOpen {
+.qqterm-bind-pluginOpen {
   display: inline-flex; align-items: center; justify-content: center;
   box-sizing: border-box; height: 30px; padding: 0 14px;
   border: 1px solid var(--dsw-alias-border-l2, rgba(128, 128, 128, 0.4));
@@ -86,57 +86,57 @@ export function installPanelStyles(): void {
   color: var(--dsw-alias-label-primary, inherit); font: inherit;
   font-size: 13px; line-height: 20px; cursor: pointer;
 }
-.imqb-pluginOpen:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(128, 128, 128, 0.12)); }
-.imqb-pluginOpen:focus-visible { outline: 2px solid var(--dsw-alias-brand, #4d6bfe); outline-offset: 3px; }
-@media (pointer: coarse) { .imqb-pluginOpen { height: 44px; } }
+.qqterm-bind-pluginOpen:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(128, 128, 128, 0.12)); }
+.qqterm-bind-pluginOpen:focus-visible { outline: 2px solid var(--dsw-alias-brand, #4d6bfe); outline-offset: 3px; }
+@media (pointer: coarse) { .qqterm-bind-pluginOpen { height: 44px; } }
 /* 主面板页面容器（layout.selectPanel 目标）：滚动 + 留白 */
-.imqb-pluginPage {
+.qqterm-bind-pluginPage {
   height: 100%; min-height: 0; overflow: auto; box-sizing: border-box;
   padding: 24px clamp(16px, 4vw, 48px) 32px;
   color: var(--dsw-alias-label-primary, #1f2329);
 }
-.imqb-pluginPageContent { max-width: 1080px; margin: 0 auto; }
-.imqb-pill {
+.qqterm-bind-pluginPageContent { max-width: 1080px; margin: 0 auto; }
+.qqterm-bind-pill {
   padding: 5px 16px; border-radius: 999px; font-size: 13px;
   border: 1px solid var(--dsw-alias-border-l2, rgba(128, 128, 128, 0.4)); background: transparent;
 }
-.imqb-pill:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover, rgba(128, 128, 128, 0.12)); }
-.imqb-btn:focus-visible, .imqb-pill:focus-visible, .imqb-input:focus-visible, .imqb-ghost:focus-visible {
+.qqterm-bind-pill:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover, rgba(128, 128, 128, 0.12)); }
+.qqterm-bind-btn:focus-visible, .qqterm-bind-pill:focus-visible, .qqterm-bind-input:focus-visible, .qqterm-bind-ghost:focus-visible {
   outline: 2px solid var(--dsw-alias-brand, #4d6bfe); outline-offset: 1px;
 }
-.imqb-form { display: flex; flex-direction: column; gap: 12px; width: min(320px, 100%); box-sizing: border-box; }
-.imqb-field { display: flex; flex-direction: column; gap: 5px; text-align: left; font-size: 13px; }
-.imqb-input {
+.qqterm-bind-form { display: flex; flex-direction: column; gap: 12px; width: min(320px, 100%); box-sizing: border-box; }
+.qqterm-bind-field { display: flex; flex-direction: column; gap: 5px; text-align: left; font-size: 13px; }
+.qqterm-bind-input {
   padding: 8px 10px; border-radius: 8px; box-sizing: border-box; width: 100%;
   border: 1px solid var(--dsw-alias-border-l2, rgba(128, 128, 128, 0.4));
   background: var(--dsw-alias-bg-input, rgba(128, 128, 128, 0.08));
   color: inherit; font: inherit; font-size: 13px; outline: none;
 }
-.imqb-input:focus { border-color: var(--dsw-alias-brand, #4d6bfe); }
-.imqb-error { margin: 0; font-size: 12px; color: var(--dsw-alias-danger, #f26d6d); }
+.qqterm-bind-input:focus { border-color: var(--dsw-alias-brand, #4d6bfe); }
+.qqterm-bind-error { margin: 0; font-size: 12px; color: var(--dsw-alias-danger, #f26d6d); }
 /* 紧凑状态视图（已绑定 / 过渡态）：设置行风格，无居中大卡留白 */
-.imqb-status { display: flex; flex-direction: column; text-align: left; font-size: 14px; }
-.imqb-status-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; }
-.imqb-status-icon { font-size: 24px; line-height: 1; flex: none; }
-.imqb-qqicon {
+.qqterm-bind-status { display: flex; flex-direction: column; text-align: left; font-size: 14px; }
+.qqterm-bind-status-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; }
+.qqterm-bind-status-icon { font-size: 24px; line-height: 1; flex: none; }
+.qqterm-bind-qqicon {
   flex: none; display: block; border-radius: 8px; /* 透明底，QQ 蓝徽标在明暗主题下均清晰 */
 }
-.imqb-status-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
-.imqb-status-title { margin: 0; font-size: 14px; font-weight: 600; line-height: 1.5; }
-.imqb-status-sub { margin: 0; font-size: 12px; line-height: 1.5; color: var(--dsw-alias-label-tertiary, inherit); opacity: .85; }
-.imqb-status-actions { display: flex; align-items: center; gap: 8px; padding: 4px 0 12px; }
+.qqterm-bind-status-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.qqterm-bind-status-title { margin: 0; font-size: 14px; font-weight: 600; line-height: 1.5; }
+.qqterm-bind-status-sub { margin: 0; font-size: 12px; line-height: 1.5; color: var(--dsw-alias-label-tertiary, inherit); opacity: .85; }
+.qqterm-bind-status-actions { display: flex; align-items: center; gap: 8px; padding: 4px 0 12px; }
 /* 扫码成功后的连接过渡：二维码模糊变暗 + 覆盖层 */
-.imqb-scanned { position: relative; display: inline-block; }
-.imqb-scanned-qr {
+.qqterm-bind-scanned { position: relative; display: inline-block; }
+.qqterm-bind-scanned-qr {
   display: block; border-radius: 10px; background: #fff; padding: 10px;
   filter: blur(6px) saturate(0.6); opacity: 0.55;
 }
-.imqb-scanned-veil {
+.qqterm-bind-scanned-veil {
   position: absolute; inset: 0; display: flex; flex-direction: column;
   align-items: center; justify-content: center; gap: 6px; text-align: center;
 }
-.imqb-scanned-title { margin: 0; font-size: 15px; font-weight: 600; }
-.imqb-scanned-sub { margin: 0; font-size: 12px; opacity: 0.75; line-height: 1.6; }
+.qqterm-bind-scanned-title { margin: 0; font-size: 15px; font-weight: 600; }
+.qqterm-bind-scanned-sub { margin: 0; font-size: 12px; opacity: 0.75; line-height: 1.6; }
     `;
   document.head.appendChild(style);
 }
@@ -294,48 +294,48 @@ function ManualForm({ initialAppId }: { initialAppId?: string }): ReactNode {
   }, [appId, appSecret, owner, busy]);
 
   if (result !== null && result.ok) {
-    return createElement('div', { className: 'imqb-status' },
-      createElement('div', { className: 'imqb-status-row' },
-        createElement('div', { className: 'imqb-status-icon' }, '✅'),
-        createElement('div', { className: 'imqb-status-meta' },
-          createElement('p', { className: 'imqb-status-title' }, result.message ?? '凭据已保存'),
-          createElement('p', { className: 'imqb-status-sub' }, '插件将自动重载；未填允许的用户时需在设置里补填 OpenID'),
+    return createElement('div', { className: 'qqterm-bind-status' },
+      createElement('div', { className: 'qqterm-bind-status-row' },
+        createElement('div', { className: 'qqterm-bind-status-icon' }, '✅'),
+        createElement('div', { className: 'qqterm-bind-status-meta' },
+          createElement('p', { className: 'qqterm-bind-status-title' }, result.message ?? '凭据已保存'),
+          createElement('p', { className: 'qqterm-bind-status-sub' }, '插件将自动重载；未填允许的用户时需在设置里补填 OpenID'),
         ),
       ),
     );
   }
 
-  return createElement('form', { className: 'imqb-form', onSubmit: submit },
-    createElement('label', { className: 'imqb-field' },
+  return createElement('form', { className: 'qqterm-bind-form', onSubmit: submit },
+    createElement('label', { className: 'qqterm-bind-field' },
       'AppID',
       createElement('input', {
-        className: 'imqb-input', value: appId, placeholder: 'QQ 机器人 AppID',
+        className: 'qqterm-bind-input', value: appId, placeholder: 'QQ 机器人 AppID',
         onChange: (event) => { setAppId(event.currentTarget.value); },
         autoComplete: 'off', spellCheck: false,
       }),
     ),
-    createElement('label', { className: 'imqb-field' },
+    createElement('label', { className: 'qqterm-bind-field' },
       'AppSecret',
       createElement('input', {
-        className: 'imqb-input', type: 'password', value: appSecret,
+        className: 'qqterm-bind-input', type: 'password', value: appSecret,
         placeholder: initialAppId === undefined ? 'QQ 机器人 AppSecret' : '输入新的 AppSecret（不回显）',
         onChange: (event) => { setAppSecret(event.currentTarget.value); },
         autoComplete: 'new-password',
       }),
     ),
-    createElement('label', { className: 'imqb-field' },
+    createElement('label', { className: 'qqterm-bind-field' },
       '允许的用户',
       createElement('input', {
-        className: 'imqb-input', value: owner,
+        className: 'qqterm-bind-input', value: owner,
         placeholder: 'QQ OpenID（可留空，之后在设置里填）',
         onChange: (event) => { setOwner(event.currentTarget.value); },
         autoComplete: 'off', spellCheck: false,
       }),
     ),
     result !== null && !result.ok
-      ? createElement('p', { className: 'imqb-error' }, result.error)
+      ? createElement('p', { className: 'qqterm-bind-error' }, result.error)
       : null,
-    createElement('button', { className: 'imqb-btn imqb-btn--primary', type: 'submit', disabled: busy },
+    createElement('button', { className: 'qqterm-bind-btn qqterm-bind-btn--primary', type: 'submit', disabled: busy },
       busy ? '正在保存…' : '保存'),
   );
 }
@@ -348,7 +348,7 @@ export const QQ_BOT_LOGO_PATH =
 function QqBotIcon({ size = 28 }: { size?: number }): ReactNode {
   return createElement('svg', {
     width: size, height: size, viewBox: '0 0 24 24', fill: 'none',
-    'aria-hidden': true, className: 'imqb-qqicon',
+    'aria-hidden': true, className: 'qqterm-bind-qqicon',
   },
     createElement('path', { d: QQ_BOT_LOGO_PATH, fill: '#0085FF' }),
   );
@@ -380,41 +380,41 @@ function BoundView({ appId, recheck }: { appId: string; recheck: () => void }): 
   if (unbindResult !== null) {
     // 非终态视图：解绑成功后正常由轮询收敛到 waiting；若 HMR 未
     // 触发（状态停留 bound），用户仍有「刷新状态」出口而不是死胡同
-    return createElement('div', { className: 'imqb-status' },
-      createElement('div', { className: 'imqb-status-row' },
-        createElement('div', { className: 'imqb-status-icon' }, unbindResult.ok ? '👋' : '⚠️'),
-        createElement('div', { className: 'imqb-status-meta' },
-          createElement('p', { className: 'imqb-status-title' }, unbindResult.message),
+    return createElement('div', { className: 'qqterm-bind-status' },
+      createElement('div', { className: 'qqterm-bind-status-row' },
+        createElement('div', { className: 'qqterm-bind-status-icon' }, unbindResult.ok ? '👋' : '⚠️'),
+        createElement('div', { className: 'qqterm-bind-status-meta' },
+          createElement('p', { className: 'qqterm-bind-status-title' }, unbindResult.message),
         ),
         unbindResult.ok
-          ? createElement('button', { className: 'imqb-ghost', onClick: recheck }, '刷新状态')
-          : createElement('button', { className: 'imqb-ghost', onClick: () => { setUnbindResult(null); } }, '返回'),
+          ? createElement('button', { className: 'qqterm-bind-ghost', onClick: recheck }, '刷新状态')
+          : createElement('button', { className: 'qqterm-bind-ghost', onClick: () => { setUnbindResult(null); } }, '返回'),
       ),
     );
   }
 
   if (editing) {
-    return createElement('div', { className: 'imqb-status' },
-      createElement('div', { className: 'imqb-status-row' },
-        createElement('div', { className: 'imqb-status-meta' },
-          createElement('p', { className: 'imqb-status-title' }, '更换凭据'),
+    return createElement('div', { className: 'qqterm-bind-status' },
+      createElement('div', { className: 'qqterm-bind-status-row' },
+        createElement('div', { className: 'qqterm-bind-status-meta' },
+          createElement('p', { className: 'qqterm-bind-status-title' }, '更换凭据'),
         ),
-        createElement('button', { className: 'imqb-ghost', onClick: () => { setEditing(false); } }, '返回'),
+        createElement('button', { className: 'qqterm-bind-ghost', onClick: () => { setEditing(false); } }, '返回'),
       ),
       createElement(ManualForm, { initialAppId: appId }),
     );
   }
-  return createElement('div', { className: 'imqb-status' },
-    createElement('div', { className: 'imqb-status-row' },
+  return createElement('div', { className: 'qqterm-bind-status' },
+    createElement('div', { className: 'qqterm-bind-status-row' },
       createElement(QqBotIcon, { size: 28 }),
-      createElement('div', { className: 'imqb-status-meta' },
-        createElement('p', { className: 'imqb-status-title' }, '已绑定'),
-        createElement('p', { className: 'imqb-status-sub imqb-mono' }, `AppID ${appId} · 私聊已接入`),
+      createElement('div', { className: 'qqterm-bind-status-meta' },
+        createElement('p', { className: 'qqterm-bind-status-title' }, '已绑定'),
+        createElement('p', { className: 'qqterm-bind-status-sub qqterm-bind-mono' }, `AppID ${appId} · 私聊已接入`),
       ),
     ),
-    createElement('div', { className: 'imqb-status-actions' },
-      createElement('button', { className: 'imqb-btn imqb-btn--primary', onClick: () => { setEditing(true); } }, '更换凭据'),
-      createElement('button', { className: 'imqb-btn imqb-btn--danger', onClick: unbind }, '解绑'),
+    createElement('div', { className: 'qqterm-bind-status-actions' },
+      createElement('button', { className: 'qqterm-bind-btn qqterm-bind-btn--primary', onClick: () => { setEditing(true); } }, '更换凭据'),
+      createElement('button', { className: 'qqterm-bind-btn qqterm-bind-btn--danger', onClick: unbind }, '解绑'),
     ),
   );
 }
@@ -427,36 +427,36 @@ function UnboundView({ state }: { state: Extract<BindStateWire, { phase: 'waitin
   useEffect(() => { setImgFailed(false); }, [state.qrSvg]);
 
   if (mode === 'manual') {
-    return createElement('div', { className: 'imqb-panel' },
-      createElement('p', { className: 'imqb-title' }, '手动填写凭据'),
+    return createElement('div', { className: 'qqterm-bind-panel' },
+      createElement('p', { className: 'qqterm-bind-title' }, '手动填写凭据'),
       createElement(ManualForm, {}),
-      createElement('button', { className: 'imqb-ghost', onClick: () => { setMode('qr'); } }, '改用扫码绑定'),
+      createElement('button', { className: 'qqterm-bind-ghost', onClick: () => { setMode('qr'); } }, '改用扫码绑定'),
     );
   }
 
   if (state.qrSvg === undefined || imgFailed) {
-    return createElement('div', { className: 'imqb-panel' },
-      createElement('div', { className: 'imqb-icon' }, '⚠️'),
-      createElement('p', { className: 'imqb-title' }, '二维码暂时无法显示'),
-      createElement('p', { className: 'imqb-hint' }, '可重启应用后重试，或任选下面一种方式继续'),
-      createElement('a', { href: state.url, target: '_blank', rel: 'noreferrer noopener', className: 'imqb-link' }, '在浏览器中打开链接扫码'),
-      createElement('div', { className: 'imqb-row' },
-        createElement('button', { className: 'imqb-pill', onClick: () => { setMode('manual'); } }, '手动填写凭据'),
+    return createElement('div', { className: 'qqterm-bind-panel' },
+      createElement('div', { className: 'qqterm-bind-icon' }, '⚠️'),
+      createElement('p', { className: 'qqterm-bind-title' }, '二维码暂时无法显示'),
+      createElement('p', { className: 'qqterm-bind-hint' }, '可重启应用后重试，或任选下面一种方式继续'),
+      createElement('a', { href: state.url, target: '_blank', rel: 'noreferrer noopener', className: 'qqterm-bind-link' }, '在浏览器中打开链接扫码'),
+      createElement('div', { className: 'qqterm-bind-row' },
+        createElement('button', { className: 'qqterm-bind-pill', onClick: () => { setMode('manual'); } }, '手动填写凭据'),
       ),
     );
   }
 
-  return createElement('div', { className: 'imqb-panel' },
+  return createElement('div', { className: 'qqterm-bind-panel' },
     createElement('img', {
-      src: state.qrSvg, alt: 'QQ 扫码二维码', width: 220, height: 220, className: 'imqb-qr',
+      src: state.qrSvg, alt: 'QQ 扫码二维码', width: 220, height: 220, className: 'qqterm-bind-qr',
       onError: () => { setImgFailed(true); },
     }),
-    createElement('p', { className: 'imqb-title' }, '扫码绑定 QQ 机器人'),
-    createElement('p', { className: 'imqb-hint' }, '使用手机 QQ 扫描二维码完成绑定'),
-    createElement('a', { href: state.url, target: '_blank', rel: 'noreferrer noopener', className: 'imqb-link' }, '二维码显示异常？在浏览器中打开'),
-    createElement('div', { className: 'imqb-row' },
-      createElement('button', { className: 'imqb-pill', onClick: refresh }, '刷新二维码'),
-      createElement('button', { className: 'imqb-pill', onClick: () => { setMode('manual'); } }, '手动填写'),
+    createElement('p', { className: 'qqterm-bind-title' }, '扫码绑定 QQ 机器人'),
+    createElement('p', { className: 'qqterm-bind-hint' }, '使用手机 QQ 扫描二维码完成绑定'),
+    createElement('a', { href: state.url, target: '_blank', rel: 'noreferrer noopener', className: 'qqterm-bind-link' }, '二维码显示异常？在浏览器中打开'),
+    createElement('div', { className: 'qqterm-bind-row' },
+      createElement('button', { className: 'qqterm-bind-pill', onClick: refresh }, '刷新二维码'),
+      createElement('button', { className: 'qqterm-bind-pill', onClick: () => { setMode('manual'); } }, '手动填写'),
     ),
   );
 }
@@ -486,49 +486,49 @@ export function BindPanelBody(props: {
   }, [state]);
 
   if (gone) {
-    return createElement('div', { className: 'imqb-panel' },
-      createElement('div', { className: 'imqb-icon' }, '❔'),
-      createElement('p', { className: 'imqb-hint' }, '插件未启用，或当前版本不支持端内配置'),
+    return createElement('div', { className: 'qqterm-bind-panel' },
+      createElement('div', { className: 'qqterm-bind-icon' }, '❔'),
+      createElement('p', { className: 'qqterm-bind-hint' }, '插件未启用，或当前版本不支持端内配置'),
     );
   }
 
   if (state === null || state.phase === 'starting') {
-    return createElement('div', { className: 'imqb-panel' },
-      createElement('p', { className: 'imqb-hint' }, '正在获取绑定状态…'),
+    return createElement('div', { className: 'qqterm-bind-panel' },
+      createElement('p', { className: 'qqterm-bind-hint' }, '正在获取绑定状态…'),
     );
   }
 
   if (state.phase === 'saving') {
     // 扫码路径：保留二维码做模糊过渡（手动填写路径无二维码，用紧凑态）
     if (lastQr !== null) {
-      return createElement('div', { className: 'imqb-panel' },
-        createElement('div', { className: 'imqb-scanned' },
-          createElement('img', { src: lastQr, alt: 'QQ 扫码二维码', width: 220, height: 220, className: 'imqb-scanned-qr' }),
-          createElement('div', { className: 'imqb-scanned-veil' },
-            createElement('p', { className: 'imqb-scanned-title' }, '✅ 扫码成功'),
-            createElement('p', { className: 'imqb-scanned-sub' }, '正在连接机器人，稍候…'),
+      return createElement('div', { className: 'qqterm-bind-panel' },
+        createElement('div', { className: 'qqterm-bind-scanned' },
+          createElement('img', { src: lastQr, alt: 'QQ 扫码二维码', width: 220, height: 220, className: 'qqterm-bind-scanned-qr' }),
+          createElement('div', { className: 'qqterm-bind-scanned-veil' },
+            createElement('p', { className: 'qqterm-bind-scanned-title' }, '✅ 扫码成功'),
+            createElement('p', { className: 'qqterm-bind-scanned-sub' }, '正在连接机器人，稍候…'),
           ),
         ),
       );
     }
-    return createElement('div', { className: 'imqb-status' },
-      createElement('div', { className: 'imqb-status-row' },
-        createElement('div', { className: 'imqb-status-icon' }, '🎉'),
-        createElement('div', { className: 'imqb-status-meta' },
-          createElement('p', { className: 'imqb-status-title' }, '扫码成功'),
-          createElement('p', { className: 'imqb-status-sub' }, '凭据已保存，插件正在重载，稍后即可开始对话'),
+    return createElement('div', { className: 'qqterm-bind-status' },
+      createElement('div', { className: 'qqterm-bind-status-row' },
+        createElement('div', { className: 'qqterm-bind-status-icon' }, '🎉'),
+        createElement('div', { className: 'qqterm-bind-status-meta' },
+          createElement('p', { className: 'qqterm-bind-status-title' }, '扫码成功'),
+          createElement('p', { className: 'qqterm-bind-status-sub' }, '凭据已保存，插件正在重载，稍后即可开始对话'),
         ),
       ),
     );
   }
 
   if (state.phase === 'failed') {
-    return createElement('div', { className: 'imqb-panel' },
-      createElement('div', { className: 'imqb-icon' }, '⚠️'),
-      createElement('p', { className: 'imqb-title' }, '绑定失败'),
-      createElement('p', { className: 'imqb-hint' }, state.reason),
-      createElement('div', { className: 'imqb-row' },
-        createElement('button', { className: 'imqb-btn imqb-btn--primary', onClick: () => { window.location.reload(); } }, '重试'),
+    return createElement('div', { className: 'qqterm-bind-panel' },
+      createElement('div', { className: 'qqterm-bind-icon' }, '⚠️'),
+      createElement('p', { className: 'qqterm-bind-title' }, '绑定失败'),
+      createElement('p', { className: 'qqterm-bind-hint' }, state.reason),
+      createElement('div', { className: 'qqterm-bind-row' },
+        createElement('button', { className: 'qqterm-bind-btn qqterm-bind-btn--primary', onClick: () => { window.location.reload(); } }, '重试'),
       ),
     );
   }

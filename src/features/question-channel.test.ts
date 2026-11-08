@@ -29,7 +29,7 @@ function createSender(sent: SentMessage[], opts?: { failKeyboard?: boolean }) {
   };
 }
 
-const sessionKey = (scope: ChatScope, peerId: string): string => `qqbot:app:${scope}:${peerId}`;
+const sessionKey = (scope: ChatScope, peerId: string): string => `qqterm:app:${scope}:${peerId}`;
 
 function makeRecord(sessionKeyStr: string, scope: ChatScope = 'c2c'): QuestionSessionRecordLike {
   return { sessionKey: sessionKeyStr, scope, replyTarget: { scope, targetId: 'x' } };
@@ -366,7 +366,7 @@ describe('QuestionChannel.handleInteraction', () => {
 
 describe('QuestionChannel: 多会话 routing', () => {
   function recordFor(sessionId: string, peerId: string): QuestionSessionRecordLike {
-    return { sessionKey: `qqbot:app:c2c:${peerId}`, sessionId, peerId, scope: 'c2c', replyTarget: { scope: 'c2c', targetId: peerId } };
+    return { sessionKey: `qqterm:app:c2c:${peerId}`, sessionId, peerId, scope: 'c2c', replyTarget: { scope: 'c2c', targetId: peerId } };
   }
 
   it('answer(sessionId, text) 不依赖 current', async () => {

@@ -69,7 +69,7 @@ export function syncCommand(
       }
 
       for (const line of lines) {
-        if (!line.ok) logger?.warn(`[im-qqbot] /bot-sync failed: ${line.text}`);
+        if (!line.ok) logger?.warn(`[qqterm] /bot-sync failed: ${line.text}`);
       }
       return formatSyncReply(lines);
     },

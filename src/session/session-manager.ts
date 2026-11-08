@@ -1,7 +1,7 @@
 /**
  * SessionManager — 管理聊天会话 → dsh Agent 的映射和生命周期
  *
- * 聊天会话只有一个，key 固定为 `qqbot:${appId}:chat`：任何 QQ 私聊窗口续写、
+ * 聊天会话只有一个，key 固定为 `qqterm:${appId}:chat`：任何 QQ 私聊窗口续写、
  * 看到的都是同一个聊天会话。后台会话（宿主里的 session）仍是多份，
  * `/sessions` 列出、`/sessions resume` 切换、`/new` 新开。
  *
@@ -29,7 +29,7 @@ import { basename, isAbsolute, resolve } from 'node:path';
 import { resolveAgentCwd } from '../shared/dirs.ts';
 import { sessionTitleOf } from '../transport/session-source.ts';
 import type { ChatScope, Logger, ReplyTarget } from '../types.ts';
-import type { ImQQBotConfig } from '../config.ts';
+import type { QQTermConfig } from '../config.ts';
 import { ModelResolver } from '../model/model-resolver.ts';
 import type { ModelRoute, ModelEntry, ReasoningInfo, EffortOption } from '../model/types.ts';
 import type { QuestionChannel } from '../features/question-channel.ts';
@@ -201,7 +201,7 @@ export class SessionManager {
   private readonly ctx: Context;
   private readonly host: HostAdapter;
   private readonly agents: DshAgentRegistry;
-  private readonly config: ImQQBotConfig;
+  private readonly config: QQTermConfig;
   private readonly logger: Logger;
   /** 由 bootstrap 注入的问答通道（ask_user_question → QQ），会话释放时清理其待答问题 */
   public questionChannel?: QuestionChannel;
@@ -213,7 +213,7 @@ export class SessionManager {
   constructor(
     ctx: Context,
     agents: DshAgentRegistry,
-    config: ImQQBotConfig,
+    config: QQTermConfig,
     logger: Logger,
   ) {
     this.ctx = ctx;
@@ -272,7 +272,7 @@ export class SessionManager {
 
       return {
         ...assembled,
-        sections: [...(assembled.sections ?? []), { name: 'qqbot:scope-prompt', order: 90, text: prompt }],
+        sections: [...(assembled.sections ?? []), { name: 'qqterm:scope-prompt', order: 90, text: prompt }],
       };
     };
 
@@ -1010,7 +1010,7 @@ export class SessionManager {
 
   /** 聊天会话只有一个：任何私聊窗口都指向同一个 key */
   private sessionKey(): string {
-    return `qqbot:${this.config.appId}:chat`;
+    return `qqterm:${this.config.appId}:chat`;
   }
 
   /** 宿主会话控制服务（inject 保证存在） */
@@ -1050,7 +1050,7 @@ export class SessionManager {
       };
     } catch (err) {
       this.logger.warn(
-        `im-qqbot: preset ${presetId ?? '(default)'} unavailable: ${err instanceof Error ? err.message : String(err)} — using host composition`,
+        `qqterm: preset ${presetId ?? '(default)'} unavailable: ${err instanceof Error ? err.message : String(err)} — using host composition`,
       );
       return {};
     }

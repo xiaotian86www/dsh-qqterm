@@ -96,7 +96,7 @@ export async function handleInbound(
     logger.error(`ERROR creating session: ${err instanceof Error ? err.message : String(err)}`);
     // 宿主 logger 在 headless profile 里不进终端，补一条 stderr：会话打不开时
     // 用户只看到兜底文案，没有这一行就无法定位（如 SessionAlreadyOwnedError）。
-    console.error('[im-qqbot] getOrCreate failed:', err);
+    console.error('[qqterm] getOrCreate failed:', err);
     // 兜底回复：会话创建失败时告知用户，避免静默无响应
     try {
       await bot.sendMarkdown(replyTarget, '⚠️ 处理消息时出现异常，请稍后重试。');

@@ -1,4 +1,4 @@
-# AGENTS.md — dsh-qqbot 开发约束
+# AGENTS.md — dsh-qqterm 开发约束
 
 给在本仓库工作的开发者 / AI 助手：这里记录**开发、测试、打包发布**中不能违反的约束。
 面向用户的安装与配置说明见 [README.md](./README.md)，版本变更见 [CHANGELOG.md](./CHANGELOG.md)。
@@ -25,7 +25,7 @@
 | `src/media/` | 富媒体理解、附件发送、清理 |
 | `src/host/` | 宿主 Agent/Session 适配 |
 | `src/client/` | 浏览器端（settings.section、sidebarRightTabs） |
-| `cordis.patch.yml` | bundle 层 patch，插入 `im-qqbot` 条目（随包分发） |
+| `cordis.patch.yml` | bundle 层 patch，插入 `qqterm` 条目（随包分发） |
 | `cordis.dev.yml` | `--patch` 调试 overlay（绝对路径加载源码） |
 | `locale/*.json` | 插件 meta 文案（宿主读）；命令与消息文案内联在 `src/` |
 | `lib/` | 构建产物，**不要手改** |
@@ -44,7 +44,7 @@
 - `apply()` 必须快速返回：扫码、网关连接、长轮询等一律 `void …catch()`，**禁止 await 用户交互**（会阻塞 Host ready / Web URL 输出）。
 - 禁止在运行时写 `process.env`；凭据持久化只写 profile 的 `cordis.patch.yml`（会触发 HMR 重载）。
 - 未捕获的 rejection 在宿主是 fail-loud 致命错误，所有异步链必须有兜底 catch。
-- `export const name = 'im-qqbot'`、bundle patch 里的 entry id `im-qqbot` 都是兼容契约；改动会让用户 profile 里按 id 写的配置覆盖失效。`inject` 随依赖增长而扩展（当前 16 项），只进不退。`compaction` 不进 `inject`：web/desktop 把它挂在 agent preset 作用域里，宿主面没有这个服务，`/compact` 只从会话 preset 取引擎，不退回宿主面。
+- `export const name = 'qqterm'`、bundle patch 里的 entry id `qqterm` 都是兼容契约；改动会让用户 profile 里按 id 写的配置覆盖失效。`inject` 随依赖增长而扩展（当前 16 项），只进不退。`compaction` 不进 `inject`：web/desktop 把它挂在 agent preset 作用域里，宿主面没有这个服务，`/compact` 只从会话 preset 取引擎，不退回宿主面。
 
 ### 3.3 客户端
 
@@ -56,10 +56,10 @@
 
 - 插件只处理 C2C 私聊：群消息在 accessPolicy 层被拦掉，代码里不再有群聊分支。按钮键盘只在 C2C 可用，发送失败必须保留文本回退（现有实现会降级并记 warn）。改问答/审批时在 C2C 验证按钮回退。
 - `ask_user_question` / `approval` 走宿主 waterfall 通道，不要再退回 `userQuestions.ask` 这类服务探测式实现。QQ 卡片投递失败必须 `return nextFn()` 把请求交回宿主的其它通道（Web GUI 仍能弹窗），不能判成 `unavailable` 吞掉——否则用户在两边都看不到审批。
-- 聊天会话 key 固定为 `qqbot:${appId}:chat`：全 bot 只有一个「当前会话」，任何 QQ 窗口共享它；已获取集合（普通消息 / `/sessions resume` / `/to` 实际拿到 agent 的会话）可以有多份，全部输出回 QQ，非当前会话的消息首行标 `` > `#短id` · 标题 ``、末行给「回复」「恢复」两个链接（长回复只在首片带标题、末片带链接；提问 / 审批用同一个首行，见 §4.12）。`/sessions` 默认按工作区分组列出工作中会话（组标题带路径，行带 `生成中` / `空闲` 与当前 `✅`），`/sessions all` 看全部会话，只标 `📌`，不标当前。`/sessions resume` 只改当前指针，`/new` 清掉当前指针（不预先铸 id，下一条消息再建会话），切走不 dispose 旧会话；`/clear`（别名 `/reset`）会先停掉当前会话再开新的，`/clear all` 停掉全部已获取会话。`/stop` 只停当前会话，`/stop all` 停掉所有正在生成的已获取会话。没有映射即视为全新会话，会话 id 由 `mintSessionId()` 铸造。
+- 聊天会话 key 固定为 `qqterm:${appId}:chat`：全 bot 只有一个「当前会话」，任何 QQ 窗口共享它；已获取集合（普通消息 / `/sessions resume` / `/to` 实际拿到 agent 的会话）可以有多份，全部输出回 QQ，非当前会话的消息首行标 `` > `#短id` · 标题 ``、末行给「回复」「恢复」两个链接（长回复只在首片带标题、末片带链接；提问 / 审批用同一个首行，见 §4.12）。`/sessions` 默认按工作区分组列出工作中会话（组标题带路径，行带 `生成中` / `空闲` 与当前 `✅`），`/sessions all` 看全部会话，只标 `📌`，不标当前。`/sessions resume` 只改当前指针，`/new` 清掉当前指针（不预先铸 id，下一条消息再建会话），切走不 dispose 旧会话；`/clear`（别名 `/reset`）会先停掉当前会话再开新的，`/clear all` 停掉全部已获取会话。`/stop` 只停当前会话，`/stop all` 停掉所有正在生成的已获取会话。没有映射即视为全新会话，会话 id 由 `mintSessionId()` 铸造。
 - 启动即恢复上次会话：QQ `ready` 后网关调 `SessionManager.restoreCurrentSession()`，按 prefs 指针走 `getOrCreate` 接回（走 singleflight，启动瞬间来消息也只 resume 一次）；盘上已不存在则跳过并清掉指针（避免 `/sessions` 展示无法恢复的「待恢复」当前项），**恢复失败绝不新建**（沿用 `mayCreateAfterResumeFailure` 的语义）；占用 / 后端故障导致恢复失败时指针保持原样。这样「有会话」与「有 record」不会长期分叉，不需要为中间态另写展示分支。
 - 回复目标也持久化：`model-prefs.json` 的 `targets` 段（`sessionKey → openid`）在 `touch()` 里值变化时才写一次；启动恢复失败（locked / 宿主报错）用它主动推一条 `⚠️ 上次的会话没能恢复` + `/sessions resume #短id` 按钮，`not-found` 静默。持久化写在消息路径上而不是卸载钩子里——强杀 / 崩溃时卸载钩子不执行。
-- 模型 / preset / 思考强度尽量沿用宿主核心行为，插件不另立一套：插件不再有 `provider` / `model` / `preset` 配置项，新会话取核心默认值（`settings.yaml` → 宿主 agentDefaultModel → 兜底）。`/model` 与 `/reasoning` 都走宿主 `sessionController.selectModel`，选择记进当前会话的 `model/selection` 事件（不 fork、不重建、插件不另存偏好），下一轮生效；没有活跃会话时拒绝（`no-session`），宿主抛错回 `failed`。没有会话时 `/model`、`/reasoning`、`/permission` 的查看视图照常展示当前值（核心默认值，与新建会话会拿到的值一致，该条目同样标 `✅`），文案保持不变，不另造「全局」之类的标签；切换照旧要求有会话。宿主每次 `selectModel` 都会顺手把选择存成部署默认，按核心行为接受这一点，不要写回旧值。`/preset` 不按会话存待定值：它写核心 `agent-preset-registry` 的 `selectedDefault`（与设置页「设为默认」同一个 `settings.update` 入口），对之后新建的会话生效，已开始的会话保持自己的 preset；插件不存 preset。回显同样写「当前」，不标「全局」，也不补「之后新建的会话生效」这类提示（机制写在 README，不写进命令回复）。`create` / `resume` 的 `agentOptions` 传响应式 getter 读 `agentDefaultModel.currentSelection()`（会话自己记录过的选择优先）。插件只在 `~/.dsh-qqbot/model-prefs.json` 存 `sessionIds` / `dirs`，键是聊天 key。
+- 模型 / preset / 思考强度尽量沿用宿主核心行为，插件不另立一套：插件不再有 `provider` / `model` / `preset` 配置项，新会话取核心默认值（`settings.yaml` → 宿主 agentDefaultModel → 兜底）。`/model` 与 `/reasoning` 都走宿主 `sessionController.selectModel`，选择记进当前会话的 `model/selection` 事件（不 fork、不重建、插件不另存偏好），下一轮生效；没有活跃会话时拒绝（`no-session`），宿主抛错回 `failed`。没有会话时 `/model`、`/reasoning`、`/permission` 的查看视图照常展示当前值（核心默认值，与新建会话会拿到的值一致，该条目同样标 `✅`），文案保持不变，不另造「全局」之类的标签；切换照旧要求有会话。宿主每次 `selectModel` 都会顺手把选择存成部署默认，按核心行为接受这一点，不要写回旧值。`/preset` 不按会话存待定值：它写核心 `agent-preset-registry` 的 `selectedDefault`（与设置页「设为默认」同一个 `settings.update` 入口），对之后新建的会话生效，已开始的会话保持自己的 preset；插件不存 preset。回显同样写「当前」，不标「全局」，也不补「之后新建的会话生效」这类提示（机制写在 README，不写进命令回复）。`create` / `resume` 的 `agentOptions` 传响应式 getter 读 `agentDefaultModel.currentSelection()`（会话自己记录过的选择优先）。插件只在 `~/.dsh-qqterm/model-prefs.json` 存 `sessionIds` / `dirs`，键是聊天 key。
 - 会话名（标题）由宿主 `sessionTitle.rename` 写入 `session/title` 事件，写完即固定，自动标题不再覆盖。`/rename <新标题>` 只改当前会话（与聊天同一权限面，不限白名单）；`/sessions rename <id> <新标题>` 改已打开的其他会话，沿用 `/sessions` 的私聊 + 唯一绑定用户（`access.owner`）。两者都只接受 live session：冷会话提示先 `/sessions resume`，不要为了改名悄悄拉起会话。
 - 入站消息的 `source.kind` 必须是 `user`（`src/session/user-message.ts`）：宿主把「人类消息」作为一批能力的触发条件——会话标题（`dsh-session-title` 只对 `kind === 'user'` 排期，内置回退标题也走这条路）、最近提问时间、轮次大纲、replay 断点。自造 kind（如早期的 `qqbot`）会让这些能力静默失效，症状是所有新建会话停在「未命名会话」。宿主自带的外部通道（ACP / JSON-RPC SDK / headless）同样发 `{ kind: 'user' }`。
 - Markdown 输出按 `textChunkLimit` 分片，代码块/表格感知切分在 `src/transport/chunker.ts`，不要绕过。
@@ -193,7 +193,7 @@
 - 句子用全角标点 `，。；！？`；引号用 `「」`（会话标题、用户原话），不要 `""` / `''`。
 - 括号：中文内容用全角 `（…）`；纯 ASCII 内容用半角并在前留一个空格，如 `工作区内修改 (workspace-write)`。
 - 省略号用 `…`，不写 `...`；中文破折号用 `——`，不写 `—` 或 `--`。
-- 中文与英文 / 数字之间留一个半角空格：`约 128 tokens`、`dsh-qqbot v0.5.5`、`共 3 个`。
+- 中文与英文 / 数字之间留一个半角空格：`约 128 tokens`、`dsh-qqterm v0.5.5`、`共 3 个`。
 - 单位紧贴数字：`12ms`、`27m`、`2h10m`；计数用千分位且固定 en-US（`num()`），如 `1,234`。
 - 英文拟声与纯英文句用半角 `!`（`✅ pong!`）；中文句子用全角 `！`；同一句不混用。
 - 行内分隔统一 ` · `（前后各一个空格）；不要用 `|`、`、`、`/` 当分隔符（`/` 留给命令与模型 id）。
@@ -354,7 +354,7 @@ QQ 里只有一个聊天窗口，多个已获取会话的输出、提问、审�
 - **正式发布**：更新 `CHANGELOG.md` 与 `CHANGELOG_EN.md`（Keep a Changelog 格式）→ 改版本号 → `pnpm build` → 打包/发布。
 - `prepublishOnly` 会再跑一次 build；发布前仍要确认 `lib/` 与 `src/` 一致。
 - 发布走内网 CI（`.orange-ci.yml` 引用 `git.woa.com` 配置），不要随意改动其 include。
-- `ci:prepare-test-pkg` 会把包名改成 `@tencent/dsh-qqbot` 并改写 `cordis.patch.yml`，**只在一次性分支/临时目录运行**，不要把它的改动提交。
+- `ci:prepare-test-pkg` 会把包名改成 `@tencent/dsh-qqterm` 并改写 `cordis.patch.yml`，**只在一次性分支/临时目录运行**，不要把它的改动提交。
 - 宿主升级后：更新 `dsh.compatibility.dshReleases` 与 note，重新验收客户端槽位和扫码绑定全流程。
 
 ## 7. 安装与 profile 隔离（联调）
@@ -376,14 +376,14 @@ QQ 里只有一个聊天窗口，多个已获取会话的输出、提问、审�
 
   ```bash
   pnpm build && pnpm pack --pack-destination .pack
-  # 重命名为 .pack/tencent-connect-dsh-qqbot-<版本>-YYYYMMDD-HHmm.tgz
-  dsh plugin --profile web add file:<绝对路径>/.pack/tencent-connect-dsh-qqbot-<版本>-<时间戳>.tgz
+  # 重命名为 .pack/tencent-connect-dsh-qqterm-<版本>-YYYYMMDD-HHmm.tgz
+  dsh plugin --profile web add file:<绝对路径>/.pack/tencent-connect-dsh-qqterm-<版本>-<时间戳>.tgz
   ```
 
-  本地快照 tgz 命名规则：`.pack/tencent-connect-dsh-qqbot-<版本>-YYYYMMDD-HHmm.tgz`（例：`.pack/tencent-connect-dsh-qqbot-0.5.5-dev.1-20261105-1029.tgz`）。`pnpm pack` 默认输出不带时间戳，打完按此规则重命名；同一版本重打保留旧包，不覆盖。`pnpm dev:reload` 已按此规则命名。
+  本地快照 tgz 命名规则：`.pack/tencent-connect-dsh-qqterm-<版本>-YYYYMMDD-HHmm.tgz`（例：`.pack/tencent-connect-dsh-qqterm-0.5.5-dev.1-20261105-1029.tgz`）。`pnpm pack` 默认输出不带时间戳，打完按此规则重命名；同一版本重打保留旧包，不覆盖。`pnpm dev:reload` 已按此规则命名。
 
   主 profile 装完必须重启 dsh（`dsh plugin add` 只装包，不会通知运行中的宿主）；客户端改动还要刷新页面。`node_modules` 里是实体副本，之后仓库改动不会自动进入 profile。
-- 回滚：`dsh plugin --profile web add @tencent-connect/dsh-qqbot@<官方版本>`，或恢复安装前备份的 `package.json` / `pnpm-lock.yaml`。
+- 回滚：`dsh plugin --profile web add @tencent-connect/dsh-qqterm@<官方版本>`，或恢复安装前备份的 `package.json` / `pnpm-lock.yaml`。
 - profile 的 pnpm 版本要与它当前 `node_modules` 的 store 一致，而不是固定跟“创建时”的版本走：看 `~/.dsh/profiles/<name>/node_modules/.modules.yaml` 的 `packageManager` / `storeDir`（本机 web 当前为 `pnpm@12.4.2` / `store/v11`）。`dsh plugin` 调用 PATH 里的 `pnpm`，版本不匹配会报 `ERR_PNPM_UNEXPECTED_STORE`；此时换用与 `packageManager` 一致的 pnpm，不要用 `pnpm install` 迁移整个 profile 的 store。
 - 本地快照 tgz 是 profile 的依赖目标，不要删除或移动；重新打包会产生新路径。
 
@@ -392,7 +392,7 @@ QQ 里只有一个聊天窗口，多个已获取会话的输出、提问、审�
 - **绝不提交真实 appId/appSecret、用户 OpenID、会话日志**。凭据只放 profile 的 `cordis.patch.yml` 或 `QQBOT_APPID` / `QQBOT_SECRET` 环境变量；示例一律占位符。
 - 访问控制只有一个白名单用户：`access.owner` 为空时拒绝所有私聊；群消息一律拒绝（不再支持群聊）；审批/提问按钮必须校验点击者等于 owner。
 - 文件发送走路径白名单，按真实路径（realpath）判定，禁止绕过符号链接检查。
-- 媒体/缓存落在 `~/.dsh-qqbot/`，不要写进仓库。
+- 媒体/缓存落在 `~/.dsh-qqterm/`，不要写进仓库。
 - `.env`、`.dsh-sessions/`、`docs/` 已在 .gitignore 中，不要为了提交方便移除这些忽略。
 
 ## 9. 提交前检查清单

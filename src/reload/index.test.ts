@@ -16,7 +16,7 @@ const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi
 const dirs: string[] = [];
 
 function statePath(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'dsh-qqbot-reload-'));
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-qqterm-reload-'));
   dirs.push(dir);
   return join(dir, 'state.json');
 }
@@ -34,7 +34,7 @@ function fakeContext(services: Record<string, unknown>, loader?: unknown): Conte
 function fakeLoader(current: () => number): {
   entries: () => { options: { id: string }; fiber: { uid: number } }[];
 } {
-  return { entries: () => [{ options: { id: 'im-qqbot' }, fiber: { uid: current() } }] };
+  return { entries: () => [{ options: { id: 'qqterm' }, fiber: { uid: current() } }] };
 }
 
 function fakeBot(): QQBot & { sendMarkdown: ReturnType<typeof vi.fn> } {
@@ -205,7 +205,7 @@ describe('createReloader', () => {
     let otherUid = 11;
     const loader = {
       entries: () => [
-        { options: { id: 'im-qqbot' }, fiber: { uid: 10 } },
+        { options: { id: 'qqterm' }, fiber: { uid: 10 } },
         { options: { id: 'other-plugin' }, fiber: { uid: otherUid } },
       ],
     };

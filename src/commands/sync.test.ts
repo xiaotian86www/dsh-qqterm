@@ -3,7 +3,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import type { QQBot, SlashCommandHandlerContext } from '@tencent-connect/qqbot-nodejs';
-import { ConfigSchema, type ImQQBotConfig } from '../config.ts';
+import { ConfigSchema, type QQTermConfig } from '../config.ts';
 import type { Logger } from '../types.ts';
 import type { CategorizedCommand } from './types.ts';
 import { formatSyncReply, syncCommand } from './sync.ts';
@@ -15,8 +15,8 @@ const commands = [
   { name: 'bot-help', description: '查看所有指令', scope: 'all', category: 'qqbot', handler: () => '' },
 ] as CategorizedCommand[];
 
-function makeConfig(access: Partial<ImQQBotConfig['access']> = {}): ImQQBotConfig {
-  return ConfigSchema({ appId: 'app', appSecret: 'secret', access } as ImQQBotConfig);
+function makeConfig(access: Partial<QQTermConfig['access']> = {}): QQTermConfig {
+  return ConfigSchema({ appId: 'app', appSecret: 'secret', access } as QQTermConfig);
 }
 
 function makeCtx(senderId = 'user1'): SlashCommandHandlerContext {

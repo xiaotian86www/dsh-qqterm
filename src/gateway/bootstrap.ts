@@ -20,7 +20,7 @@ import { RetryChannel } from '../features/retry-channel.ts';
 import { decodeButtonData } from '../features/button-utils.ts';
 import { buildUserAgent, shortSessionId } from '../shared/index.ts';
 import { decorateSessionMessage, sessionTitleOf } from '../transport/session-source.ts';
-import type { ImQQBotConfig } from '../config.ts';
+import type { QQTermConfig } from '../config.ts';
 import type { Logger } from '../types.ts';
 import { setupMiddlewares } from './middleware-setup.ts';
 import { createGatewaySession } from './gateway-session.ts';
@@ -64,7 +64,7 @@ export function onGatewayConnected(
 export async function bootstrapGateway(
   ctx: Context,
   agents: DshAgentRegistry,
-  config: ImQQBotConfig,
+  config: QQTermConfig,
   logger: Logger,
 ): Promise<void> {
   const manager = new SessionManager(ctx, agents, config, logger);
@@ -194,7 +194,7 @@ export async function bootstrapGateway(
   }
 
   onGatewayConnected(bot, (event) => {
-    console.log(`[im-qqbot] Bot ${event}! appId=${config.appId}`);
+    console.log(`[qqterm] Bot ${event}! appId=${config.appId}`);
 
     // 启动恢复：把上次的会话接回来，避免「/status 说未建立、下一条消息又能接回」。
     // 失败时主动推一条带重试入口的消息——重启后没有入站消息，只能发给持久化的
@@ -272,5 +272,5 @@ export async function bootstrapGateway(
         gatewaySession.flush();
         replyStore.dispose();
       };
-    }, 'im-qqbot.lifecycle');
+    }, 'qqterm.lifecycle');
 }

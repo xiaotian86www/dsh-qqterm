@@ -10,7 +10,7 @@ vi.mock('../media/media-cleaner.ts', async () => {
   const { mkdtempSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
   const { join } = await import('node:path');
-  return { MEDIA_ROOT: mkdtempSync(join(tmpdir(), 'dsh-qqbot-attachment-')) };
+  return { MEDIA_ROOT: mkdtempSync(join(tmpdir(), 'dsh-qqterm-attachment-')) };
 });
 
 const logger: Logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };

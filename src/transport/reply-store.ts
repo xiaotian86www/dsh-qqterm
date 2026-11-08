@@ -59,7 +59,7 @@ interface PersistedFile {
 export interface ReplyStoreOptions {
   appId: string;
   logger: Logger;
-  /** 落盘路径，默认 ~/.dsh-qqbot/reply-ids.json */
+  /** 落盘路径，默认 ~/.dsh-qqterm/reply-ids.json */
   file?: string;
   /** 平台被动回复窗口，默认 30 分钟 */
   ttlMs?: number;

@@ -1,7 +1,7 @@
 /**
  * 富媒体过期清理 — 避免下载文件持续膨胀
  *
- * 下载目录 ~/.dsh-qqbot/media，文件写入后不再变更，故文件 mtime 即「下载时间」。
+ * 下载目录 ~/.dsh-qqterm/media，文件写入后不再变更，故文件 mtime 即「下载时间」。
  * 清理时按文件 mtime 判断是否超过保留时长。
  */
 import { existsSync } from 'node:fs';
@@ -39,10 +39,10 @@ export async function cleanupExpiredMedia(ttlHours: number, logger?: Logger): Pr
       const info = await stat(filePath);
       if (now - info.mtimeMs <= ttlMs) return false;
       await rm(filePath, { force: true });
-      logger?.debug(`im-qqbot: cleaned expired media: ${name}`);
+      logger?.debug(`qqterm: cleaned expired media: ${name}`);
       return true;
     } catch (err) {
-      logger?.warn(`im-qqbot: media cleanup failed for ${name}: ${err instanceof Error ? err.message : String(err)}`);
+      logger?.warn(`qqterm: media cleanup failed for ${name}: ${err instanceof Error ? err.message : String(err)}`);
       return false;
     }
   }));
@@ -59,15 +59,15 @@ export async function cleanupExpiredMedia(ttlHours: number, logger?: Logger): Pr
 export function startMediaCleanup(ctx: Context, ttlHours: number, logger: Logger): void {
   if (ttlHours <= 0) return;
 
-  logger.info(`im-qqbot: media cleanup started (ttl=${ttlHours}h, interval=1h, root=${MEDIA_ROOT})`);
+  logger.info(`qqterm: media cleanup started (ttl=${ttlHours}h, interval=1h, root=${MEDIA_ROOT})`);
 
   // 启动时立即清理一次（异步，不阻塞启动流程）
   void cleanupExpiredMedia(ttlHours, logger)
     .then((cleaned) => {
-      if (cleaned > 0) logger.info(`im-qqbot: cleaned ${cleaned} expired media files`);
+      if (cleaned > 0) logger.info(`qqterm: cleaned ${cleaned} expired media files`);
     })
     .catch((err) => {
-      logger.warn(`im-qqbot: media cleanup failed: ${err instanceof Error ? err.message : String(err)}`);
+      logger.warn(`qqterm: media cleanup failed: ${err instanceof Error ? err.message : String(err)}`);
     });
 
   (ctx as unknown as { effect(fn: () => (() => Promise<void>) | void, name?: string): void })
@@ -75,13 +75,13 @@ export function startMediaCleanup(ctx: Context, ttlHours: number, logger: Logger
       const timer = setInterval(() => {
         void cleanupExpiredMedia(ttlHours, logger)
           .then((n) => {
-            if (n > 0) logger.info(`im-qqbot: cleaned ${n} expired media files`);
+            if (n > 0) logger.info(`qqterm: cleaned ${n} expired media files`);
           })
           .catch((err) => {
-            logger.warn(`im-qqbot: media cleanup failed: ${err instanceof Error ? err.message : String(err)}`);
+            logger.warn(`qqterm: media cleanup failed: ${err instanceof Error ? err.message : String(err)}`);
           });
       }, CLEANUP_INTERVAL_MS);
 
       return async () => { clearInterval(timer); };
-    }, 'im-qqbot.media-cleanup');
+    }, 'qqterm.media-cleanup');
 }
