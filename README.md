@@ -43,7 +43,7 @@ QQ 用户 → QQ WebSocket → dsh-qqterm → ctx.agents → dsh agent loop → 
 
 无需命令行，全程在应用内完成：
 
-1. **安装**：左侧栏点击「插件」→「添加插件」→ 输入 `@tencent-connect/dsh-qqterm` → 安装并立即启动
+1. **安装**：左侧栏点击「插件」→「添加插件」→ 输入 `dsh-qqterm` → 安装并立即启动
 
 <img src="./assets/docs/install.png" alt="端内添加插件" width="560" />
 
@@ -57,7 +57,7 @@ QQ 用户 → QQ WebSocket → dsh-qqterm → ctx.agents → dsh agent loop → 
 
 ```bash
 # 安装到 profile
-npx @deepseek-ai/dsh plugin --profile qqterm add @tencent-connect/dsh-qqterm
+npx @deepseek-ai/dsh plugin --profile qqterm add dsh-qqterm
 
 # 启动
 npx @deepseek-ai/dsh --profile qqterm

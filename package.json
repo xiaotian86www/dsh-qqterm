@@ -1,5 +1,5 @@
 {
-  "name": "@tencent-connect/dsh-qqterm",
+  "name": "dsh-qqterm",
   "version": "0.0.1",
   "icon": "./assets/icons/qq_logo.svg",
   "description": "QQ 超级终端：在 QQ 私聊里操作 DeepSeek Harness。 QQ SuperTerm: operate DeepSeek Harness from QQ private chats.",

@@ -94,7 +94,7 @@
 
 # ── QQ Bot IM 驱动 ──
 - id: qqterm
-  name: '@tencent-connect/dsh-qqterm'
+  name: 'dsh-qqterm'
   config:
     appId: ${QQBOT_APPID}
     appSecret: ${QQBOT_SECRET}

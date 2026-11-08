@@ -90,7 +90,7 @@ function findProfileBySymlink(baseDir: string): string | null {
     return null;
   }
   const match = (name: string): string | null => {
-    const linked = resolve(profilesRoot, name, 'node_modules', '@tencent-connect', 'dsh-qqterm');
+    const linked = resolve(profilesRoot, name, 'node_modules', 'dsh-qqterm');
     try {
       return realpathSync(linked) === realBase ? resolve(profilesRoot, name) : null;
     } catch {

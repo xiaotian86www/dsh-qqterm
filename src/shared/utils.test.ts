@@ -35,7 +35,7 @@ describe('getProfileDir', () => {
     mkdirSync(pluginSrc, { recursive: true });
     // profile 通过 symlink 安装
     const profile = join(root, 'home', 'profiles', 'web');
-    const linked = join(profile, 'node_modules', '@tencent-connect', 'dsh-qqterm');
+    const linked = join(profile, 'node_modules', 'dsh-qqterm');
     mkdirSync(join(profile, 'node_modules', '@tencent-connect'), { recursive: true });
     symlinkSync(pluginSrc, linked);
 
@@ -53,7 +53,7 @@ describe('getProfileDir', () => {
     mkdirSync(pluginSrc, { recursive: true });
     // desktop 与 web 两个 profile 都 symlink 同一份源码
     for (const name of ['desktop', 'web']) {
-      const linked = join(root, 'home', 'profiles', name, 'node_modules', '@tencent-connect', 'dsh-qqterm');
+      const linked = join(root, 'home', 'profiles', name, 'node_modules', 'dsh-qqterm');
       mkdirSync(join(root, 'home', 'profiles', name, 'node_modules', '@tencent-connect'), { recursive: true });
       symlinkSync(pluginSrc, linked);
     }
@@ -77,7 +77,7 @@ describe('getProfileDir', () => {
     const pluginSrc = join(root, 'plugin-src', 'dsh-qqterm');
     mkdirSync(pluginSrc, { recursive: true });
     for (const name of ['desktop', 'web']) {
-      const linked = join(root, 'home', 'profiles', name, 'node_modules', '@tencent-connect', 'dsh-qqterm');
+      const linked = join(root, 'home', 'profiles', name, 'node_modules', 'dsh-qqterm');
       mkdirSync(join(root, 'home', 'profiles', name, 'node_modules', '@tencent-connect'), { recursive: true });
       symlinkSync(pluginSrc, linked);
     }
@@ -114,7 +114,7 @@ describe('getProfileDir', () => {
     const profile = join(root, 'profiles', 'desktop');
     const plugin = join(
       profile, 'dependencies', 'node_modules', '.pnpm', 'dsh-qqterm@1.0.0',
-      'node_modules', '@tencent-connect', 'dsh-qqterm',
+      'node_modules', 'dsh-qqterm',
     );
     mkdirSync(plugin, { recursive: true });
     writeFileSync(join(profile, 'cordis.patch.yml'), '# patch\n');
@@ -127,7 +127,7 @@ describe('getProfileDir', () => {
   it('CLI 浅层布局：cordis.patch.yml 命中 profile 根', () => {
     const root = tempDir();
     const profile = join(root, 'profiles', 'qqbot');
-    const plugin = join(profile, 'node_modules', '@tencent-connect', 'dsh-qqterm');
+    const plugin = join(profile, 'node_modules', 'dsh-qqterm');
     mkdirSync(plugin, { recursive: true });
     writeFileSync(join(profile, 'cordis.patch.yml'), '# patch\n');
 
@@ -137,7 +137,7 @@ describe('getProfileDir', () => {
   it('全新 profile（尚无标志文件）：回退 node_modules 启发式', () => {
     const root = tempDir();
     const profile = join(root, 'profiles', 'qqbot');
-    const plugin = join(profile, 'node_modules', '@tencent-connect', 'dsh-qqterm');
+    const plugin = join(profile, 'node_modules', 'dsh-qqterm');
     mkdirSync(plugin, { recursive: true });
 
     expect(getProfileDir(plugin)).toBe(profile);
@@ -168,7 +168,7 @@ describe('getProfileDir', () => {
   it('npm 安装：插件包内自带 bundle patch 不得命中，profile 根才有效', () => {
     const root = tempDir();
     const profile = join(root, 'profiles', 'desktop');
-    const plugin = join(profile, 'node_modules', '@tencent-connect', 'dsh-qqterm');
+    const plugin = join(profile, 'node_modules', 'dsh-qqterm');
     mkdirSync(plugin, { recursive: true });
     // 插件包内自带 dsh.bundle.patch 分发物——它是插件自己的，不是 profile 标志
     writeFileSync(join(plugin, 'cordis.patch.yml'), '# bundle patch\n');

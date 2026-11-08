@@ -376,14 +376,14 @@ QQ 里只有一个聊天窗口，多个已获取会话的输出、提问、审�
 
   ```bash
   pnpm build && pnpm pack --pack-destination .pack
-  # 重命名为 .pack/tencent-connect-dsh-qqterm-<版本>-YYYYMMDD-HHmm.tgz
-  dsh plugin --profile web add file:<绝对路径>/.pack/tencent-connect-dsh-qqterm-<版本>-<时间戳>.tgz
+  # 重命名为 .pack/dsh-qqterm-<版本>-YYYYMMDD-HHmm.tgz
+  dsh plugin --profile web add file:<绝对路径>/.pack/dsh-qqterm-<版本>-<时间戳>.tgz
   ```
 
-  本地快照 tgz 命名规则：`.pack/tencent-connect-dsh-qqterm-<版本>-YYYYMMDD-HHmm.tgz`（例：`.pack/tencent-connect-dsh-qqterm-0.0.1-dev.1-20261105-1029.tgz`）。`pnpm pack` 默认输出不带时间戳，打完按此规则重命名；同一版本重打保留旧包，不覆盖。`pnpm dev:reload` 已按此规则命名。
+  本地快照 tgz 命名规则：`.pack/dsh-qqterm-<版本>-YYYYMMDD-HHmm.tgz`（例：`.pack/dsh-qqterm-0.0.1-dev.1-20261105-1029.tgz`）。`pnpm pack` 默认输出不带时间戳，打完按此规则重命名；同一版本重打保留旧包，不覆盖。`pnpm dev:reload` 已按此规则命名。
 
   主 profile 装完必须重启 dsh（`dsh plugin add` 只装包，不会通知运行中的宿主）；客户端改动还要刷新页面。`node_modules` 里是实体副本，之后仓库改动不会自动进入 profile。
-- 回滚：`dsh plugin --profile web add @tencent-connect/dsh-qqterm@<已发布版本>`，或恢复安装前备份的 `package.json` / `pnpm-lock.yaml`。
+- 回滚：`dsh plugin --profile web add dsh-qqterm@<已发布版本>`，或恢复安装前备份的 `package.json` / `pnpm-lock.yaml`。
 - profile 的 pnpm 版本要与它当前 `node_modules` 的 store 一致，而不是固定跟“创建时”的版本走：看 `~/.dsh/profiles/<name>/node_modules/.modules.yaml` 的 `packageManager` / `storeDir`（本机 web 当前为 `pnpm@12.4.2` / `store/v11`）。`dsh plugin` 调用 PATH 里的 `pnpm`，版本不匹配会报 `ERR_PNPM_UNEXPECTED_STORE`；此时换用与 `packageManager` 一致的 pnpm，不要用 `pnpm install` 迁移整个 profile 的 store。
 - 本地快照 tgz 是 profile 的依赖目标，不要删除或移动；重新打包会产生新路径。
 

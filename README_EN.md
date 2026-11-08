@@ -43,7 +43,7 @@ The plugin is a pure Cordis plugin: the host loads `lib/index.js`, the browser l
 
 No command line needed — everything happens inside the app:
 
-1. **Install**: click "Plugins" in the left sidebar → "Add plugin" → enter `@tencent-connect/dsh-qqterm` → install and start now
+1. **Install**: click "Plugins" in the left sidebar → "Add plugin" → enter `dsh-qqterm` → install and start now
 
 <img src="./assets/docs/install.png" alt="In-app plugin install" width="560" />
 
@@ -57,7 +57,7 @@ Credentials are saved automatically after the scan; later launches need no re-sc
 
 ```bash
 # Add to a profile
-npx @deepseek-ai/dsh plugin --profile qqterm add @tencent-connect/dsh-qqterm
+npx @deepseek-ai/dsh plugin --profile qqterm add dsh-qqterm
 
 # Start
 npx @deepseek-ai/dsh --profile qqterm
