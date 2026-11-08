@@ -23,6 +23,7 @@ import { decorateSessionMessage, sessionTitleOf } from '../transport/session-sou
 import type { ImQQBotConfig } from '../config.ts';
 import type { Logger } from '../types.ts';
 import { setupMiddlewares } from './middleware-setup.ts';
+import { createGatewaySession } from './gateway-session.ts';
 import { startMediaCleanup } from '../media/media-cleaner.ts';
 import { ensureVisionInputModal, registerDescribeImageTool } from '../media/vision-tool.ts';
 import { registerSendFileTool, type MediaSenderLike } from '../media/send-file-tool.ts';
@@ -61,6 +62,8 @@ export async function bootstrapGateway(
 
   // ── 初始化 QQ Bot SDK ──
   const userAgent = buildUserAgent();
+  // 会话票据落盘：重载窗口里漏收的事件靠 RESUME 补发（见 gateway-session.ts）
+  const gatewaySession = createGatewaySession(config.appId);
   const bot = new QQBot({
     appId: config.appId,
     appSecret: config.appSecret,
@@ -68,6 +71,7 @@ export async function bootstrapGateway(
     baseUrl: process.env.QQBOT_BASE_URL?.replace(/\/+$/, '') || 'https://api.bot.qq.com',
     tokenBaseUrl: process.env.QQBOT_TOKEN_BASE_URL?.replace(/\/+$/, '') || 'https://api.bot.qq.com',
     userAgent,
+    sessionPersistence: gatewaySession.persistence,
     logger,
   } as ConstructorParameters<typeof QQBot>[0]);
   logger.info(`QQBot SDK initialized (UA: ${userAgent})`);
@@ -248,8 +252,11 @@ export async function bootstrapGateway(
 
       return async () => {
         logger.info('Shutting down');
-        await manager.disposeAll();
+        // 先断接收再拆会话：disposeAll 期间还开着 socket 的话，新到的消息会被
+        // 半活的 fiber 收下（seq 已落盘，新实例不会补发），等于静默丢掉。
         bot.stop();
+        await manager.disposeAll();
+        gatewaySession.flush();
         replyStore.dispose();
       };
     }, 'im-qqbot.lifecycle');
