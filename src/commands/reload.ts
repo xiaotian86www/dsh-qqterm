@@ -28,9 +28,6 @@ export function reloadCommand({ config, reloader }: CommandDeps): CategorizedCom
         return '⚠️ 当前 profile 未启用热重载';
       }
 
-      // 先回复再调度：重载会 dispose 当前 fiber，回复必须在此之前送出
-      await sendMarkdownChunked(cmdCtx, '🔄 正在应用插件变更…', config.textChunkLimit);
-
       // 被动回复凭证由 ReplyStore 落盘，重载后新 fiber 自己读；这里只留投递目标
       const replyTarget = (cmdCtx as unknown as {
         replyTarget?: { targetId?: string };
@@ -40,7 +37,11 @@ export function reloadCommand({ config, reloader }: CommandDeps): CategorizedCom
 
       // 上一轮的结果可能还没送到（新 fiber 的 ready 补发之前又收到这条命令）：
       // run() 会把状态改写成 running，那一轮的「应用了什么」就再也读不到了。
+      // 必须先于回执：否则上一轮的结论会排在这一轮的「正在应用」后面，读成它的结果。
       if (bot !== undefined) await reloader.announce(bot);
+
+      // 先回复再调度：重载会 dispose 当前 fiber，回复必须在此之前送出
+      await sendMarkdownChunked(cmdCtx, '🔄 正在应用插件变更…', config.textChunkLimit);
 
       const targetId = replyTarget?.targetId;
       reloader.run(

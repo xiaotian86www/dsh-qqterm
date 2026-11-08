@@ -1,5 +1,5 @@
 /**
- * /bot-reload 命令：先回执，再补发上一轮结果，最后调度新一轮
+ * /bot-reload 命令：先补发上一轮结果，再回执，最后调度新一轮
  *
  * 补发这一步不能省：重载会 dispose 当前 fiber，第一轮的结果只能落盘等新 fiber 的
  * ready 补发；第二条命令若先跑到 run()，状态会被改写成 running，那一轮「应用了
@@ -77,11 +77,11 @@ describe('/bot-reload 命令声明', () => {
 });
 
 describe('/bot-reload', () => {
-  it('先回执，再补发上一轮结果，最后调度新一轮', async () => {
+  it('先补发上一轮结果，再回执，最后调度新一轮', async () => {
     const h = harness();
     await h.command.handler(makeCtx(h.bot));
 
-    expect(h.order).toEqual(['ack', 'announce', 'run']);
+    expect(h.order).toEqual(['announce', 'ack', 'run']);
     expect(h.announce).toHaveBeenCalledWith(h.bot);
     expect(h.run).toHaveBeenCalledWith({ targetId: 'u1' }, h.bot);
   });
