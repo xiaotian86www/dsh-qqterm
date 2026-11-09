@@ -139,6 +139,12 @@ export interface HostSessionInfo {
   readonly id: string;
   /** 创建时间（Unix epoch ms；缺失按 0） */
   readonly createdAt: number;
+  /**
+   * 最近人类消息时间（Unix epoch ms）：宿主会话摘要的 `updatedAt`，
+   * 即 `max(createdAt, 投影 sessionListMetadata 的 lastPromptAt)`；
+   * 宿主不提供时回退成 `createdAt`。列表按它倒序排（与 Web 侧栏一致）。
+   */
+  readonly updatedAt: number;
   /** 会话创建时的绝对工作目录 */
   readonly cwd?: string;
   /** 派生来源会话（fork / subagent） */
@@ -224,6 +230,16 @@ interface SessionTitleLike {
 }
 
 /**
+ * ctx.sessionController 的最小读契约（只用到 list）。
+ *
+ * `list()` 返回 Web 侧栏同一份会话摘要：`updatedAt = max(createdAt, lastPromptAt)`，
+ * 其中 `lastPromptAt` 是投影 `sessionListMetadata` 记录的最近一条人类消息时间。
+ */
+interface SessionControllerLike {
+  list?(request: object, signal?: AbortSignal): Promise<{ items?: readonly unknown[] } | undefined>;
+}
+
+/**
  * ctx.workingDirectory 的最小只读契约（dsh-base 的 working-directory）。
  *
  * `defaultDirectory` 是 dsh 启动目录；`get(session)` 取会话当前 cwd，覆盖运行期
@@ -251,6 +267,7 @@ function hostSessionFrom(record: unknown, liveFallback: boolean): HostSessionInf
   const info: HostSessionInfo = {
     id,
     createdAt: typeof header['createdAt'] === 'number' ? header['createdAt'] : 0,
+    updatedAt: typeof header['createdAt'] === 'number' ? header['createdAt'] : 0,
     isSeeded: header['isSeeded'] === true,
     live: raw?.live === true || liveFallback,
     ...(typeof header['cwd'] === 'string' ? { cwd: header['cwd'] } : {}),
@@ -261,8 +278,7 @@ function hostSessionFrom(record: unknown, liveFallback: boolean): HostSessionInf
 }
 
 /** 从批量标题结果里取出 (id, title)；失败/缺标题的条目忽略 */
-function collectTitles(results: readonly unknown[], sink: Map<string, string>): void {
-  for (const result of results) {
+function collectTitles(results: readonly unknown[], sink: Map<string, string>): void {  for (const result of results) {
     const item = result as {
       sessionId?: unknown;
       status?: unknown;
@@ -273,6 +289,31 @@ function collectTitles(results: readonly unknown[], sink: Map<string, string>): 
     const title = item.value?.title?.title;
     if (id !== undefined && typeof title === 'string' && title !== '') sink.set(id, title);
   }
+}
+
+/**
+ * 读宿主会话摘要里的活跃时间（Web 侧栏排序用的是同一份 `updatedAt`）。
+ *
+ * 宿主没有 `list`（旧版本）或读取失败时返回空表：列表回退成按创建时间排。
+ */
+async function sessionRecency(
+  controller: SessionControllerLike | undefined,
+  logger?: AdapterLogger,
+): Promise<Map<string, number>> {
+  const recency = new Map<string, number>();
+  if (typeof controller?.list !== 'function') return recency;
+  try {
+    const result = await controller.list({});
+    for (const item of result?.items ?? []) {
+      const raw = item as { sessionId?: unknown; updatedAt?: unknown } | null;
+      if (raw !== null && typeof raw.sessionId === 'string' && typeof raw.updatedAt === 'number') {
+        recency.set(raw.sessionId, raw.updatedAt);
+      }
+    }
+  } catch (err) {
+    logger?.warn?.(`host adapter: sessionController.list 失败，活跃时间回退成创建时间: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  return recency;
 }
 
 /** 模块级函数的动态 import 结果缓存（spec 变量路径绕开本地依赖类型检查） */
@@ -296,12 +337,14 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
     sessionPersistence: SessionPersistenceLike;
     sessionQuery: SessionQueryLike;
     sessionTitle: SessionTitleLike;
+    sessionController?: SessionControllerLike;
     workspaceRegistry: WorkspaceRegistryLike;
     agentPresets: { serviceFor(agent: unknown, name: string): unknown };
     workingDirectory: WorkingDirectoryLike;
   };
   const persistence = host.sessionPersistence;
   const query = host.sessionQuery;
+  const controller = host.sessionController;
   const titleService = host.sessionTitle;
   const registry = host.workspaceRegistry;
   const presets = host.agentPresets;
@@ -414,9 +457,17 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
 
     async listSessions() {
       try {
-        return (await query.listSessions())
+        const [records, recency] = await Promise.all([
+          query.listSessions(),
+          sessionRecency(controller, logger),
+        ]);
+        return records
           .map((record) => hostSessionFrom(record, false))
-          .filter((info): info is HostSessionInfo => info !== undefined);
+          .filter((info): info is HostSessionInfo => info !== undefined)
+          .map((info) => {
+            const updatedAt = recency.get(info.id);
+            return updatedAt === undefined ? info : { ...info, updatedAt };
+          });
       } catch (err) {
         logger?.warn?.(`host adapter: sessionQuery.listSessions 失败: ${err instanceof Error ? err.message : String(err)}`);
         return [];

@@ -89,8 +89,7 @@ export interface BindRoutesOptions {
 
 /** 可经 UI 编辑的配置键（白名单：只收用户必要的字段，其余走 patch/env） */
 const EDITABLE_CONFIG_KEYS = new Set([
-  'streaming', 'showToolResults', 'debug',
-  'directPrompt',
+  'streaming', 'showToolResults',
   'access',
 ]);
 
@@ -98,22 +97,12 @@ const EDITABLE_CONFIG_KEYS = new Set([
 const EDITABLE_CONFIG_SCHEMAS: Record<string, (value: unknown) => unknown> = {
   streaming: (v) => booleanSchema(v, 'streaming'),
   showToolResults: (v) => booleanSchema(v, 'showToolResults'),
-  debug: (v) => booleanSchema(v, 'debug'),
-  directPrompt: stringSchema('directPrompt'),
   access: (v) => AccessControlSchema(v as never),
 };
 
 function booleanSchema(value: unknown, name: string): boolean {
   if (typeof value !== 'boolean') throw new TypeError(`${name} 必须是布尔值`);
   return value;
-}
-
-function stringSchema(name: string): (value: unknown) => unknown {
-  return (value) => {
-    if (typeof value !== 'string') throw new TypeError(`${name} 必须是字符串`);
-    if (value.length > 20000) throw new TypeError(`${name} 过长`);
-    return value;
-  };
 }
 
 /** manual 请求体大小上限（appId + appSecret 远小于此值） */

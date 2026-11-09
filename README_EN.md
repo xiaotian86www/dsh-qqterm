@@ -97,12 +97,10 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqterm/cordis.dev.yml
 |------|------|--------|------|
 | `appId` | string | **required** | QQ Bot AppID (or via `QQBOT_APPID` env var) |
 | `appSecret` | string | **required** | QQ Bot AppSecret (or via `QQBOT_SECRET` env var) |
-| `directPrompt` | string | - | Extra system prompt for private chats |
 | `textChunkLimit` | number | `4500` | Max chars per message |
 | `streaming` | boolean | `true` | Enable streaming output |
-| `processingTimeoutMs` | number | `1800000` | Processing timeout (ms), aborts the current LLM call |
 | `maxQueue` | number | `20` | Max concurrent queue length |
-| `askTimeoutMs` | number | `300000` | Question timeout (ms), default 5 min (ask_user_question) |
+| `askTimeoutMs` | number | `300000` | Question timeout (ms), default 5 min (ask_user_question), 0 = no timeout |
 | `showToolResults` | boolean | `false` | Show tool-call results, both success and failure |
 | `debug` | boolean | `false` | Debug mode |
 
@@ -154,14 +152,14 @@ The terminal serves exactly one user: every other private chat is rejected, and 
 | `vision.model` | string | - | Vision model id (e.g. qwen-vl-max) |
 | `vision.maxBytes` | number | `10MB` | Max image bytes |
 | `vision.maxTokens` | number | `1024` | Max output tokens |
-| `vision.timeoutMs` | number | `120000` | Vision call timeout (ms) |
 
 ### File sending (sendFile)
 
 | Config | Type | Default | Description |
 |------|------|--------|------|
-| `sendFile.restrictPaths` | boolean | `true` | Enable path allowlist (media + the session's working directory + extraRoots only) |
 | `sendFile.extraRoots` | string[] | `[]` | Extra allowed root directories |
+
+File sending always goes through the path allowlist: only files under `~/.dsh-qqterm/media`, the session's working directory, and `extraRoots` are allowed (checked against real paths, so symlinks cannot escape).
 
 ### Command panel (panel)
 
@@ -205,8 +203,21 @@ The menu is bot-wide configuration that every user sees, and changes only show a
 | `/bot-status` | View current session status (brief: session name and short id / model / reasoning effort / preset / message count; see `/status` for the full view) |
 | `/bot-help` | View all commands |
 | `/bot-sync` (alias `/bot-refresh`) | Sync the command panel and custom menu (bound user only) |
+| `/plugins` | Plugin management: no arguments lists installed plugins; `install <name>` / `update <name> [version]` work against the registry; `reload` applies on-disk plugin changes (bound user only) |
 
 > A misspelled command (like `/modle` or `/sesions`) is not forwarded to the model as a prompt: the bot replies "no such command" and, when the intent is clear enough, offers the correct one as a clickable command. Only "slash + ASCII command name" counts as a command, so text like `/usr/local/bin` or `/今天` still goes to the model; the full-width `／` is equivalent to `/`, so it works straight from a Chinese IME.
+
+### Installing, updating, and reloading plugins (`/plugins`)
+
+`/plugins` calls the host's plugin manager; package operations only handle bundles installed from the registry:
+
+- `/plugins` lists installed third-party plugins; rows with a newer version found in the background carry `→ new version` and an "update" link, and `/plugins 2` pages through.
+- A background check asks the registry (2 minutes after startup, then every 6 hours); a newer version only shows up as `→ new version` in the list — nothing is pushed and nothing updates itself.
+- `/plugins install <name>` takes effect immediately: the host reconciles the profile, so no `/plugins reload` is needed.
+- `/plugins update <name> [version]` picks the newest compatible version when none is given; a failed upgrade restores the previous version.
+- When a dependency ships build scripts, pnpm refuses to run them by default; the result offers a "continue" button, and only that click grants build permission for that package in this profile.
+- `/plugins reload` applies on-disk plugin changes (the old `/bot-reload`): only modules that really changed are swapped, and changes that need a restart are reported as such.
+- Local tgz snapshots (`pnpm dev:reload`) still use `/plugins reload` after swapping the package; they are not part of install / update.
 
 ## Workspaces
 
@@ -261,7 +272,7 @@ Notes:
 - **Several sessions can stay live at once**: a session joins the acquired set when a normal message, `/sessions resume`, or `/to` actually gets its agent. Output, questions, and approvals from every acquired session go back to QQ; the current session is untagged, while messages from other sessions get a separate source line `#shortid · title` before the body and a `/to` reply link at the end. The acquired set is runtime-only — after a restart only the current session is restored from `model-prefs.json`.
 - **Switching does not release**: `/sessions resume` only moves the current pointer; the old session keeps running and its output keeps flowing to QQ. `/new` only clears the current pointer, and the old session keeps running too. On unload the plugin disposes only the agents it created; borrowed Web/TUI agents are just dereferenced.
 - **Questions are routed per session**: the current session answers with plain text; buttons from other sessions carry the session id and work when clicked; questions without buttons append a `/to #id ` link. A plain message that did not come through a link is never forwarded to the current model — the user is told to use a button or `/to`.
-- The held list is ordered "current → other held (by acquisition time)". The time column is the **creation time** (the host header stores no "last used" timestamp).
+- The held list is ordered "current → other held (by acquisition time)", and the row time is the session's latest human message time (falling back to creation time). Inside a workspace, `/sessions all` is ordered by that same time, matching the `updatedAt` the Web sidebar uses. Pinned sessions still lead and the workspace order is unchanged.
 - After a cross-workspace resume the agent works inside **that session's own directory**, and the file-send allowlist follows it.
 
 
@@ -317,10 +328,12 @@ src/
 │   └── attachment.ts           # Attachment handling
 ├── shared/                     # Shared utilities
 │   ├── utils.ts                # Common helpers
+│   ├── entries.ts              # Loader entry snapshots (reload / install)
 │   ├── dirs.ts                 # Data directory (~/.dsh-qqterm)
 │   ├── scope.ts                # scope/peer extraction
 │   └── send-helper.ts          # Chunked send
-├── reload/                     # /bot-reload (apply on-disk changes)
+├── reload/                     # Hot reload (/plugins reload, apply on-disk changes)
+├── plugins/                    # /plugins (install / update plugins)
 └── commands/                   # Slash commands
 ```
 

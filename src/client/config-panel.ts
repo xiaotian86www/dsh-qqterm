@@ -1,4 +1,4 @@
-﻿/**
+/**
  * QQ 机器人配置面板 — 必要配置的 UI 编辑
  *
  * UI 复刻 DSW 通用设置（settings-form 原语）的视觉风格：
@@ -26,8 +26,6 @@ interface AccessControlWire {
 type ConfigWire = {
   streaming?: boolean;
   showToolResults?: boolean;
-  debug?: boolean;
-  directPrompt?: string;
   access?: AccessControlWire;
 };
 
@@ -86,7 +84,6 @@ function useConfigPanelStyles(): void {
 }
 .qqterm-config-input:focus { outline: none; border-color: var(--dsw-alias-state-business-primary); }
 .qqterm-config-input:disabled { color: var(--dsw-alias-label-tertiary); cursor: default; }
-.qqterm-config-textarea { height: auto; min-height: 68px; padding: 8px 12px; resize: vertical; line-height: 1.5; }
 /* 分段控件样式已移除：访问控制只保留唯一用户输入 */
 /* 底栏（官方 SettingsForm.footer 复刻） */
 .qqterm-config-footer { display: flex; align-items: center; gap: 8px; padding-top: 16px; }
@@ -143,20 +140,6 @@ function FieldRow({ label, help, value, placeholder, onChange }: {
     createElement('input', {
       className: 'qqterm-config-input', value, placeholder, spellCheck: false,
       onChange: (event: ChangeEvent<HTMLInputElement>) => { onChange(event.currentTarget.value); },
-    }),
-    help === undefined ? null : createElement('p', { className: 'qqterm-config-hint' }, help),
-  );
-}
-
-/** 多行文本行 */
-function AreaRow({ label, help, value, rows, onChange }: {
-  label: string; help?: string; value: string; rows?: number; onChange: (next: string) => void;
-}): ReactNode {
-  return createElement('div', { className: 'qqterm-config-field' },
-    createElement('span', { className: 'qqterm-config-label' }, label),
-    createElement('textarea', {
-      className: 'qqterm-config-input qqterm-config-textarea', value, rows: rows ?? 3,
-      onChange: (event: ChangeEvent<HTMLTextAreaElement>) => { onChange(event.currentTarget.value); },
     }),
     help === undefined ? null : createElement('p', { className: 'qqterm-config-hint' }, help),
   );
@@ -273,12 +256,6 @@ export function ConfigPanel(props: { bindPhase?: string } = {}): ReactElement {
       label: '显示工具调用结果', checked: form.showToolResults ?? false,
       help: '在聊天中展示工具调用结果，含失败',
       onChange: (v) => { patch('showToolResults', v); },
-    }),
-
-    createElement('div', { className: 'qqterm-config-group-title' }, '个性化提示词'),
-    createElement(AreaRow, {
-      label: '私聊额外 system prompt', value: form.directPrompt ?? '',
-      onChange: (v) => { patch('directPrompt', v); },
     }),
 
     createElement('div', { className: 'qqterm-config-footer' },

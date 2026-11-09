@@ -35,7 +35,7 @@ const SHARED_PATCH = [
   '    enabled: false',
   '- id: qqterm',
   '  config:',
-  '    directPrompt: 旧提示词',
+  '    textChunkLimit: 4500',
   '- id: llm-deepseek',
   '  config:',
   '    baseURL: https://example.com/v1',
@@ -180,16 +180,13 @@ describe('绑定链路 × 真实 persist 落盘（#53 回归）', () => {
     await invoke(routes.get(BIND_CONFIG_PATH), fakeReq('POST', JSON.stringify({
       streaming: false,
       showToolResults: true,
-      debug: true,
-      directPrompt: '私聊提示词',
       access: { owner: 'u1' },
     })), res);
 
     expect(res.statusCode).toBe(200);
     const after = readFileSync(patchPath, 'utf8');
     for (const expected of [
-      'streaming: false', 'showToolResults: true', 'debug: true',
-      'directPrompt: 私聊提示词',
+      'streaming: false', 'showToolResults: true',
       'owner: u1',
     ]) {
       expect(after).toContain(expected);
@@ -250,23 +247,6 @@ describe('绑定链路 × 真实 persist 落盘（#53 回归）', () => {
     await invoke(routes.get(BIND_CONFIG_PATH), fakeReq('POST', '{"streaming":false}'), second);
     expect(second.statusCode).toBe(200);
     expect(statSync(patchPath).mtimeMs).toBe(past.getTime()); // 无变化 → 无写 → mtime 不动
-  });
-
-  it('配置保存（长 prompt）：超过 4KB 的请求体正常保存（#69）', async () => {
-    dir = mkdtempSync(join(tmpdir(), 'qqterm-bind-large-'));
-    patchPath = join(dir, 'cordis.patch.yml');
-    writeFileSync(patchPath, SHARED_PATCH, 'utf8');
-    profileDirState.dir = dir;
-
-    const routes = registerRealRoutes(() => null);
-    const longPrompt = '你是一个专业的 QQ 私聊助手。'.repeat(400); // ~8KB UTF-8
-    const res = fakeRes();
-    await invoke(routes.get(BIND_CONFIG_PATH), fakeReq('POST', JSON.stringify({ directPrompt: longPrompt })), res);
-
-    expect(res.statusCode).toBe(200);
-    const after = readFileSync(patchPath, 'utf8');
-    expect(after).toContain('你是一个专业的 QQ 私聊助手。');
-    expectSharedPreserved(patchPath);
   });
 
   it('manual 请求体仍受 4KB 上限约束', async () => {

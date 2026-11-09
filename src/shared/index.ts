@@ -3,6 +3,8 @@
  */
 export {
   getProfileDir,
+  resolveProfileDir,
+  errorText,
   resolveEnv,
   formatRelativeTime,
   buildUserAgent,
@@ -10,6 +12,7 @@ export {
   shortSessionId,
   outsideHmrTransaction,
 } from './utils.ts';
+export { entryUids, changedEntries, entryReplaced, type LoaderLike } from './entries.ts';
 export { getScopePeer } from './scope.ts';
 export { PLUGIN_HOME, resolveAgentCwd } from './dirs.ts';
 export { sendMarkdownChunked } from './send-helper.ts';

@@ -31,6 +31,8 @@ import { DeliverablesDeliverer } from '../transport/deliverables.ts';
 import { formatPanelSummary, syncCommandPanels, type PanelSyncResult } from '../features/command-panel.ts';
 import { syncCommandMenu, type MenuSyncResult } from '../features/command-menu.ts';
 import { createReloader } from '../reload/index.ts';
+import { createPluginInstaller } from '../plugins/index.ts';
+import { startUpdateCheck } from '../plugins/updater.ts';
 
 /**
  * interaction 统一分发器：按 button_data 的顶层 `t` 判别字段，路由到对应
@@ -72,6 +74,8 @@ export async function bootstrapGateway(
   const replyStore = new ReplyStore({ appId: config.appId, logger });
   // 热重载能力：hmr 是可选服务，profile 未启用时命令只提示、不做任何事
   const reloader = createReloader(ctx, logger);
+  // 插件安装能力：pluginManager 由宿主提供（web / desktop / CLI profile 都有）
+  const installer = createPluginInstaller(ctx, logger);
 
   // ── 初始化 QQ Bot SDK ──
   const userAgent = buildUserAgent();
@@ -92,7 +96,7 @@ export async function bootstrapGateway(
   createReplyAwareBot(bot, replyStore);
 
   // ── 中间件链 ──
-  const commands = setupMiddlewares(bot, config, manager, logger, replyStore, reloader);
+  const commands = setupMiddlewares(bot, config, manager, logger, replyStore, reloader, installer);
 
   // ── 入站：经过中间件链后的消息交给 dsh agent ──
   bot.on('message', async (mCtx: MiddlewareContext) => {
@@ -213,15 +217,20 @@ export async function bootstrapGateway(
         logger.warn(`启动恢复会话失败: ${err instanceof Error ? err.message : String(err)}`);
       });
 
-    // 上一次 /bot-reload 的结果只能靠状态文件带到这个 fiber：连上后补发一条被动回复
+    // 上一次 /plugins reload 的结果只能靠状态文件带到这个 fiber：连上后补发一条被动回复
     void reloader.announce(bot).catch((err: unknown) => {
       logger.warn(`热重载结果播报失败: ${err instanceof Error ? err.message : String(err)}`);
+    });
+
+    // 插件安装可能把 qqterm 自己换掉：新 fiber 连上后补发上一次安装 / 更新的结果
+    void installer.announce(bot).catch((err: unknown) => {
+      logger.warn(`插件操作结果播报失败: ${err instanceof Error ? err.message : String(err)}`);
     });
 
     // 指令面板：连上后把当前命令推到私聊全局面板。
     // 每次连接（含续传）都同步一次，面板被外部删掉也能自愈；失败只记 warn，
     // 不影响网关（OpenAPI 未开通时这里会拿到 4xx）。
-    if (config.panel?.autoSync ?? true) {
+    if (config.panel.autoSync) {
       void syncCommandPanels(bot.api, commands, logger)
         .then((results: PanelSyncResult[]) => {
           logger.info(`指令面板已同步: ${formatPanelSummary(results)}`);
@@ -232,7 +241,7 @@ export async function bootstrapGateway(
     }
 
     // 自定义菜单：单聊窗口底部的固定入口（四个按钮 + 权限 / 思考两个子菜单）
-    if (config.menu?.autoSync ?? true) {
+    if (config.menu.autoSync) {
       void syncCommandMenu(bot.api, logger)
         .then((result: MenuSyncResult) => {
           logger.info(`自定义菜单已同步: ${result.count} 项`);
@@ -243,10 +252,11 @@ export async function bootstrapGateway(
     }
   });
 
-  // ── 富媒体过期清理 ──
-  if (config.media.enabled) {
-    startMediaCleanup(ctx, config.media.ttlHours, logger);
-  }
+  // ── 富媒体过期清理（与下载开关解耦：关掉下载也要清理旧文件） ──
+  startMediaCleanup(ctx, config.media.ttlHours, logger);
+
+  // ── 后台检查插件更新（结果只进 `/plugins` 列表，不推送、不自动装） ──
+  startUpdateCheck(ctx, installer, logger);
 
   // ── 视觉工具注册（qqbot_describe_image，复用 dsh llm + attachments） ──
   ensureVisionInputModal(config.vision, logger);

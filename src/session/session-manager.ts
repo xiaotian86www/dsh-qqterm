@@ -89,34 +89,12 @@ const COMPACTION_ERROR_HINTS: Record<string, string> = {
 /** 会话列表最多为多少条会话读取标题（每条都要读一遍日志，是列表的耗时大头） */
 const TITLE_FETCH_LIMIT = 10;
 
-/** `/sessions all` 每个工作区最多为多少条会话读标题（与命令层每页条数一致） */
-const TITLE_ROWS_PER_GROUP = 10;
-
 /**
- * `/sessions all` 读标题的总量上限。
+ * `/sessions` 持有列表一次最多读多少条标题。
  *
- * 只对「会展示出来的行」读标题：以前取全局最新 10 条，工作区一多，靠后的组
- * 全部显示成「未命名会话」——那不是取舍，是 bug。
+ * 只对会展示的行读：读日志是列表的耗时大头，全部读会让命令卡住。
  */
-const TITLE_FETCH_LIMIT_ALL = 40;
-
-/** system-prompt section 最小结构（name/order/text） */
-interface PromptSection {
-  name: string;
-  order: number;
-  text: string;
-}
-
-/** system-prompt/assemble waterfall 的 context 最小结构 */
-interface AssembleContext {
-  agent?: DshAgent;
-}
-
-/** system-prompt/assemble 的组装产物最小结构 */
-interface AssembledPrompt {
-  sections?: PromptSection[];
-  [key: string]: unknown;
-}
+const TITLE_FETCH_LIMIT_HELD = 40;
 
 /** 复刻宿主 latestCompletedPrefixBoundary：最后一个 turn/end 起到下一 turn 开始前的边界 */
 export function latestCompletedPrefixBoundary(events: readonly unknown[]): number | undefined {
@@ -229,7 +207,6 @@ export class SessionManager {
     this.logger.info(`host adapter capabilities: ${this.host.capabilities.join(', ')}`);
     this.modelResolver = new ModelResolver(ctx, config, logger);
 
-    this.registerDirectPromptInjection();
     this.registerAgentDisposed();
   }
 
@@ -251,39 +228,6 @@ export class SessionManager {
       this.cancelPendingFor(agent.id);
       this.logger.info(`acquired session disposed externally: sessionId=${agent.id}`);
     }, { global: true });
-  }
-
-  /**
-   * 通过 system-prompt/assemble waterfall 注入私聊额外 system prompt。
-   *
-   * 该事件在每次 turn 构建 request 时触发；此处把 `directPrompt` 作为额外
-   * prompt section 追加。会话尚未建立（首次 assemble）或未配置额外 prompt
-   * 时原样返回，不做改动。
-   */
-  private registerDirectPromptInjection(): void {
-    const assemble = async (
-      _assembly: unknown,
-      context: AssembleContext,
-      next: () => Promise<AssembledPrompt>,
-    ): Promise<AssembledPrompt> => {
-      const assembled = await next();
-      if (!context.agent) return assembled;
-
-      const record = this.findByAgent(context.agent);
-      if (!record) return assembled;
-
-      const prompt = this.config.directPrompt;
-      if (!prompt) return assembled;
-
-      return {
-        ...assembled,
-        sections: [...(assembled.sections ?? []), { name: 'qqterm:scope-prompt', order: 90, text: prompt }],
-      };
-    };
-
-    (this.ctx as unknown as {
-      on(event: 'system-prompt/assemble', handler: typeof assemble): void;
-    }).on('system-prompt/assemble', assemble);
   }
 
   /**
@@ -1581,7 +1525,7 @@ export class SessionManager {
     const visible = (await this.host.listSessions())
       .filter((session) => session.origin !== 'subagent')
       .filter((session) => session.cwd !== undefined && samePath(session.cwd, workspace))
-      .sort((a, b) => b.createdAt - a.createdAt);
+      .sort((a, b) => (b.updatedAt - a.updatedAt) || (a.id < b.id ? -1 : 1));
 
     // 这里只列当前工作区，但条目也要带工作区字段：归档候选 / 归档页按它分组，
     // 缺了就会全部落进「未分组」。
@@ -1608,6 +1552,7 @@ export class SessionManager {
       return {
         id: session.id,
         createdAt: session.createdAt,
+        updatedAt: session.updatedAt,
         current: session.id === currentId,
         live: session.live,
         held: record !== undefined,
@@ -1645,7 +1590,7 @@ export class SessionManager {
     });
 
     const titles = await this.host
-      .sessionTitles(ordered.slice(0, TITLE_FETCH_LIMIT_ALL).map((record) => record.sessionId))
+      .sessionTitles(ordered.slice(0, TITLE_FETCH_LIMIT_HELD).map((record) => record.sessionId))
       .catch(() => new Map<string, string>());
     const workspaces = this.host.workspaceList();
 
@@ -1661,6 +1606,7 @@ export class SessionManager {
         id: record.sessionId,
         ...(titles.has(record.sessionId) ? { title: titles.get(record.sessionId) } : {}),
         createdAt: info?.createdAt ?? record.acquiredAt,
+        updatedAt: info?.updatedAt ?? info?.createdAt ?? record.acquiredAt,
         current: record.sessionId === currentId,
         live: true,
         held: true,
@@ -1796,14 +1742,15 @@ export class SessionManager {
     const sessions = all
       .filter((session) => session.origin !== 'subagent')
       .filter((session) => session.cwd !== undefined)
-      .sort((a, b) => b.createdAt - a.createdAt);
+      .sort((a, b) => (b.updatedAt - a.updatedAt) || (a.id < b.id ? -1 : 1));
 
-    /** 分组条目：标题在分组拼好之后再补（要先知道哪些行真的会展示） */
+    /** 分组条目：标题由调用方按需补（fillSessionTitles，只读要展示的行） */
     const asEntry = (session: HostSessionInfo, workspace: string): WorkspaceSession => {
       const record = this.records.get(session.id);
       return {
         id: session.id,
         createdAt: session.createdAt,
+        updatedAt: session.updatedAt,
         current: session.id === currentId,
         live: session.live,
         held: record !== undefined,
@@ -1838,7 +1785,10 @@ export class SessionManager {
 
       merged.sort((left, right) => {
         const pin = orderOf(left.id) - orderOf(right.id);
-        return pin !== 0 ? pin : right.createdAt - left.createdAt;
+        if (pin !== 0) return pin;
+        // 与 Web 侧栏默认排序一致：最近人类消息时间倒序，同时间按 id 升序
+        const recency = right.updatedAt - left.updatedAt;
+        return recency !== 0 ? recency : left.id < right.id ? -1 : 1;
       });
 
       for (const session of merged) consumed.add(session.id);
@@ -1862,23 +1812,24 @@ export class SessionManager {
       });
     }
 
-    // 标题只给「会展示的行」读：每组前 N 条，总量封顶；读日志是列表的耗时大头
-    const wanted: string[] = [];
-    for (const group of groups) {
-      for (const session of group.sessions.slice(0, TITLE_ROWS_PER_GROUP)) {
-        if (wanted.length >= TITLE_FETCH_LIMIT_ALL) break;
-        wanted.push(session.id);
-      }
-    }
-    const titles = await this.host.sessionTitles(wanted);
-    for (const group of groups) {
-      for (const session of group.sessions) {
-        const title = titles.get(session.id);
-        if (title !== undefined) session.title = title;
-      }
-    }
-
     return groups;
+  }
+
+  /**
+   * 给列表条目补标题（读日志是列表的耗时大头，只补调用方要展示的那几条）。
+   *
+   * 分组列表分页在命令层，这里不知道哪一页会展示，所以不在 listWorkspaceGroups
+   * 里盲读；命令按当前页切片后调这里。读不到就保持 undefined，渲染层回退成
+   * 「未命名会话」。已带标题的条目跳过，重复调用不会重复读。
+   */
+  async fillSessionTitles(entries: readonly WorkspaceSession[]): Promise<void> {
+    const missing = entries.filter((entry) => entry.title === undefined);
+    if (missing.length === 0) return;
+    const titles = await this.host.sessionTitles(missing.map((entry) => entry.id));
+    for (const entry of missing) {
+      const title = titles.get(entry.id);
+      if (title !== undefined) entry.title = title;
+    }
   }
 
   /**

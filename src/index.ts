@@ -34,6 +34,9 @@ export const inject = [
   // 会话目录（defaultDirectory / get）由 dsh-base 的 working-directory 提供：
   // 若按可选服务软读，Cordis 代理会在属性未注入时直接抛错，可选链兜不住。
   'workingDirectory',
+  // 插件安装 / 更新（/plugins）：web / desktop / CLI profile 由 dsh-base 提供；
+  // 服务缺失时插件保持 inactive，不写「能力不可用」的降级分支。
+  'pluginManager',
 ];
 export const Config = ConfigSchema;
 

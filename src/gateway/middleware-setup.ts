@@ -20,6 +20,7 @@ import {
 import type { QQTermConfig } from '../config.ts';
 import type { SessionManager } from '../session/index.ts';
 import type { Reloader } from '../reload/index.ts';
+import type { PluginInstaller } from '../plugins/index.ts';
 import type { Logger } from '../types.ts';
 import { buildCommandList } from '../commands/index.ts';
 import type { CategorizedCommand } from '../commands/types.ts';
@@ -36,6 +37,7 @@ export function setupMiddlewares(
   logger: Logger,
   replyStore: ReplyStore,
   reloader?: Reloader,
+  installer?: PluginInstaller,
 ): CategorizedCommand[] {
   // 1. 错误兜底（最外层洋葱皮）
   bot.use(errorHandler());
@@ -78,7 +80,7 @@ export function setupMiddlewares(
   bot.use(rateLimiter());
 
   // 6. 斜杠命令（在 concurrencyGuard 之前，命令匹配后不排队直接响应）
-  const commandList = buildCommandList({ manager, config, logger, bot, reloader });
+  const commandList = buildCommandList({ manager, config, logger, bot, reloader, installer });
   const slash = slashCommand({
     // 关闭 autoHelp：help 命令由 qqbot 注册为 /bot-help，
     // 避免 SDK 再自动注册一个无前缀的 /help 造成重复
@@ -102,7 +104,6 @@ export function setupMiddlewares(
   bot.use(concurrencyGuard({
     strategy: 'merge',
     maxQueue: config.maxQueue,
-    maxProcessingMs: config.processingTimeoutMs,
   }));
 
   // 8. C2C 输入状态指示

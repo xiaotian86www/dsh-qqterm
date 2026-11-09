@@ -1,4 +1,4 @@
-﻿import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, readFileSync, writeFileSync, existsSync, utimesSync, statSync, rmSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -36,7 +36,7 @@ const SHARED_PATCH = [
   '    enabled: false',
   '- id: qqterm',
   '  config:',
-  '    directPrompt: 旧提示词',
+  '    streaming: false',
   '    appId: old-app # 旧凭据',
   '    appSecret: old-secret',
   '- id: llm-deepseek',
@@ -57,7 +57,7 @@ describe('persistCredentialsToProfile', () => {
     expect(after).toContain('ui-settings');
     expect(after).toContain('llm-deepseek');
     expect(after).toContain('# 旧凭据');
-    expect(after).toContain('directPrompt: 旧提示词');
+    expect(after).toContain('streaming: false');
     expect(after).not.toContain('old-app');
     expect(after).toContain('appId: test-app');
 
@@ -170,7 +170,7 @@ describe('removeCredentialsFromProfile', () => {
     expect(removeCredentialsFromProfile(dir, log)).toBe(true);
 
     const after = readFileSync(patchPath, 'utf8');
-    expect(after).toContain('directPrompt: 旧提示词');
+    expect(after).toContain('streaming: false');
     expect(after).toContain('- insert:');
     expect(after).not.toContain('test-app');
     expect(after).not.toContain('old-app');
@@ -198,10 +198,10 @@ describe('updateProfileConfig', () => {
   it('最小写入：只合并提交键，不触碰凭据字段', () => {
     writeFileSync(patchPath, SHARED_PATCH, 'utf8');
 
-    expect(updateProfileConfig({ directPrompt: '新提示词', access: { owner: 'u1' } }, dir, log)).toBe(true);
+    expect(updateProfileConfig({ textChunkLimit: 3200, access: { owner: 'u1' } }, dir, log)).toBe(true);
 
     const after = readFileSync(patchPath, 'utf8');
-    expect(after).toContain('directPrompt: 新提示词');
+    expect(after).toContain('textChunkLimit: 3200');
     expect(after).toContain('owner: u1');
     expect(after).toContain('appId: old-app');
     expect(entryIds(after)).toEqual(['insert', 'ui-settings', 'qqterm', 'llm-deepseek']);

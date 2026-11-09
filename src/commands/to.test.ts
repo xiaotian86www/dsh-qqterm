@@ -22,6 +22,7 @@ function entry(over: Partial<WorkspaceSession> = {}): WorkspaceSession {
     id: TARGET,
     title: '目标会话',
     createdAt: 1,
+    updatedAt: 1,
     current: false,
     live: true,
     held: false,
@@ -46,6 +47,7 @@ function makeManager(over: {
 } = {}) {
   return {
     listWorkspaceGroups: vi.fn(async () => over.groups ?? groups()),
+    fillSessionTitles: vi.fn(async () => {}),
     hasLiveSession: vi.fn(() => over.live ?? true),
     findBySessionId: vi.fn(() => over.record),
     sendTo: vi.fn(async () => over.sendTo ?? { ok: true, kind: 'sent', sessionId: TARGET }),

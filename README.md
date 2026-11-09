@@ -97,12 +97,10 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqterm/cordis.dev.yml
 |------|------|--------|------|
 | `appId` | string | **必填** | QQ Bot AppID（或通过 `QQBOT_APPID` 环境变量） |
 | `appSecret` | string | **必填** | QQ Bot AppSecret（或通过 `QQBOT_SECRET` 环境变量） |
-| `directPrompt` | string | - | 私聊额外 system prompt |
 | `textChunkLimit` | number | `4500` | 单条消息最大字符数 |
 | `streaming` | boolean | `true` | 是否启用流式输出 |
-| `processingTimeoutMs` | number | `1800000` | 处理超时(ms)，超时中断当前 LLM 调用 |
 | `maxQueue` | number | `20` | 并发队列最大长度 |
-| `askTimeoutMs` | number | `300000` | 待答问题超时(ms)，默认 5 分钟（ask_user_question） |
+| `askTimeoutMs` | number | `300000` | 待答问题超时(ms)，默认 5 分钟（ask_user_question），0=不超时 |
 | `showToolResults` | boolean | `false` | 是否展示工具调用结果（成功与失败都受此开关控制） |
 | `debug` | boolean | `false` | 调试模式 |
 
@@ -153,14 +151,14 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqterm/cordis.dev.yml
 | `vision.model` | string | - | 视觉模型 id（如 qwen-vl-max） |
 | `vision.maxBytes` | number | `10MB` | 图片字节上限 |
 | `vision.maxTokens` | number | `1024` | 输出 token 上限 |
-| `vision.timeoutMs` | number | `120000` | 视觉调用超时(ms) |
 
 ### 附件发送（sendFile）
 
 | 配置 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `sendFile.restrictPaths` | boolean | `true` | 是否启用路径白名单（仅 media + 当前会话工作目录 + extraRoots） |
 | `sendFile.extraRoots` | string[] | `[]` | 额外允许访问的根目录 |
+
+发送文件始终走路径白名单：只允许 `~/.dsh-qqterm/media`、当前会话工作目录与 `extraRoots` 内（按真实路径判定，符号链接不可绕过）。
 
 ### 指令面板（panel）
 
@@ -204,8 +202,21 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqterm/cordis.dev.yml
 | `/bot-status` | 查看当前会话状态（简版：会话名与短 id / 模型 / 思考强度 / preset / 消息数，完整状态看 `/status`） |
 | `/bot-help` | 查看所有指令 |
 | `/bot-sync`（别名 `/bot-refresh`） | 同步指令面板与自定义菜单（仅绑定用户可用） |
+| `/plugins` | 插件管理：不带参数列出已安装插件，`install <包名>` / `update <包名> [版本]` 走 registry，`reload` 应用磁盘上的插件变更（仅绑定用户可用） |
 
 > 指令名拼错（如 `/modle`、`/sesions`）不会被当作提问转发给大模型：机器人直接回「没有这个指令」，能猜到意图时给出可点击的正确指令。只有「斜杠 + ASCII 指令名」算指令，`/usr/local/bin`、`/今天` 这类文本照旧交给模型；全角 `／` 与半角 `/` 等价，中文输入法下可以直接敲。
+
+### 插件安装、更新与热重载（`/plugins`）
+
+`/plugins` 调宿主的插件管理服务，包管理只管从 registry 安装的 bundle：
+
+- `/plugins` 列出已安装的第三方插件，后台查到新版本的行尾带 `→ 新版本` 与「更新」链接；`/plugins 2` 翻页。
+- 后台会定时查 registry（启动 2 分钟后一次，之后每 6 小时一次），查到新版本只在列表里标 `→ 新版本`，不主动发消息、也不自动安装。
+- `/plugins install <包名>` 装完即生效：宿主会 reconcile profile，不需要再发 `/plugins reload`。
+- `/plugins update <包名> [版本]` 不带版本时取 registry 上最新的兼容版本；装新版失败会自动装回旧版本。
+- 依赖带构建脚本时 pnpm 默认拒绝执行，结果里给「继续安装」按钮，点了才授予该包在本 profile 的构建权限。
+- `/plugins reload` 应用磁盘上已变更的插件文件（原来的 `/bot-reload`）：只换真的变过的插件，需要重启的改动会如实回报。
+- 本地 tgz 快照（`pnpm dev:reload`）仍是先换包再 `/plugins reload`，不在 install / update 里。
 
 ## 工作区（workspace）
 
@@ -260,7 +271,7 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqterm/cordis.dev.yml
 - **多个会话可以同时活着**：普通消息、`/sessions resume`、`/to` 实际拿到 agent 的会话都会加入「已获取集合」。所有已获取会话的输出、提问、审批都会发回 QQ；当前会话不加标记，其它会话的消息在正文前单独一行标 `#短id · 标题`，正文末尾附 `/to` 回复链接。已获取集合只在运行期存在，重启后只有当前会话从 `model-prefs.json` 恢复。
 - **切走不释放**：`/sessions resume` 只改当前指针，旧会话继续在后台跑、输出继续回 QQ；`/new` 只清掉当前指针，旧会话同样继续跑。插件卸载时只 dispose 自己创建的 agent，Web/TUI 创建的只丢引用。
 - **问答按会话路由**：当前会话直接回文本；其它会话的按钮带 session id，点按钮就能答；没有按钮的问题会附 `/to #id ` 链接。一条没走链接的纯文本不会误发给当前模型，会提示用按钮或 `/to`。
-- 持有列表按「当前 → 其它持有（获取时间倒序）」排。列表时间是**创建时间**（宿主 header 不存「最后使用时间」）。
+- 持有列表按「当前 → 其它持有（获取时间倒序）」排，行里的时间取会话的最近人类消息时间（取不到时回退创建时间）；`/sessions all` 的工作区内顺序同样按这个时间倒序（与 Web 侧栏同一份 `updatedAt`），置顶会话仍在最前，工作区顺序不变。
 - 跨工作区恢复后，agent 会在**那个会话自己的目录**里干活；文件发送白名单也随该目录变化。
 
 
@@ -316,10 +327,12 @@ src/
 │   └── attachment.ts           # 附件处理
 ├── shared/                     # 共享工具
 │   ├── utils.ts                # 通用函数
+│   ├── entries.ts              # loader entry 快照（重载 / 安装共用）
 │   ├── dirs.ts                 # 数据目录（~/.dsh-qqterm）
 │   ├── scope.ts                # scope/peer 提取
 │   └── send-helper.ts          # 分块发送
-├── reload/                     # /bot-reload（应用磁盘变更）
+├── reload/                     # 热重载（/plugins reload，应用磁盘变更）
+├── plugins/                    # /plugins（安装 / 更新插件）
 └── commands/                   # 斜杠命令
 ```
 

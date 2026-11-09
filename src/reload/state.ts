@@ -12,8 +12,10 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { PLUGIN_HOME } from '../shared/dirs.ts';
-import { formatRelativeTime } from '../shared/utils.ts';
+import { errorText, formatRelativeTime } from '../shared/utils.ts';
 import type { Logger } from '../types.ts';
+
+export { errorText };
 
 export type ReloadPhase = 'done' | 'failed';
 
@@ -93,10 +95,4 @@ export function describeReloadState(state: ReloadState | undefined): string | un
   return state.restartReason === undefined
     ? `✅ 已应用 · ${when}`
     : `⚠️ 已应用，部分改动需重启 · ${when}`;
-}
-
-/** 错误消息截断：状态文件只留够排障的一行，不落整个堆栈 */
-export function errorText(err: unknown, limit = 300): string {
-  const text = err instanceof Error ? err.message : String(err);
-  return text.length <= limit ? text : `${text.slice(0, limit)}…`;
 }

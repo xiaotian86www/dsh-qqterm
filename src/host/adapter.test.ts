@@ -74,6 +74,41 @@ describe('host adapter', () => {
       'sessionTitle.rename',
     ]));
   });
+
+  it('listSessions：合并 sessionController.list 的 updatedAt（Web 侧栏同一份摘要）', async () => {
+    const adapter = createHostAdapter(makeCtx({
+      sessionQuery: {
+        listSessions: async () => [
+          { header: { id: 'a', cwd: '/w', createdAt: 100 }, live: false },
+          { header: { id: 'b', cwd: '/w', createdAt: 200 }, live: false },
+        ],
+      },
+      sessionController: {
+        list: async () => ({ items: [{ sessionId: 'a', updatedAt: 900 }, { sessionId: 'b', updatedAt: 200 }] }),
+      },
+    }));
+
+    const sessions = await adapter.listSessions();
+
+    expect(sessions.map((session) => [session.id, session.createdAt, session.updatedAt])).toEqual([
+      ['a', 100, 900],
+      ['b', 200, 200],
+    ]);
+  });
+
+  it('listSessions：sessionController 缺失或抛错时 updatedAt 回退成 createdAt', async () => {
+    const query = {
+      listSessions: async () => [{ header: { id: 'a', cwd: '/w', createdAt: 100 }, live: false }],
+    };
+    const withoutController = createHostAdapter(makeCtx({ sessionQuery: query }));
+    expect((await withoutController.listSessions())[0]?.updatedAt).toBe(100);
+
+    const failing = createHostAdapter(makeCtx({
+      sessionQuery: query,
+      sessionController: { list: async () => { throw new Error('EIO'); } },
+    }));
+    expect((await failing.listSessions())[0]?.updatedAt).toBe(100);
+  });
 });
 
 describe('会话归档（workspaceRegistry）', () => {

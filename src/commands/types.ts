@@ -7,6 +7,7 @@ import type { QQBot, SlashCommand } from '@tencent-connect/qqbot-nodejs';
 import type { SessionManager } from '../session/index.ts';
 import type { QQTermConfig } from '../config.ts';
 import type { Reloader } from '../reload/index.ts';
+import type { PluginInstaller } from '../plugins/index.ts';
 import type { Logger } from '../types.ts';
 
 export interface CommandDeps {
@@ -17,6 +18,8 @@ export interface CommandDeps {
   bot?: QQBot;
   /** 热重载能力：profile 未启用 HMR 时 available=false，单测可缺省 */
   reloader?: Reloader;
+  /** 插件安装能力：宿主没有 pluginManager 时缺省，单测可注入假实现 */
+  installer?: PluginInstaller;
 }
 
 /** 命令分类：agent = 底层 agent 通用能力，qqbot = 插件特有 */

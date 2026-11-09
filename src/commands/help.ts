@@ -2,7 +2,8 @@
  * /bot-help — 查看所有指令，按「通用能力 / 插件内置」分组展示
  *
  * 通用能力：对应底层 dsh agent 能力（new/compact/model/stop），无前缀
- * 插件内置：插件自身封装（bot-ping/bot-version/bot-status/bot-help），带 bot- 前缀
+ * 插件内置：插件自身封装（bot-ping/bot-version/bot-status/bot-help），带 bot- 前缀；
+ * /plugins 是唯一不带前缀的，因为它的子命令（install/update/reload）自成一组
  */
 import type { CommandDeps, CategorizedCommand } from './types.ts';
 import { pluginVersion, sendMarkdownChunked } from '../shared/index.ts';

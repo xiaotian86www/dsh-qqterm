@@ -325,6 +325,11 @@ export interface WorkspaceSession {
   title?: string;
   /** 创建时间（Unix epoch ms） */
   createdAt: number;
+  /**
+   * 最近人类消息时间（Unix epoch ms）：宿主会话摘要的 `updatedAt`，
+   * 列表按它倒序排、行里也显示它（跟 Web 侧栏的活跃时间同源）。
+   */
+  updatedAt: number;
   /** 是否为本 chat 当前绑定的会话 */
   current: boolean;
   /** 是否正被进程内 agent 占用 */

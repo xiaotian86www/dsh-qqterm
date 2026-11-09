@@ -254,7 +254,7 @@ function renderRow(entry: WorkspaceSession, options: RowOptions = {}): string {
   body.push(displayId(entry.id));
   body.push(shortTitle(entry));
   if (options.showStatus) body.push(statusOf(entry));
-  const time = formatRelativeTime(entry.createdAt);
+  const time = formatRelativeTime(entry.updatedAt);
   if (time !== '—') body.push(time);
   const workspace = clip(cleanInline(entry.workspace ?? ''));
   if (options.withWorkspace && workspace !== '') body.push(workspace);
@@ -414,6 +414,9 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Categ
           case 'workspaces': {
             const groups = await loadGroups();
             if (typeof groups === 'string') return groups;
+            // 只为当前页的行读标题：分组列表不知道会翻到哪一页，不能一次全读
+            const rows = pageSlice(groupRows(groups), page);
+            await manager.fillSessionTitles(rows.map((row) => row.entry));
             return renderGroups(groups, page);
           }
 
@@ -421,6 +424,7 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Categ
             const groups = await loadGroups();
             if (typeof groups === 'string') return groups;
             const archived = flattenGroups(groups).filter((entry) => entry.archived);
+            await manager.fillSessionTitles(pageSlice(archived, page));
             return renderArchived(archived, page);
           }
 
@@ -436,6 +440,8 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Categ
             }
             if (target.entry.current) return '✅ 已是当前会话';
 
+            // 回执要写会话名；列表按页补标题，这里只补命中的这一条
+            await manager.fillSessionTitles([target.entry]);
             const outcome = await manager.switchSession(
               scope,
               peerId,
@@ -518,6 +524,7 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Categ
                   ? '🗂 还没有任何会话'
                   : `⚠️ 没有未归档的会话 · ${commandLink('/sessions archived', '查看已归档')}`;
               }
+              await manager.fillSessionTitles(pageSlice(candidates, pickerPage));
               return renderArchivePicker(candidates, pickerPage);
             }
 
@@ -536,6 +543,8 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Categ
             }
 
             const batch = resolveTargets(all, parsed.tokens);
+            // 跳过项与结果行都写会话名，按命中目标补标题
+            await manager.fillSessionTitles(batch.picks);
             const skipped = batch.picks
               .filter((entry) => entry.archived)
               .map((entry) => `「${shortTitle(entry)}」本来就在归档里，跳过`);
@@ -575,6 +584,8 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Categ
             if ('message' in parsed) return parsed.message;
 
             const batch = resolveTargets(all, parsed.tokens);
+            // 跳过项与结果行都写会话名，按命中目标补标题
+            await manager.fillSessionTitles(batch.picks);
             const skipped = batch.picks
               .filter((entry) => !entry.archived)
               .map((entry) => `「${shortTitle(entry)}」没有归档，跳过`);
@@ -780,6 +791,34 @@ function renderArchivePicker(
 }
 
 /**
+ * 会话列表的一页切片。
+ *
+ * 命令在渲染前只给这一页补标题，切片方式必须与渲染一致，否则用户会看到
+ * 「未命名会话」出现在别的行上。
+ */
+function pageSlice<T>(items: readonly T[], page: number): T[] {
+  const start = (page - 1) * PAGE_SIZE;
+  return items.slice(start, start + PAGE_SIZE);
+}
+
+/**
+ * `/sessions all` 的行序列：跳过已归档的会话，跨工作区连续编号。
+ *
+ * 渲染与补标题共用这一份顺序；组标题只在行跨组时重复。
+ */
+function groupRows(
+  groups: readonly WorkspaceGroup[],
+): { group: WorkspaceGroup; entry: WorkspaceSession }[] {
+  const rows: { group: WorkspaceGroup; entry: WorkspaceSession }[] = [];
+  for (const group of groups) {
+    for (const entry of group.sessions) {
+      if (!entry.archived) rows.push({ group, entry });
+    }
+  }
+  return rows;
+}
+
+/**
  * 渲染全部会话的分组列表（`/sessions all`，按会话分页）。
  *
  * 每行只给 8 位短 id，不编号；持有会话加 `📌` 标记，但不标当前项
@@ -803,12 +842,7 @@ function renderGroups(groups: readonly WorkspaceGroup[], page = 1): string {
     ].join('\n');
   }
 
-  const rows: { group: WorkspaceGroup; entry: WorkspaceSession }[] = [];
-  for (const group of visible) {
-    for (const entry of group.sessions) {
-      if (!entry.archived) rows.push({ group, entry });
-    }
-  }
+  const rows = groupRows(visible);
 
   const total = rows.length;
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));

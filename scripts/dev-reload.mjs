@@ -2,9 +2,9 @@
 /**
  * 开发 profile 一键换包：build → pack（带时间戳）→ dsh plugin add
  *
- * 开发 profile（默认 qqdev）用 tgz 实体副本安装、HMR 常开，改完代码不重启：
+ * 开发 profile（默认 dev）用 tgz 实体副本安装、HMR 常开，改完代码不重启：
  *   1. 打包并装进 profile（本脚本）
- *   2. 在 QQ 里发 /bot-reload，让宿主 reconcileProfile 换掉已加载的模块
+ *   2. 在 QQ 里发 /plugins reload，让宿主 reconcileProfile 换掉已加载的模块
  *
  * 用法：node scripts/dev-reload.mjs [profile]
  */
@@ -14,7 +14,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const profile = process.argv[2] ?? 'qqdev';
+const profile = process.argv[2] ?? 'dev';
 
 function run(command, args) {
   const quote = (value) => (/^[\w@%+=:,./\\-]+$/.test(value) ? value : `"${value}"`);
@@ -62,7 +62,7 @@ console.log(`[dev-reload] 产物 ${target}`);
 console.log(`[dev-reload] dsh plugin --profile ${profile} add`);
 run('dsh', ['plugin', '--profile', profile, 'add', `file:${target.split('\\').join('/')}`]);
 
-console.log(`\n[dev-reload] 已装进 ${profile}，接下来在 QQ 里发 /bot-reload 应用变更。`);
-if (!profile.startsWith('qqdev')) {
+console.log(`\n[dev-reload] 已装进 ${profile}，接下来在 QQ 里发 /plugins reload 应用变更。`);
+if (!profile.startsWith('dev')) {
   console.log(`[dev-reload] 注意：${profile} 需要开启 HMR（cordis.patch.yml 里不能有 - id: hmr / disabled: true）。`);
 }

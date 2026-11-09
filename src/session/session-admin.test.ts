@@ -124,6 +124,8 @@ function createCtx(options: {
   resume?: (sessionId: string) => Promise<DshAgentHandle>;
   /** 模拟宿主 sessionTitle 服务（/rename 用） */
   sessionTitle?: { rename: (session: unknown, title: string) => { title: string } };
+  /** 模拟宿主 sessionController.list 的 updatedAt（会话 id → 最近人类消息时间） */
+  recency?: Record<string, number>;
 }): Context {
   const sessions = options.sessions ?? [];
   const byId = new Map(sessions.map((session) => [session.id, session]));
@@ -184,6 +186,11 @@ function createCtx(options: {
       create: async (path: string) => ({ path, title: basename(path), attachSession: async () => {} }),
     },
     sessionTitle: options.sessionTitle ?? { rename: () => ({ title: '' }) },
+    sessionController: {
+      list: async () => ({
+        items: Object.entries(options.recency ?? {}).map(([sessionId, updatedAt]) => ({ sessionId, updatedAt })),
+      }),
+    },
     agentPresets: { serviceFor: () => undefined },
     permissionPresets: { names: [], optionOf: () => undefined },
     get: (name: string) => {
@@ -250,6 +257,22 @@ describe('listWorkspaceSessions', () => {
     expect(entries[0]?.current).toBe(true);
     expect(entries[1]?.current).toBe(false);
     expect(entries[0]?.title).toContain('标题-');
+  });
+
+  it('按最近人类消息时间倒序（与 Web 侧栏同一份 updatedAt）', async () => {
+    const ctx = createCtx({
+      withQuery: true,
+      sessions: [
+        { id: 'session-new', cwd: WORKSPACE(), createdAt: 500 },
+        { id: 'session-old', cwd: WORKSPACE(), createdAt: 100 },
+      ],
+      recency: { 'session-old': 900, 'session-new': 300 },
+    });
+    const { manager } = createManager(ctx);
+
+    const entries = await manager.listWorkspaceSessions('c2c', PEER);
+
+    expect(entries.map((entry) => entry.id)).toEqual(['session-old', 'session-new']);
   });
 
   it('条目带工作区字段：归档候选按它分组，缺了会全落进「未分组」', async () => {
@@ -334,6 +357,25 @@ describe('listWorkspaceGroups', () => {
     const entry = groups.flatMap((group) => group.sessions).find((session) => session.id === held);
 
     expect(entry).toMatchObject({ held: true, running: true, workspace: 'repo' });
+  });
+
+  it('组内按最近人类消息时间倒序，同时间按 id 升序（Web 侧栏的次序）', async () => {
+    const ctx = createCtx({
+      withQuery: true,
+      sessions: [
+        { id: 'session-c', cwd: WORKSPACE(), createdAt: 300 },
+        { id: 'session-b', cwd: WORKSPACE(), createdAt: 200 },
+        { id: 'session-a', cwd: WORKSPACE(), createdAt: 100 },
+      ],
+      workspaces: [{ id: 'w1', path: WORKSPACE(), title: 'repo', sessionIds: ['session-a', 'session-b', 'session-c'] }],
+      recency: { 'session-a': 900, 'session-b': 900, 'session-c': 700 },
+    });
+    const { manager } = createManager(ctx);
+
+    const groups = await manager.listWorkspaceGroups('c2c', PEER);
+
+    expect(groups.flatMap((group) => group.sessions.map((session) => session.id)))
+      .toEqual(['session-a', 'session-b', 'session-c']);
   });
 });
 

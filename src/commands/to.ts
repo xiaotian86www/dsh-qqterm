@@ -70,6 +70,8 @@ export function toCommand({ manager, logger }: CommandDeps): CategorizedCommand 
       let sessionId: string;
       let title: string | undefined;
       if (target) {
+        // 列表不再预读标题，命中后只补这一条
+        await manager.fillSessionTitles([target]);
         sessionId = target.id;
         title = target.title;
         if (target.archived) {

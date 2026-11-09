@@ -22,6 +22,7 @@
 | `src/session/` | 聊天会话寻址、后台会话切换（`/sessions`、`/new`） |
 | `src/transport/` | 入站、出站、分片、附件、回复目标 |
 | `src/commands/` | `/bot-*`、`/model`、`/preset`、`/sessions` 等指令 |
+| `src/plugins/` | 插件安装 / 更新 / 热重载（`/plugins`）：状态文件、结果渲染、宿主 `pluginManager` 适配 |
 | `src/media/` | 富媒体理解、附件发送、清理 |
 | `src/host/` | 宿主 Agent/Session 适配 |
 | `src/client/` | 浏览器端（settings.section） |
@@ -45,7 +46,7 @@
 - 禁止在运行时写 `process.env`；凭据持久化只写 profile 的 `cordis.patch.yml`（会触发 HMR 重载）。
 - 未捕获的 rejection 在宿主是 fail-loud 致命错误，所有异步链必须有兜底 catch。
 - 网关必须在 HMR 事务之外启动（`outsideHmrTransaction`，`src/index.ts` 两处 `bootstrapGateway` 都已包上）：宿主的「正在应用变更」标记是 `AsyncLocalStorage`，热重载时 `apply` 在事务里执行；若在事务里建网关，socket / 定时器会一直带着这个标记，之后每条入站消息写配置都会被宿主判成 `HMR transactions cannot be nested`。长生命周期对象一律不要建在 `apply` 的事务上下文里。
-- `export const name = 'qqterm'`、bundle patch 里的 entry id `qqterm` 都是兼容契约；改动会让用户 profile 里按 id 写的配置覆盖失效。`inject` 随依赖增长而扩展（当前 16 项），只进不退。`compaction` 不进 `inject`：web/desktop 把它挂在 agent preset 作用域里，宿主面没有这个服务，`/compact` 只从会话 preset 取引擎，不退回宿主面。
+- `export const name = 'qqterm'`、bundle patch 里的 entry id `qqterm` 都是兼容契约；改动会让用户 profile 里按 id 写的配置覆盖失效。`inject` 随依赖增长而扩展（当前 17 项），只进不退。`compaction` 不进 `inject`：web/desktop 把它挂在 agent preset 作用域里，宿主面没有这个服务，`/compact` 只从会话 preset 取引擎，不退回宿主面。
 
 ### 3.3 客户端
 
@@ -128,6 +129,7 @@
 | agent preset | 🧩 | `/preset` |
 | 思考强度 | 🧠 | `/reasoning`、`/model`、`/status` |
 | 计费 | 💰 | `/cost` |
+| 插件管理 | 🔌 | `/plugins` |
 | 审批 | 🔐 | 审批卡片 |
 | 提问 / 问答 | ❓ | 问答卡片标题 |
 | 工具调用 | 🔧 | 工具结果 |
@@ -361,15 +363,15 @@ QQ 里只有一个聊天窗口，多个已获取会话的输出、提问、审�
 ## 7. 安装与 profile 隔离（联调）
 
 - **主 profile 禁止 `link:` 开发目录**：只装已发布版本或 `file:` 冻结快照，避免本地半成品在下次重启后直接影响线上机器人。
-- 开发调试用独立 profile（本机为 `qqdev`）：独立机器人应用 + **tgz 实体副本 + HMR 常开**，与主 profile 并行、互不影响。开发 profile 与主 profile 用同一套安装方式，区别只是改完代码后走 `/bot-reload` 而不是重启。
+- 开发调试用独立 profile（本机为 `dev`）：独立机器人应用 + **tgz 实体副本 + HMR 常开**，与主 profile 并行、互不影响。开发 profile 与主 profile 用同一套安装方式，区别只是改完代码后走 `/plugins reload` 而不是重启。
 - 开发 profile 改完代码固定走热重载：
 
   ```bash
-  pnpm dev:reload qqdev     # build → pack（带时间戳）→ dsh plugin add
-  # 然后在 QQ 里发 /bot-reload
+  pnpm dev:reload dev     # build → pack（带时间戳）→ dsh plugin add
+  # 然后在 QQ 里发 /plugins reload
   ```
 
-  `scripts/dev-reload.mjs` 负责打包命名与安装；`/bot-reload` 调宿主的 `reconcileProfile()`，只换磁盘上真变了的模块，回复会说明应用了哪些 entry——`✅ 没有需要应用的变更` 表示磁盘没变（没重新打包就发命令就是这种结果）。
+  `scripts/dev-reload.mjs` 负责打包命名与安装；`/plugins reload` 调宿主的 `reconcileProfile()`，只换磁盘上真变了的模块，回复会说明应用了哪些 entry——`✅ 没有需要应用的变更` 表示磁盘没变（没重新打包就发命令就是这种结果）。
 
 - 为什么开发 profile 也不用 `link:`：`pnpm build` 会直接改到已加载的包，宿主的文件监听与构建过程互相踩；tgz 是实体副本，「装包」与「重载」变成两件独立的事，失败最多影响本 profile。
 - 开发 profile 的 HMR 必须在 `cordis.patch.yml` 里保持开启（不要写 `- id: hmr / disabled: true`）；base 组合包在 profile 运行时本就启用它，只有 headless / SDK 组合包没有该服务。

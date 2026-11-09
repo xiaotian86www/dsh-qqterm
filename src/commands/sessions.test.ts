@@ -33,6 +33,7 @@ function entry(over: Partial<WorkspaceSession> = {}): WorkspaceSession {
     id: 'session-11111111-1111-1111-1111-111111111111',
     title: '修复登录 bug',
     createdAt: Date.now() - 60_000,
+    updatedAt: Date.now() - 60_000,
     current: false,
     live: false,
     held: false,
@@ -66,6 +67,7 @@ function makeManager(over: ManagerStub = {}) {
       // 真实 manager 会给每条补所属工作区标题，归档页靠它区分同名会话
       sessions: (await list()).map((item) => ({ ...item, workspace: 'repo' })),
     }]),
+    fillSessionTitles: vi.fn(async () => {}),
     currentSessionId: vi.fn(() => undefined),
     switchSession: vi.fn(async () => ({ ok: true })),
     renameSession: vi.fn(() => ({ ok: true, title: '改好的名字' })),
@@ -176,6 +178,7 @@ describe('/sessions 持有视图', () => {
           held: true,
           title: '旧会话',
           createdAt: Date.now() - 3 * 86_400_000,
+          updatedAt: Date.now() - 3 * 86_400_000,
           workspace: 'repo',
           workspacePath: '/repo',
         }),
@@ -455,6 +458,29 @@ describe('/sessions all', () => {
     expect(text).toContain('<qqbot-cmd-input text="/sessions" show="工作中会话"/>');
   });
 
+  it('行内时间显示最近人类消息时间，不显示创建时间', async () => {
+    const manager = makeManager({
+      listWorkspaceGroups: vi.fn(async () => [{
+        id: 'ws-1',
+        title: 'repo',
+        path: '/repo',
+        missing: false,
+        sessions: [entry({
+          id: 'session-aaa11111',
+          title: '很久以前建的',
+          createdAt: Date.now() - 3 * 86_400_000,
+          updatedAt: Date.now() - 5 * 60_000,
+          workspace: 'repo',
+        })],
+      }]),
+    });
+
+    const text = await run(manager, 'all');
+
+    expect(text).toContain('· 5m 前');
+    expect(text).not.toContain('3d 前');
+  });
+
   it('超过一页时按会话分页，页首仍重复所属工作区', async () => {
     const many = Array.from({ length: 13 }, (_, i) => entry({
       id: `session-${String(i).padStart(8, '0')}`,
@@ -480,6 +506,41 @@ describe('/sessions all', () => {
     expect(page2).toContain('**repo**');
     expect(page2).toContain('#00000010 · 第11个');
     expect(page2).toContain('<qqbot-cmd-input text="/sessions all 1" show="上一页"/> · 第 2/2 页');
+  });
+
+  it('每页只为当前页的行补标题：最后一页的旧会话也显示真实标题', async () => {
+    const many = Array.from({ length: 25 }, (_, i) => entry({
+      id: `session-${String(i).padStart(8, '0')}`,
+      title: undefined,
+      workspace: 'repo',
+    }));
+    const fill = vi.fn(async (entries: WorkspaceSession[]) => {
+      for (const item of entries) item.title = `第${Number(item.id.slice(-2)) + 1}个`;
+    });
+    const manager = makeManager({
+      listWorkspaceGroups: vi.fn(async () => [{
+        id: 'ws-1',
+        title: 'repo',
+        path: '/repo',
+        missing: false,
+        sessions: many,
+      }]),
+      fillSessionTitles: fill,
+    });
+
+    const page3 = await run(manager, 'all 3');
+
+    expect(fill).toHaveBeenCalledTimes(1);
+    expect(fill.mock.calls[0]![0].map((item) => item.id)).toEqual([
+      'session-00000020',
+      'session-00000021',
+      'session-00000022',
+      'session-00000023',
+      'session-00000024',
+    ]);
+    expect(page3).toContain('第 3/3 页');
+    expect(page3).toContain('#00000024 · 第25个');
+    expect(page3).not.toContain('未命名会话');
   });
 
   it('全部归档的工作区仍然列出，并指向归档页', async () => {

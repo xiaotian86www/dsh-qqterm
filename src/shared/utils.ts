@@ -155,6 +155,30 @@ function findProfileAncestor(baseDir: string, probe: (dir: string) => string | n
 }
 
 /**
+ * 当前 profile 目录
+ *
+ * `profileContext` 是宿主给的权威答案（含 Desktop 的 workspace 布局）；
+ * 取不到时退回按安装路径探测，供单测与精简 profile 使用。
+ */
+export function resolveProfileDir(ctxLike?: unknown): string | undefined {
+  try {
+    const profile = (ctxLike as { get?: (name: string) => unknown })?.get?.('profileContext') as
+      | { dir?: string }
+      | undefined;
+    if (profile !== undefined && typeof profile.dir === 'string' && profile.dir !== '') return profile.dir;
+  } catch {
+    // 服务缺失或已失效：按路径探测兜底
+  }
+  return getProfileDir() ?? undefined;
+}
+
+/** 错误消息截断：状态文件只留够排障的一行，不落整个堆栈 */
+export function errorText(err: unknown, limit = 300): string {
+  const text = err instanceof Error ? err.message : String(err);
+  return text.length <= limit ? text : `${text.slice(0, limit)}…`;
+}
+
+/**
  * 解析环境变量占位配置
  */
 export function resolveEnv(configValue: string, envKey: string): string {

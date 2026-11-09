@@ -370,7 +370,7 @@ describe('announce', () => {
     await vi.advanceTimersByTimeAsync(300);
     expect(readReloadState(path)?.notify).toEqual({ targetId: 'u1' });
 
-    // 第二条 /bot-reload 到达：命令先补发上一轮，再开始新一轮
+    // 第二条 /plugins reload 到达：命令先补发上一轮，再开始新一轮
     await reloader.announce(bot);
     expect(bot.sendMarkdown).toHaveBeenCalledTimes(1);
     expect(readReloadState(path)?.notify).toBeUndefined();

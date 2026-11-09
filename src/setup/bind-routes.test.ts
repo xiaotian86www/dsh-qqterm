@@ -261,7 +261,7 @@ describe('bind-routes', () => {
       '  config:',
       '    appId: "102120114"',
       '    appSecret: "s3cr3t"',
-      '    directPrompt: 旧提示词',
+      '    streaming: false',
       '',
     ].join('\n'), 'utf8');
     profileDirState.dir = dir;
@@ -285,7 +285,7 @@ describe('bind-routes', () => {
       const content = readFileSync(patchPath, 'utf8');
       expect(content).not.toContain('appId');
       expect(content).not.toContain('appSecret');
-      expect(content).toContain('directPrompt: 旧提示词');
+      expect(content).toContain('streaming: false');
     } finally {
       profileDirState.dir = undefined;
       if (savedAppId === undefined) delete process.env.QQBOT_APPID;
@@ -303,7 +303,7 @@ describe('bind-routes', () => {
     writeFileSync(patchPath, [
       '- id: qqterm',
       '  config:',
-      '    directPrompt: 旧提示词',
+      '    streaming: false',
       '',
     ].join('\n'), 'utf8');
     profileDirState.dir = dir;

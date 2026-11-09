@@ -7,7 +7,7 @@ import { sessionTargetLabel, sessionTitleOf } from '../transport/session-source.
 import { effortLabel } from '../model/effort-label.ts';
 
 /** /bot-status — 查看当前会话状态（最小视图：会话 / 模型 / preset / 消息数） */
-export function statusCommand({ manager, reloader }: CommandDeps): CategorizedCommand {
+export function statusCommand({ manager, reloader, installer }: CommandDeps): CategorizedCommand {
   return {
     name: 'bot-status',
     category: 'qqbot',
@@ -16,7 +16,9 @@ export function statusCommand({ manager, reloader }: CommandDeps): CategorizedCo
     handler: async (cmdCtx) => {
       const { scope, peerId } = getScopePeer(cmdCtx);
       const status = manager.getStatus(scope, peerId);
-      if (!status.active) return '⚠️ 当前没有会话';
+      const lastPlugins = installer?.describe();
+      const pluginLine = lastPlugins === undefined ? [] : [`上次插件操作: ${lastPlugins}`];
+      if (!status.active) return ['⚠️ 当前没有会话', ...pluginLine].join('\n');
       const record = manager.getSessionRecord(scope, peerId);
       const title = record === undefined ? undefined : sessionTitleOf(record);
       const session = status.sessionId === undefined
@@ -33,6 +35,7 @@ export function statusCommand({ manager, reloader }: CommandDeps): CategorizedCo
         `Preset: ${status.preset ?? '无'}`,
         `消息数: ${status.messageCount ?? 0}`,
         ...(lastReload === undefined ? [] : [`上次重载: ${lastReload}`]),
+        ...pluginLine,
       ].join('\n');
     },
   };

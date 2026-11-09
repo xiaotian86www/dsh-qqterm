@@ -13,7 +13,7 @@
  * 或变的是别人）时不会有新的连接，只能由当前实例在重载结束后自己发。
  *
  * 新 fiber 连上时结论可能还没落盘（reconcile 还在跑），这里不等待：读不到结论就
- * 什么都不发，留给下一条 `/bot-reload` 开始前的补发。等待换来的只是「早几十毫秒
+ * 什么都不发，留给下一条 `/plugins reload` 开始前的补发。等待换来的只是「早几十毫秒
  * 送达」，代价是一整套超时判断。
  *
  * 「到底换没换」靠重载前后比各 entry 的 fiber uid：`reconcileProfile` 的返回值
@@ -25,11 +25,17 @@
  */
 import type { Context } from '@deepseek-ai/cordis';
 import type { QQBot } from '@tencent-connect/qqbot-nodejs';
-import { getProfileDir } from '../shared/index.ts';
+import {
+  changedEntries,
+  entryReplaced,
+  entryUids,
+  errorText,
+  resolveProfileDir,
+  type LoaderLike,
+} from '../shared/index.ts';
 import type { Logger } from '../types.ts';
 import {
   describeReloadState,
-  errorText,
   readReloadState,
   reloadStatePath,
   writeReloadState,
@@ -53,20 +59,6 @@ interface ExecutingLike {
   exit<T>(callback: () => T): T;
 }
 
-/** fiber 的唯一编号：Cordis 分配的是数字，dispose 后为 null */
-type EntryUid = string | number;
-
-/** loader 条目：`entries()` 直接给 Entry 对象，id 在 `options.id` 上 */
-interface LoaderEntryLike {
-  options?: { id?: string; name?: string };
-  fiber?: { uid?: EntryUid | null };
-}
-
-/** loader 的最小接口：只用来判断「换掉了哪些 entry」 */
-interface LoaderLike {
-  entries(): Iterable<LoaderEntryLike>;
-}
-
 export interface Reloader {
   /** 当前 profile 是否可用热重载（未启用时为 false，命令据此提示） */
   readonly available: boolean;
@@ -88,64 +80,6 @@ export interface ReloaderOptions {
 const RELOAD_DELAY_MS = 200;
 /** 超过这个时长的记录不再播报（避免下次正常重启时冒出陈旧通知） */
 const STALE_MS = 600_000;
-
-/** 从 ctx 取 profile 目录：profileContext 最准，退回路径探测 */
-function resolveProfileDir(ctx: Context): string | undefined {
-  const profile = (ctx as unknown as { get?: (name: string) => { dir?: string } | undefined })
-    .get?.('profileContext');
-  if (profile !== undefined && typeof profile.dir === 'string' && profile.dir !== '') return profile.dir;
-  return getProfileDir() ?? undefined;
-}
-
-/**
- * 当前各个 entry 的 fiber uid；拿不到 loader 时返回 undefined。
- *
- * 注意 uid 是 Cordis 分配的**数字**（dispose 后为 null），fiber 在跑才有值：
- * 按字符串判会一个都收不到，diff 就永远返回「什么都没变」。
- */
-function entryUids(loader: LoaderLike | undefined): Map<string, EntryUid> | undefined {
-  if (loader === undefined) return undefined;
-  try {
-    const uids = new Map<string, EntryUid>();
-    for (const entry of loader.entries()) {
-      const id = entry.options?.id;
-      const uid = entry.fiber?.uid;
-      if (typeof id !== 'string') continue;
-      if (typeof uid === 'number' || typeof uid === 'string') uids.set(id, uid);
-    }
-    // 一个都读不到说明形状又变了，别拿空表冒充「没有变更」
-    return uids.size === 0 ? undefined : uids;
-  } catch {
-    // loader 在重载期间可能已经失效，判不出就交给调用方兜底
-    return undefined;
-  }
-}
-
-/** 被替换的 entry：uid 变了或整个消失了；两边有一边读不到时返回 undefined */
-function changedEntries(
-  before: Map<string, EntryUid> | undefined,
-  after: Map<string, EntryUid> | undefined,
-): string[] | undefined {
-  if (before === undefined || after === undefined) return undefined;
-  const changed: string[] = [];
-  for (const [id, uid] of after) {
-    const previous = before.get(id);
-    if (previous !== undefined && previous !== uid) changed.push(id);
-  }
-  for (const id of before.keys()) {
-    if (!after.has(id)) changed.push(id);
-  }
-  return changed;
-}
-
-/** 本插件自己有没有被换掉：true=换了，false=还在，undefined=判不出来 */
-function selfReplaced(
-  before: Map<string, EntryUid> | undefined,
-  after: Map<string, EntryUid> | undefined,
-): boolean | undefined {
-  if (before === undefined || after === undefined) return undefined;
-  return before.get(ENTRY_ID) !== after.get(ENTRY_ID);
-}
 
 /**
  * 在「不在 HMR 事务里」的上下文执行。
@@ -238,7 +172,7 @@ export function createReloader(ctx: Context, logger: Logger, options?: ReloaderO
             };
             writeReloadState(statePath, done, logger);
             // 自己没被换掉就没有新的 ready，只能由当前实例补发
-            if (bot !== undefined && selfReplaced(before, after) !== true) await deliver(bot, done);
+            if (bot !== undefined && entryReplaced(before, after, ENTRY_ID) !== true) await deliver(bot, done);
           })
           .catch((err: unknown): void => {
             const after = entryUids(loader);
@@ -252,7 +186,7 @@ export function createReloader(ctx: Context, logger: Logger, options?: ReloaderO
             };
             writeReloadState(statePath, failed, logger);
             logger.warn(`插件热重载失败: ${errorText(err)}`);
-            if (bot !== undefined && selfReplaced(before, after) !== true) void deliver(bot, failed);
+            if (bot !== undefined && entryReplaced(before, after, ENTRY_ID) !== true) void deliver(bot, failed);
           });
       }, RELOAD_DELAY_MS);
       timer.unref?.();
