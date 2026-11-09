@@ -18,8 +18,8 @@ afterEach(() => {
   }
 });
 
-const config = (restrictPaths: boolean, extraRoots: string[] = []) =>
-  ({ restrictPaths, extraRoots }) as Parameters<typeof isPathAllowed>[1];
+const config = (extraRoots: string[] = []) =>
+  ({ extraRoots }) as Parameters<typeof isPathAllowed>[1];
 
 describe('isWithinRoot / isPathAllowed（#94-4：符号链接绕过防护）', () => {
   it('普通文件在 root 内 → 放行', () => {
@@ -80,9 +80,17 @@ describe('isWithinRoot / isPathAllowed（#94-4：符号链接绕过防护）', (
     const link = join(extra, 'leak');
     symlinkSync(outside, link);
 
-    expect(isPathAllowed(join(link, 's.txt'), config(true, [extra]), cwd)).toBe(false);
-    expect(isPathAllowed(join(cwd, 'f.txt'), config(true, [extra]), join(cwd, 'f.txt'))).toBe(false);
-    expect(isPathAllowed(secret, config(true, [outside]), cwd)).toBe(true);
+    expect(isPathAllowed(join(link, 's.txt'), config([extra]), cwd)).toBe(false);
+    expect(isPathAllowed(join(cwd, 'f.txt'), config([extra]), join(cwd, 'f.txt'))).toBe(false);
+    expect(isPathAllowed(secret, config([outside]), cwd)).toBe(true);
+  });
+
+  it('白名单恒开：cwd 与 extraRoots 之外的文件 → 拒绝', () => {
+    const cwd = tempDir();
+    const outside = tempDir();
+    const file = join(outside, 'a.txt');
+    writeFileSync(file, 'x');
+    expect(isPathAllowed(file, config(), cwd)).toBe(false);
   });
 });
 

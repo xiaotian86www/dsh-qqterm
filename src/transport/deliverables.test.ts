@@ -27,7 +27,7 @@ function createMediaBot(): MediaSenderLike {
 function createConfig(): QQTermConfig {
   return {
     textChunkLimit: 4500,
-    sendFile: { restrictPaths: true, extraRoots: [], sendPresentedFiles: true, maxFiles: 4 },
+    sendFile: { extraRoots: [], sendPresentedFiles: true, maxFiles: 4 },
   } as unknown as QQTermConfig;
 }
 

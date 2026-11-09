@@ -14,8 +14,6 @@ import type { Logger, RawAttachment } from '../types.ts';
 import type { MediaConfig } from '../config.ts';
 import { MEDIA_ROOT } from '../media/media-cleaner.ts';
 
-/** 默认富媒体下载大小上限（MB），可被 media.maxMB 覆盖 */
-const DEFAULT_MAX_MB = 200;
 /** 下载超时（毫秒） */
 const DOWNLOAD_TIMEOUT_MS = 120_000;
 
@@ -194,7 +192,7 @@ export async function downloadMediaAttachments(
 
   mkdirSync(MEDIA_ROOT, { recursive: true });
 
-  const maxBytes = (media.maxMB ?? DEFAULT_MAX_MB) * 1024 * 1024;
+  const maxBytes = media.maxMB * 1024 * 1024;
 
   const results: DownloadedFile[] = [];
   for (const att of targets) {

@@ -98,13 +98,6 @@
   config:
     appId: ${QQBOT_APPID}
     appSecret: ${QQBOT_SECRET}
-    provider: deepseek
-    model: deepseek-chat
-    cwd: ${DSH_CWD:-/tmp/dsh-qqterm}
-    requireMention: true
-    textChunkLimit: 4500
-    showToolResults: false
-    debug: false
     vision:
       enabled: false
       provider: ''   # 视觉模型 provider（需与上方 llm-pi-ai 配置的路由一致，如 hunyuan）

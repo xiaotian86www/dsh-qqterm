@@ -46,7 +46,7 @@ export class DeliverablesDeliverer implements DeliverablesDelivererLike {
 
   /** 轮末投递一批声明文件：逐个发送，未送达的聚合为一条文字提示 */
   public async deliver(record: SessionRecord, files: PresentedFileRef[]): Promise<void> {
-    const limit = Math.max(1, this.config.sendFile?.maxFiles ?? 4);
+    const limit = Math.max(1, this.config.sendFile.maxFiles);
     // 会话目录优先（工作区跟着会话走）；拿不到才退回插件兜底目录
     const cwd = this.dirOf?.(record) ?? resolveAgentCwd(undefined);
     const missed: string[] = [];

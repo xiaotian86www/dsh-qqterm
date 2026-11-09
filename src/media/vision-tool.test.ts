@@ -46,7 +46,6 @@ const vision: VisionConfig = {
   defaultPrompt: 'Describe this image in detail.',
   maxBytes: 10 * 1024 * 1024,
   maxTokens: 1024,
-  timeoutMs: 120000,
 };
 
 function createLogger(): Logger {

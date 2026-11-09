@@ -430,7 +430,7 @@ describe('OutboundRouter: deliverables/presented', () => {
   it('配置关闭时不投递', async () => {
     const deliver = vi.fn().mockResolvedValue(undefined);
     const { outbound } = setup({
-      config: createConfig({ sendFile: { restrictPaths: true, extraRoots: [], sendPresentedFiles: false, maxFiles: 4 } as QQTermConfig['sendFile'] }),
+      config: createConfig({ sendFile: { extraRoots: [], sendPresentedFiles: false, maxFiles: 4 } as QQTermConfig['sendFile'] }),
       deliverer: { deliver },
     });
 

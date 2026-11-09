@@ -43,11 +43,8 @@ export interface RetryChannelSenderLike {
 }
 
 export interface RetryChannelConfigLike {
-  retryOffer?: { enabled?: boolean; timeoutMs?: number };
+  retryOffer: { enabled: boolean; timeoutMs: number };
 }
-
-/** 卡片默认有效期：10 分钟 */
-const DEFAULT_OFFER_TIMEOUT_MS = 10 * 60 * 1000;
 
 interface PendingRetry {
   record: RetrySessionRecordLike;
@@ -123,7 +120,7 @@ export class RetryChannel {
     // 降级成纯文本时不再有待确认状态：按钮不存在，等待也没有意义
     if (!delivered) return false;
 
-    const timeoutMs = this.config.retryOffer?.timeoutMs ?? DEFAULT_OFFER_TIMEOUT_MS;
+    const timeoutMs = this.config.retryOffer.timeoutMs;
     if (timeoutMs > 0) {
       const timer = setTimeout(() => this.onTimeout(sessionId), timeoutMs);
       timer.unref?.();

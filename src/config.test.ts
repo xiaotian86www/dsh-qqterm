@@ -26,4 +26,13 @@ describe('ConfigSchema 访问控制（唯一绑定用户）', () => {
     const cfg = ConfigSchema({ access: { c2cMode: 'open', c2cAllow: ['u1'] } });
     expect(cfg.access.owner).toBe('');
   });
+
+  it('嵌套配置省略时子字段默认值仍生效（不依赖对象级 default 字面量）', () => {
+    const cfg = ConfigSchema({ appId: 'x' });
+    expect(cfg.retryOffer).toEqual({ enabled: true, timeoutMs: 600_000 });
+    expect(cfg.media).toEqual({ enabled: true, maxMB: 200, ttlHours: 24 });
+    expect(cfg.sendFile.maxFiles).toBe(4);
+    expect(cfg.panel.autoSync).toBe(true);
+    expect(cfg.menu.autoSync).toBe(true);
+  });
 });

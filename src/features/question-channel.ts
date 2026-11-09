@@ -416,7 +416,9 @@ export class QuestionChannel {
         entry.onAbort = onAbort;
         request.signal.addEventListener('abort', onAbort, { once: true });
       }
-      entry.timer = setTimeout(() => this.onTimeout(sessionId), this.config.askTimeoutMs);
+      if (this.config.askTimeoutMs > 0) {
+        entry.timer = setTimeout(() => this.onTimeout(sessionId), this.config.askTimeoutMs);
+      }
       this.pending.set(sessionId, entry);
       this.logger.info(`qqterm: question sent to QQ, waiting for answer sessionId=${sessionId}`);
     });
@@ -489,7 +491,9 @@ export class QuestionChannel {
 
   private resetTimer(entry: PendingEntry, sessionId: string): void {
     if (entry.timer) clearTimeout(entry.timer);
-    entry.timer = setTimeout(() => this.onTimeout(sessionId), this.config.askTimeoutMs);
+    entry.timer = this.config.askTimeoutMs > 0
+      ? setTimeout(() => this.onTimeout(sessionId), this.config.askTimeoutMs)
+      : undefined;
   }
 
   private clearTimer(entry: PendingEntry): void {

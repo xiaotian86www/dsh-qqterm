@@ -28,8 +28,4 @@
       config:
         appId: __FROM_ENV__
         appSecret: __FROM_ENV__
-        # provider/model 留空：从宿主默认模型路由继承，可通过 /model 命令切换
-        requireMention: true
-        textChunkLimit: 4500
-        showToolResults: false
         debug: true

@@ -288,6 +288,16 @@ describe('QuestionChannel.askViaQQ', () => {
     await expect(p).rejects.toThrow('timed out');
     expect(sent.some((s) => s.text.includes('超时'))).toBe(true);
   });
+
+  it('askTimeoutMs=0 不自动超时', async () => {
+    const sent: SentMessage[] = [];
+    const ch = new QuestionChannel(createManager(), createSender(sent), { askTimeoutMs: 0, access: { owner: 'U1' } }, createLogger());
+    const p = startAsk(ch, 'c2c', 'U1', [q2()]);
+    const settled = p.then(() => 'resolved', () => 'rejected');
+    const raced = await Promise.race([settled, sleep(80).then(() => 'pending')]);
+    expect(raced).toBe('pending');
+    expect(sent.some((s) => s.text.includes('超时'))).toBe(false);
+  });
 });
 
 describe('QuestionChannel.handleInteraction', () => {
