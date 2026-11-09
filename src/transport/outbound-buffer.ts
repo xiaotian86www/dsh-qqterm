@@ -22,9 +22,8 @@ export interface StreamSessionLike {
 /** QQ Bot 发送接口 */
 export interface QQBotSender {
   sendMarkdown(target: ReplyTarget, content: string, opts?: { keyboard?: InlineKeyboard }): Promise<unknown>;
-  /** 现在能不能对这个目标开流式（被动凭证由发送层判断，上层不关心 msg_id） */
-  canStream(target: ReplyTarget): boolean;
-  openStream(target: ReplyTarget): StreamSessionLike;
+  /** 开流式；没有可用的被动凭证时返回 undefined，调用方转静态发送 */
+  openStream(target: ReplyTarget): StreamSessionLike | undefined;
 }
 
 export class OutboundBuffer {

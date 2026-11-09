@@ -46,14 +46,14 @@ describe('ReplyStore', () => {
     expect(store.resolve({ scope: 'c2c', targetId: 'u1' }, true).msgId).toBeUndefined();
   });
 
-  it('canReply 只看可用性，不消耗用量', () => {
-    const { store } = tempStore({ limit: 1 });
+  it('用量按需合并落盘，flush 之后才可见', () => {
+    const { store, file } = tempStore();
     store.recordMessage('c2c', 'u1', 'm1');
-    expect(store.canReply({ scope: 'c2c', targetId: 'u1' })).toBe(true);
-    expect(store.canReply({ scope: 'c2c', targetId: 'u1' })).toBe(true);
-    // 两次查询之后仍能真正用一次
-    expect(store.resolve({ scope: 'c2c', targetId: 'u1' }, true).msgId).toBe('m1');
-    expect(store.canReply({ scope: 'c2c', targetId: 'u1' })).toBe(false);
+    // 合并窗口内不落盘：消息路径上不做同步全量读写
+    expect(() => readFileSync(file, 'utf8')).toThrow();
+    store.flush();
+    const disk = JSON.parse(readFileSync(file, 'utf8')) as { targets: Record<string, { ids: { id: string }[] }> };
+    expect(Object.values(disk.targets)[0]!.ids.map((item) => item.id)).toEqual(['m1']);
   });
 
   it('超过平台窗口的候选不再参与（并回退到更新的候选）', () => {
@@ -78,16 +78,33 @@ describe('ReplyStore', () => {
   });
 
   it('event 只在 allowEvent 时参与，且不落盘', () => {
-    const { store, file } = tempStore();
-    store.recordEvent('c2c', 'u1', 'evt-1');
+    let now = 1_000_000;
+    // limit=1：先用掉唯一一条 msg 用量，才能验证「只剩 event 时只有 allowEvent 能用它」
+    const { store, file } = tempStore({ now: () => now, limit: 1 });
     store.recordMessage('c2c', 'u1', 'm1');
+    now += 1_000;
+    store.recordEvent('c2c', 'u1', 'evt-1');
+    const msgOnly = store.resolve({ scope: 'c2c', targetId: 'u1' }, false);
+    expect(msgOnly.msgId).toBe('m1');
+    expect(msgOnly.eventId).toBeUndefined();
+    // msg 已用满，event 仍不允许 → 没有可用凭证
     expect(store.resolve({ scope: 'c2c', targetId: 'u1' }, false).eventId).toBeUndefined();
     const withEvent = store.resolve({ scope: 'c2c', targetId: 'u1' }, true);
     expect(withEvent.eventId).toBe('INTERACTION_CREATE:evt-1');
     expect(withEvent.msgId).toBeUndefined();
+    expect(withEvent.msgSeq).toBe(1);
     // 内存里只有 event，落盘文件不会出现它
+    store.flush();
     const disk = JSON.parse(readFileSync(file, 'utf8')) as { targets: Record<string, unknown> };
     expect(JSON.stringify(disk)).not.toContain('evt-1');
+  });
+
+  it('同一次互动连回多条时 msg_seq 递增', () => {
+    const { store } = tempStore();
+    store.recordEvent('c2c', 'u1', 'evt-1');
+    expect(store.resolve({ scope: 'c2c', targetId: 'u1' }, true).msgSeq).toBe(1);
+    // 平台按 (event_id, msg_seq) 去重，第二次必须换 seq
+    expect(store.resolve({ scope: 'c2c', targetId: 'u1' }, true).msgSeq).toBe(2);
   });
 
   it('msgId 与用量一起落盘，重启后继续生效', () => {
@@ -95,6 +112,7 @@ describe('ReplyStore', () => {
     const first = tempStore({ now: () => now });
     first.store.recordMessage('c2c', 'u1', 'm1');
     for (let i = 0; i < 2; i += 1) first.store.resolve({ scope: 'c2c', targetId: 'u1' }, true);
+    first.store.flush();
 
     now += 60_000;
     const second = new ReplyStore({
@@ -114,6 +132,7 @@ describe('ReplyStore', () => {
     let now = 3_000_000;
     const first = tempStore({ now: () => now });
     first.store.recordMessage('c2c', 'u1', 'm1');
+    first.store.flush();
 
     now += 31 * 60 * 1000;
     const second = new ReplyStore({ appId: 'app1', logger, file: first.file, now: () => now });
@@ -125,6 +144,7 @@ describe('ReplyStore', () => {
     const file = join(dir, 'reply-ids.json');
     const a = new ReplyStore({ appId: 'appA', logger, file });
     a.recordMessage('c2c', 'u1', 'm1');
+    a.flush();
     const b = new ReplyStore({ appId: 'appB', logger, file });
     expect(b.resolve({ scope: 'c2c', targetId: 'u1' }, true).msgId).toBeUndefined();
     expect(a.resolve({ scope: 'c2c', targetId: 'u1' }, true).msgId).toBe('m1');
@@ -137,6 +157,7 @@ describe('ReplyStore', () => {
     const store = new ReplyStore({ appId: 'app1', logger, file });
     expect(store.resolve({ scope: 'c2c', targetId: 'u1' }, true).msgId).toBeUndefined();
     store.recordMessage('c2c', 'u1', 'm1');
+    store.flush();
     expect(JSON.parse(readFileSync(file, 'utf8'))).toMatchObject({ version: 1 });
   });
 
@@ -146,6 +167,17 @@ describe('ReplyStore', () => {
     store.resolve({ scope: 'c2c', targetId: 'u1' }, true);
     store.recordMessage('c2c', 'u1', 'm1');
     store.resolve({ scope: 'c2c', targetId: 'u1' }, true);
+    expect(store.resolve({ scope: 'c2c', targetId: 'u1' }, true).msgId).toBeUndefined();
+  });
+
+  it('离线的旧消息被重推也不会续命（窗口按原始消息时间算）', () => {
+    let now = 4_000_000;
+    const { store } = tempStore({ now: () => now });
+    store.recordMessage('c2c', 'u1', 'm1');
+    now += 20 * 60 * 1000;
+    // RESUME 补发 / 平台重推：同一条消息带的是原来的 timestamp
+    store.recordMessage('c2c', 'u1', 'm1', now - 20 * 60 * 1000);
+    now += 11 * 60 * 1000; // 距原消息 31 分钟，超出 TTL
     expect(store.resolve({ scope: 'c2c', targetId: 'u1' }, true).msgId).toBeUndefined();
   });
 });

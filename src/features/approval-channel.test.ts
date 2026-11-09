@@ -149,9 +149,14 @@ describe('buildApprovalText', () => {
       isCurrent: false,
       title: '修登录',
     });
-    expect(text.startsWith('> `#04de1556` · 修登录\n\n')).toBe(true);
-    expect(text).toContain('🔐 **执行审批**');
+    expect(text.startsWith('> `#04de1556` · 修登录\n**🔐 执行审批**\n\n🔧 工具: bash')).toBe(true);
+    expect(text).toContain('**🔐 执行审批**');
     expect(text).not.toContain('[#');
+  });
+
+  it('来源行与标题之间不留空行，标题后保留一个空行', () => {
+    const text = buildApprovalText(makeRequest({ toolName: 'bash' }), 'ls');
+    expect(text.startsWith('**🔐 执行审批**\n\n🔧 工具: bash')).toBe(true);
   });
 
   it('当前会话不标来源行', () => {
@@ -369,5 +374,18 @@ describe('ApprovalChannel.cancelPending', () => {
     const delegated = vi.fn(async () => 'allowed-once' as ApprovalOutcome);
     await expect(handler(makeRequest({ id: 'sess-qq' }), delegated)).resolves.toBe('allowed-once');
     expect(delegated).toHaveBeenCalledTimes(1);
+  });
+
+  it('链上也没有 answerer 时按未决策结束，不让 rejection 冒泡', async () => {
+    const ch = new ApprovalChannel(
+      createManager({ findBySessionId: (id) => (id === 'sess-qq' ? makeRecord(sessionKey('c2c', 'peer-qq')) : undefined) }),
+      { sendMarkdown: vi.fn(async () => { throw new Error('network down'); }) },
+      makeConfig(),
+      createLogger(),
+    );
+    const { handler } = installAndCapture(ch, []);
+
+    const delegated = vi.fn(async (): Promise<ApprovalOutcome> => { throw new Error('no answerer'); });
+    await expect(handler(makeRequest({ id: 'sess-qq' }), delegated)).resolves.toBe('cancelled');
   });
 });

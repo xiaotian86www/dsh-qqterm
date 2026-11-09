@@ -74,7 +74,7 @@ describe('formatQuestion', () => {
       options: [{ label: 'A', description: '描述A' }, { label: 'B' }],
     };
     const text = formatQuestion(q, false);
-    expect(text.startsWith('### ❓ 需要你的回答\n\n选哪个？')).toBe(true);
+    expect(text.startsWith('**❓ 需要你的回答**\n\n选哪个？')).toBe(true);
     expect(text).toContain('1. A · 描述A');
     expect(text).toContain('2. B');
     expect(text).toContain('> 💡 回复编号选择');
@@ -85,7 +85,7 @@ describe('formatQuestion', () => {
     const q: UserQuestion = { id: 'q', header: '登录方式', question: '\n\n用哪个账号？', options: [{ label: 'A' }] };
     const text = formatQuestion(q, true);
 
-    expect(text.startsWith('### ❓ 登录方式\n\n用哪个账号？')).toBe(true);
+    expect(text.startsWith('**❓ 登录方式**\n\n用哪个账号？')).toBe(true);
     expect(text).not.toContain('**登录方式**');
   });
 
@@ -106,7 +106,7 @@ describe('formatQuestion', () => {
       isCurrent: false,
       title: '修登录',
     });
-    expect(text.startsWith('> `#04de1556` · 修登录\n\n')).toBe(true);
+    expect(text.startsWith('> `#04de1556` · 修登录\n**❓ 需要你的回答**\n\n')).toBe(true);
     expect(text).not.toContain('[#');
     expect(text).toContain('show="回答"');
     expect(text).toContain('show="恢复"');
@@ -114,7 +114,7 @@ describe('formatQuestion', () => {
 
   it('非当前会话带按钮时文案与当前会话一致，只把「直接回复」换成链接', () => {
     const text = formatQuestion(q2(), true, { sessionId: 'session-04de1556', isCurrent: false, title: '修登录' });
-    expect(text.startsWith('> `#04de1556` · 修登录\n\n')).toBe(true);
+    expect(text.startsWith('> `#04de1556` · 修登录\n**❓ 需要你的回答**\n\n')).toBe(true);
     expect(text).toContain('> 👇 点击下方按钮选择 · 或者');
     // 文案与当前会话卡片一致，只把「直接回复」换成链接：点它把 `/to #id ` 填进输入框
     expect(text).toContain('<qqbot-cmd-input text="/to #04de1556 " show="直接回复"/>');
@@ -521,6 +521,72 @@ describe('QuestionChannel.install routing（user-questions/request waterfall）'
     expect(logger.warn).toHaveBeenCalled();
   });
 
+  it('delegates the whole request when a later question fails to deliver', async () => {
+    let calls = 0;
+    const record = makeRecord(sessionKey('c2c', 'u9'));
+    (record as { sessionId?: string }).sessionId = 'sess-qq';
+    const manager = createManager({
+      findBySessionId: (id) => (id === 'sess-qq' ? record : undefined),
+      getSessionRecord: () => record,
+    });
+    const logger = createLogger();
+    const ch = new QuestionChannel(
+      manager,
+      {
+        sendMarkdown: vi.fn(async () => {
+          calls += 1;
+          // 首题送达，第二题起连键盘带纯文本都发不出去
+          if (calls > 1) throw new Error('credential expired');
+        }),
+      },
+      { askTimeoutMs: 60_000, access: { owner: 'U1' } },
+      logger,
+    );
+    const { handler } = installChannel(ch);
+
+    const next = vi.fn(async () => ({ answers: [
+      { id: 'q1', selected: ['web-1'] },
+      { id: 'q2', selected: ['web-2'] },
+    ] }));
+    const p = handler(
+      { questions: [q2('q1'), q2('q2')], agent: { id: 'sess-qq' } },
+      next,
+    ) as Promise<UserQuestionResult>;
+
+    await sleep(10);
+    // 首题在 QQ 答完，第二题投递失败 → 整组退回宿主，已答的 q1 丢弃
+    expect(ch.tryAnswer('c2c', 'u9', '1')).toBe(true);
+    expect(await p).toEqual({ answers: [
+      { id: 'q1', selected: ['web-1'] },
+      { id: 'q2', selected: ['web-2'] },
+    ] });
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalled();
+  });
+
+  it('ends with ASK_ABORTED when the host answerer also fails', async () => {
+    const record = makeRecord(sessionKey('c2c', 'u9'));
+    (record as { sessionId?: string }).sessionId = 'sess-qq';
+    const manager = createManager({
+      findBySessionId: (id) => (id === 'sess-qq' ? record : undefined),
+      getSessionRecord: () => record,
+    });
+    const logger = createLogger();
+    const ch = new QuestionChannel(
+      manager,
+      { sendMarkdown: vi.fn(async () => { throw new Error('network down'); }) },
+      { askTimeoutMs: 60_000, access: { owner: 'U1' } },
+      logger,
+    );
+    const { handler } = installChannel(ch);
+
+    const next = vi.fn(async (): Promise<UserQuestionResult> => { throw new Error('no answerer'); });
+    const p = handler({ questions: [q2()], agent: { id: 'sess-qq' } }, next) as Promise<UserQuestionResult>;
+
+    await expect(p).rejects.toMatchObject({ code: 'ASK_ABORTED' });
+    expect(logger.error).toHaveBeenCalled();
+  });
+
   it('uninstall 只清理 pending，不再改写服务方法', async () => {
     const sent: SentMessage[] = [];
     const ch = new QuestionChannel(createManager(), createSender(sent), { askTimeoutMs: 60_000, access: { owner: 'U1' } }, createLogger());
@@ -552,7 +618,7 @@ describe('非当前会话的标记', () => {
     await expect(p).rejects.toThrow('timed out');
     await sleep(10);
 
-    expect(sent[0]!.text.startsWith('> `#04de1556` · 修登录\n\n')).toBe(true);
+    expect(sent[0]!.text.startsWith('> `#04de1556` · 修登录\n**❓ 需要你的回答**\n\n')).toBe(true);
     expect(sent[1]!.text).toBe('> `#04de1556` · 修登录\n\n⚠️ 提问已超时，未收到回答。');
   });
 });

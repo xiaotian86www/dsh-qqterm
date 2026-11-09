@@ -13,10 +13,9 @@ function createSession(): StreamSessionLike {
   return { update: vi.fn().mockResolvedValue(undefined), complete: vi.fn().mockResolvedValue(undefined) };
 }
 
-function createBot(session: StreamSessionLike, canStream = true): QQBotSender {
+function createBot(session: StreamSessionLike | undefined): QQBotSender {
   return {
     sendMarkdown: vi.fn().mockResolvedValue(undefined),
-    canStream: vi.fn(() => canStream),
     openStream: vi.fn(() => session),
   };
 }
@@ -55,10 +54,11 @@ function setup(opts?: {
   deliverer?: { deliver: ReturnType<typeof vi.fn> };
   current?: boolean;
   retryChannel?: { offer: ReturnType<typeof vi.fn> };
-  canStream?: boolean;
+  /** 发送层能不能拿到流式所需的被动凭证 */
+  hasCredential?: boolean;
 }) {
   const session = createSession();
-  const bot = createBot(session, opts?.canStream ?? true);
+  const bot = createBot((opts?.hasCredential ?? true) ? session : undefined);
   const record = 'record' in (opts ?? {}) ? opts!.record : createRecord(c2cTarget);
   const manager = {
     findBySessionId: vi.fn((id: string) => (id === 'sess-qq' ? record : undefined)),
@@ -150,8 +150,8 @@ describe('OutboundRouter.routeStreamFrame', () => {
     expect(bot.sendMarkdown).not.toHaveBeenCalled();
   });
 
-  it('发送层没有可用凭证时不流式：帧累积后由 assistant/message 静态发送', async () => {
-    const { outbound, bot } = setup({ canStream: false });
+  it('发送层拿不到被动凭证时不流式：帧累积后由 assistant/message 静态发送', async () => {
+    const { outbound, bot } = setup({ hasCredential: false });
 
     outbound.routeStreamFrame('sess-qq', start('a1'));
     outbound.routeStreamFrame('sess-qq', delta('a1', 'static reply'));
@@ -163,7 +163,8 @@ describe('OutboundRouter.routeStreamFrame', () => {
     });
     await vi.advanceTimersByTimeAsync(0);
 
-    expect(bot.openStream).not.toHaveBeenCalled();
+    // openStream 只尝试一次（返回 undefined），随后降级静态
+    expect(bot.openStream).toHaveBeenCalledTimes(1);
     expect(bot.sendMarkdown).toHaveBeenCalledWith({ scope: 'c2c', targetId: 'user1' }, 'static reply');
   });
 
@@ -401,7 +402,6 @@ describe('OutboundRouter: deliverables/presented', () => {
     const textTask = new Promise<void>((resolve) => { resolveText = resolve; });
     const bot: QQBotSender = {
       sendMarkdown: vi.fn(() => textTask),
-      canStream: vi.fn(() => true),
       openStream: vi.fn(() => createSession()),
     };
     const record = createRecord(c2cTarget);

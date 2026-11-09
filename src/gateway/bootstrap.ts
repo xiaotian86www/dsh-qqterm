@@ -111,7 +111,6 @@ export async function bootstrapGateway(
   // （QQBotSender.openStream 的参数形态与 SDK 不同）。
   const sender: QQBotSender = {
     sendMarkdown: (target, content, opts) => bot.sendMarkdown(target, content, opts),
-    canStream: (target) => replyStore.canReply(target),
     openStream: (target) => bot.openStream({ target }),
   };
 
@@ -165,7 +164,8 @@ export async function bootstrapGateway(
 
   // ── 按钮点击回调（interaction）：统一分发到问答/审批通道 ──
   bot.on('interaction', async (_iCtx: unknown, event: InteractionEvent) => {
-    // 只处理私聊互动：点击者以 user_openid 为准
+    // 按钮只认绑定用户：非 owner 的点击不登记凭证、不分发、不回 ack
+    if (!config.access.owner || event.user_openid !== config.access.owner) return;
     // 记录互动事件 id，作为后续被动回复候选（event_id，仅内存）
     replyStore.recordEvent('c2c', event.user_openid, event.id);
 

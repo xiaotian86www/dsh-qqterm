@@ -29,6 +29,7 @@ function makeBot(): { bot: QQBot; calls: Call[] } {
     sendVideo: record('sendVideo'),
     sendVoice: record('sendVoice'),
     sendFile: record('sendFile'),
+    sendMedia: record('sendMedia'),
     openStream: (...args: unknown[]) => {
       calls.push({ method: 'openStream', args });
       return { update: async () => {}, complete: async () => {} };
@@ -64,20 +65,23 @@ describe('createReplyAwareBot', () => {
     expect(calls[0]!.args[0]).toEqual({ scope: 'c2c', targetId: 'u1', msgId: undefined });
   });
 
-  it('event 候选通过 bot.send 的 extra 发出', async () => {
+  it('event 候选通过 bot.send 的 extra 发出，并带上递增的 msg_seq', async () => {
     const { bot, calls } = makeBot();
     const store = makeStore();
     createReplyAwareBot(bot, store);
     store.recordEvent('c2c', 'u1', 'evt-1');
 
     await bot.sendMarkdown(target, 'hello');
-    expect(calls[0]!.method).toBe('send');
+    await bot.sendMarkdown(target, 'again');
+    expect(calls.map((call) => call.method)).toEqual(['send', 'send']);
     expect(calls[0]!.args[0]).toMatchObject({
       target: { scope: 'c2c', targetId: 'u1', msgId: undefined },
       msgType: MsgType.MARKDOWN,
       markdown: { content: 'hello' },
-      extra: { event_id: 'INTERACTION_CREATE:evt-1' },
+      extra: { event_id: 'INTERACTION_CREATE:evt-1', msg_seq: 1 },
     });
+    // 同一次互动回两条：平台按 (event_id, msg_seq) 去重，seq 必须换
+    expect(calls[1]!.args[0]).toMatchObject({ extra: { msg_seq: 2 } });
   });
 
   it('文本与媒体只用 msg 候选，不会拿 event 顶上', async () => {
@@ -88,9 +92,11 @@ describe('createReplyAwareBot', () => {
 
     await bot.sendText(target, 'hi');
     await bot.sendFile(target, { localPath: 'a.txt' });
-    expect(calls.map((call) => call.method)).toEqual(['sendText', 'sendFile']);
+    await bot.sendMedia(target, { fileType: 1, url: 'x' });
+    expect(calls.map((call) => call.method)).toEqual(['sendText', 'sendFile', 'sendMedia']);
     expect((calls[0]!.args[0] as ReplyTarget).msgId).toBeUndefined();
     expect((calls[1]!.args[0] as ReplyTarget).eventId).toBeUndefined();
+    expect((calls[2]!.args[0] as ReplyTarget).eventId).toBeUndefined();
   });
 
   it('openStream 解析出 msgId 后再交给 SDK', async () => {
@@ -102,6 +108,14 @@ describe('createReplyAwareBot', () => {
     bot.openStream({ target });
     expect(calls[0]!.method).toBe('openStream');
     expect((calls[0]!.args[0] as { target: ReplyTarget }).target.msgId).toBe('m1');
+  });
+
+  it('没有被动凭证时 openStream 返回 undefined，不交给 SDK', () => {
+    const { bot, calls } = makeBot();
+    createReplyAwareBot(bot, makeStore());
+
+    expect(bot.openStream({ target })).toBeUndefined();
+    expect(calls).toHaveLength(0);
   });
 
   it('发送失败原样抛给上层，不做自动重试', async () => {

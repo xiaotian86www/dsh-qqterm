@@ -251,7 +251,15 @@ export class ApprovalChannel {
       this.logger.error(`qqterm: approval send failed sessionId=${sessionId}: ${msg}`);
       // 卡片没送到 QQ 时不能把请求吞掉：交回链上其他通道（Web GUI 仍可弹窗）。
       this.logger.warn('qqterm: QQ approval delivery failed, falling back to the host answerer');
-      return delegate();
+      try {
+        return await delegate();
+      } catch (nextErr) {
+        // 链上也没有 answerer 了：两条通道都投不出去，按「未决策」结束（fail-closed），
+        // 不让 rejection 冒成宿主的未捕获错误。
+        const nextMsg = nextErr instanceof Error ? nextErr.message : String(nextErr);
+        this.logger.error(`qqterm: no answerer accepted the approval: ${nextMsg}`);
+        return 'cancelled';
+      }
     }
 
     return new Promise<ApprovalOutcome>((resolve) => {

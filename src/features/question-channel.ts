@@ -3,7 +3,8 @@
  *
  * 接入方式：监听 `user-questions/request` waterfall（与 approval 通道同一套
  * 官方 seam），按 `request.agent.id` 路由到 QQ 会话；非 QQ 会话 `next()` 交给
- * 链上其它 answerer（如 Web 弹出框），多通道共存。
+ * 链上其它 answerer（如 Web 弹出框），多通道共存。QQ 投递失败同样退回宿主链，
+ * 不重试。
  *
  * 早期实现包装 `userQuestions.ask`：插件 apply 时取一次服务实例，取不到
  * （服务尚未激活 / 挂载晚于本插件）就静默放弃且永不重试——通道时灵时不灵，
@@ -119,8 +120,9 @@ function sessionIdOf(record: QuestionSessionRecordLike): string {
 /**
  * QQ 投递失败（发送接口报错）。
  *
- * 与「用户没答/超时」区分：只有投递失败才允许退回 `next()` 交给 Web 端，
- * 已送达的问题再退回会导致同一个问题在两个通道各弹一次。
+ * 与「用户没答/超时」区分：只有投递失败才允许退回 `next()` 交给 Web 端。
+ * 发送失败不做重试（凭证过期时重试只会再失败一次），任一题投递失败都把
+ * 整个请求退回宿主链；已经答过的题不保留，Web 端会从头重问一遍整组。
  */
 class QuestionDeliveryError extends Error {
   public constructor(message: string) {
@@ -186,13 +188,19 @@ export class QuestionChannel {
       const record = sessionId ? self.manager.findBySessionId(sessionId) : undefined;
       if (!record) return nextFn();
 
-      // 投递失败才退回 Web：已送达的问题不能再次弹出（见 QuestionDeliveryError）
-      return self.askViaQQ(record, request).catch((err: unknown) => {
-        if (err instanceof QuestionDeliveryError) {
-          self.logger.warn(`qqterm: QQ question delivery failed, falling back to the host answerer: ${err.message}`);
-          return nextFn();
+      // 投递失败才退回宿主链（Web 弹窗）：任一题失败都整组退回，不重试、不保留已答答案
+      return self.askViaQQ(record, request).catch(async (err: unknown) => {
+        if (!(err instanceof QuestionDeliveryError)) throw err;
+        self.logger.warn(`qqterm: QQ question delivery failed, falling back to the host answerer: ${err.message}`);
+        try {
+          return await nextFn();
+        } catch (nextErr) {
+          // 链上已没有 answerer（或请求已结束）：两条通道都投不出去，按中断结束，
+          // 不能让这个 rejection 冒成宿主的未捕获错误（宿主里那是致命错误）。
+          const msg = nextErr instanceof Error ? nextErr.message : String(nextErr);
+          self.logger.error(`qqterm: no answerer accepted the question after QQ delivery failed: ${msg}`);
+          throw new QuestionChannelError(`question was not delivered on any channel: ${msg}`, ASK_ABORTED);
         }
-        throw err;
       });
     }, { global: true, prepend: true });
     this.logger.info('qqterm: QQ question channel installed (user-questions/request)');
