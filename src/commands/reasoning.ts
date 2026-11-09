@@ -61,9 +61,6 @@ export function reasoningCommand({ manager, config, logger }: CommandDeps): Cate
         if (outcome.reason === 'unknown-effort') {
           return `⚠️ 不支持的档位: \`${args}\``;
         }
-        if (outcome.reason === 'no') {
-          return '⚠️ 当前没有会话';
-        }
         return `❌ 思考强度切换失败${outcome.message ? `: ${outcome.message}` : ''}`;
       }
 

@@ -24,7 +24,7 @@
 | `src/commands/` | `/bot-*`、`/model`、`/preset`、`/sessions` 等指令 |
 | `src/media/` | 富媒体理解、附件发送、清理 |
 | `src/host/` | 宿主 Agent/Session 适配 |
-| `src/client/` | 浏览器端（settings.section、sidebarRightTabs） |
+| `src/client/` | 浏览器端（settings.section） |
 | `cordis.patch.yml` | bundle 层 patch，插入 `qqterm` 条目（随包分发） |
 | `cordis.dev.yml` | `--patch` 调试 overlay（绝对路径加载源码） |
 | `locale/*.json` | 插件 meta 文案（宿主读）；命令与消息文案内联在 `src/` |
@@ -44,13 +44,14 @@
 - `apply()` 必须快速返回：扫码、网关连接、长轮询等一律 `void …catch()`，**禁止 await 用户交互**（会阻塞 Host ready / Web URL 输出）。
 - 禁止在运行时写 `process.env`；凭据持久化只写 profile 的 `cordis.patch.yml`（会触发 HMR 重载）。
 - 未捕获的 rejection 在宿主是 fail-loud 致命错误，所有异步链必须有兜底 catch。
+- 网关必须在 HMR 事务之外启动（`outsideHmrTransaction`，`src/index.ts` 两处 `bootstrapGateway` 都已包上）：宿主的「正在应用变更」标记是 `AsyncLocalStorage`，热重载时 `apply` 在事务里执行；若在事务里建网关，socket / 定时器会一直带着这个标记，之后每条入站消息写配置都会被宿主判成 `HMR transactions cannot be nested`。长生命周期对象一律不要建在 `apply` 的事务上下文里。
 - `export const name = 'qqterm'`、bundle patch 里的 entry id `qqterm` 都是兼容契约；改动会让用户 profile 里按 id 写的配置覆盖失效。`inject` 随依赖增长而扩展（当前 16 项），只进不退。`compaction` 不进 `inject`：web/desktop 把它挂在 agent preset 作用域里，宿主面没有这个服务，`/compact` 只从会话 preset 取引擎，不退回宿主面。
 
 ### 3.3 客户端
 
 - 入口 id 必须等于包名（tsdown 从 package.json 读取；`window.__ModuleLoader__.load({ id })`）。改包名要同步 `cordis.patch.yml` 的 `name` 和客户端 `PACKAGE_NAME` 常量，否则报 “loaded without registering”。
 - 客户端只把 `react` / `react-dom` 当外部依赖（见 `tsdown.client.config.ts` 的 BASELINE_EXTERNALS），其余依赖全部内联；新增依赖要考虑 bundle 体积。
-- 依赖的槽位：`settings.section`、`sidebarRightTabs`、`sidebar.right.pane.tab`。宿主大版本升级后要在 Desktop 与 dsh web 两端重新验收；服务缺失时应静默 inactive，不能让页面白屏。
+- 依赖的槽位只有 `settings.section`：GUI 侧全部操作（绑定 / 换凭据 / 解绑 / 配置编辑）都在设置页一个栏目里，不再注册右侧栏 Tab、`sidebar.right.pane.tab`、`main`、`sidebar.panellist` 或插件详情动作。宿主大版本升级后要在 Desktop 与 dsh web 两端重新验收；服务缺失时应静默 inactive，不能让页面白屏。
 
 ### 3.4 交互与消息
 
@@ -59,7 +60,7 @@
 - 聊天会话 key 固定为 `qqterm:${appId}:chat`：全 bot 只有一个「当前会话」，任何 QQ 窗口共享它；已获取集合（普通消息 / `/sessions resume` / `/to` 实际拿到 agent 的会话）可以有多份，全部输出回 QQ，非当前会话的消息首行标 `` > `#短id` · 标题 ``、末行给「回复」「恢复」两个链接（长回复只在首片带标题、末片带链接；提问 / 审批用同一个首行，见 §4.12）。`/sessions` 默认按工作区分组列出工作中会话（组标题带路径，行带 `生成中` / `空闲` 与当前 `✅`），`/sessions all` 看全部会话，只标 `📌`，不标当前。`/sessions resume` 只改当前指针，`/new` 清掉当前指针（不预先铸 id，下一条消息再建会话），切走不 dispose 旧会话；`/clear`（别名 `/reset`）会先停掉当前会话再开新的，`/clear all` 停掉全部已获取会话。`/stop` 只停当前会话，`/stop all` 停掉所有正在生成的已获取会话。没有映射即视为全新会话，会话 id 由 `mintSessionId()` 铸造。
 - 启动即恢复上次会话：QQ `ready` 后网关调 `SessionManager.restoreCurrentSession()`，按 prefs 指针走 `getOrCreate` 接回（走 singleflight，启动瞬间来消息也只 resume 一次）；盘上已不存在则跳过并清掉指针（避免 `/sessions` 展示无法恢复的「待恢复」当前项），**恢复失败绝不新建**（沿用 `mayCreateAfterResumeFailure` 的语义）；占用 / 后端故障导致恢复失败时指针保持原样。这样「有会话」与「有 record」不会长期分叉，不需要为中间态另写展示分支。
 - 回复目标也持久化：`model-prefs.json` 的 `targets` 段（`sessionKey → openid`）在 `touch()` 里值变化时才写一次；启动恢复失败（locked / 宿主报错）用它主动推一条 `⚠️ 上次的会话没能恢复` + `/sessions resume #短id` 按钮，`not-found` 静默。持久化写在消息路径上而不是卸载钩子里——强杀 / 崩溃时卸载钩子不执行。
-- 模型 / preset / 思考强度尽量沿用宿主核心行为，插件不另立一套：插件不再有 `provider` / `model` / `preset` 配置项，新会话取核心默认值（`settings.yaml` → 宿主 agentDefaultModel → 兜底）。`/model` 与 `/reasoning` 都走宿主 `sessionController.selectModel`，选择记进当前会话的 `model/selection` 事件（不 fork、不重建、插件不另存偏好），下一轮生效；没有活跃会话时拒绝（`no-session`），宿主抛错回 `failed`。没有会话时 `/model`、`/reasoning`、`/permission` 的查看视图照常展示当前值（核心默认值，与新建会话会拿到的值一致，该条目同样标 `✅`），文案保持不变，不另造「全局」之类的标签；切换照旧要求有会话。宿主每次 `selectModel` 都会顺手把选择存成部署默认，按核心行为接受这一点，不要写回旧值。`/preset` 不按会话存待定值：它写核心 `agent-preset-registry` 的 `selectedDefault`（与设置页「设为默认」同一个 `settings.update` 入口），对之后新建的会话生效，已开始的会话保持自己的 preset；插件不存 preset。回显同样写「当前」，不标「全局」，也不补「之后新建的会话生效」这类提示（机制写在 README，不写进命令回复）。`create` / `resume` 的 `agentOptions` 传响应式 getter 读 `agentDefaultModel.currentSelection()`（会话自己记录过的选择优先）。插件只在 `~/.dsh-qqterm/model-prefs.json` 存 `sessionIds` / `dirs`，键是聊天 key。
+- 模型 / preset / 思考强度尽量沿用宿主核心行为，插件不另立一套：插件不再有 `provider` / `model` / `preset` 配置项，新会话取核心默认值（`settings.yaml` → 宿主 agentDefaultModel → 兜底）。`/model` 与 `/reasoning` 有活跃会话时走宿主 `sessionController.selectModel`，选择记进当前会话的 `model/selection` 事件（不 fork、不重建、插件不另存偏好），下一轮生效，宿主抛错回 `failed`；没有活跃会话时切换直接写部署默认值（模型与思考强度走 `agentDefaultModel.saveSelection`，`/permission` 走 `settings.update('permission', { defaultPreset })`），回执文案与有会话时一致，不为切换拉起会话。没有会话时 `/model`、`/reasoning`、`/permission` 的查看视图照常展示当前值（部署默认值，与新建会话会拿到的值一致，该条目同样标 `✅`），文案保持不变，不另造「全局」之类的标签。宿主每次 `selectModel` 都会顺手把选择存成部署默认，按核心行为接受这一点，不要写回旧值。`/preset` 不按会话存待定值：它写核心 `agent-preset-registry` 的 `selectedDefault`（与设置页「设为默认」同一个 `settings.update` 入口），对之后新建的会话生效，已开始的会话保持自己的 preset；插件不存 preset。回显同样写「当前」，不标「全局」，也不补「之后新建的会话生效」这类提示（机制写在 README，不写进命令回复）。`create` / `resume` 的 `agentOptions` 传响应式 getter 读 `agentDefaultModel.currentSelection()`（会话自己记录过的选择优先）。插件只在 `~/.dsh-qqterm/model-prefs.json` 存 `sessionIds` / `dirs`，键是聊天 key。
 - 会话名（标题）由宿主 `sessionTitle.rename` 写入 `session/title` 事件，写完即固定，自动标题不再覆盖。`/rename <新标题>` 只改当前会话（与聊天同一权限面，不限白名单）；`/sessions rename <id> <新标题>` 改已打开的其他会话，沿用 `/sessions` 的私聊 + 唯一绑定用户（`access.owner`）。两者都只接受 live session：冷会话提示先 `/sessions resume`，不要为了改名悄悄拉起会话。
 - 入站消息的 `source.kind` 必须是 `user`（`src/session/user-message.ts`）：宿主把「人类消息」作为一批能力的触发条件——会话标题（`dsh-session-title` 只对 `kind === 'user'` 排期，内置回退标题也走这条路）、最近提问时间、轮次大纲、replay 断点。自造 kind（如早期的 `qqbot`）会让这些能力静默失效，症状是所有新建会话停在「未命名会话」。宿主自带的外部通道（ACP / JSON-RPC SDK / headless）同样发 `{ kind: 'user' }`。
 - Markdown 输出按 `textChunkLimit` 分片，代码块/表格感知切分在 `src/transport/chunker.ts`，不要绕过。

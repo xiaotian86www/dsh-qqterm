@@ -95,11 +95,15 @@ function hostServices() {
   };
 }
 
-function createCtx(permissions?: PermissionPresetsLike): Context {
+function createCtx(
+  permissions?: PermissionPresetsLike,
+  settings: { update: ReturnType<typeof vi.fn> } = { update: vi.fn(async () => {}) },
+): Context {
   return {
     ...hostServices(),
     permissionPresets: permissions,
-    get: (name: string) => (name === 'permissionPresets' ? permissions : undefined),
+    settings,
+    get: (name: string) => (name === 'permissionPresets' ? permissions : name === 'settings' ? settings : undefined),
     on: vi.fn(),
   } as unknown as Context;
 }
@@ -110,6 +114,7 @@ function createManager(
   permissions?: PermissionPresetsLike,
   logger: Logger = createLogger(),
   registry = createRegistry(),
+  settings: { update: ReturnType<typeof vi.fn> } = { update: vi.fn(async () => {}) },
 ) {
   const config = ConfigSchema({
     appId: APP_ID,
@@ -117,7 +122,7 @@ function createManager(
     provider: 'p',
     model: 'm',
   } as QQTermConfig);
-  const manager = new SessionManager(createCtx(permissions), registry as unknown as DshAgentRegistry, config, logger);
+  const manager = new SessionManager(createCtx(permissions, settings), registry as unknown as DshAgentRegistry, config, logger);
   managers.push(manager);
   return manager;
 }
@@ -188,14 +193,16 @@ describe('切换权限', () => {
     expect(set).not.toHaveBeenCalled();
   });
 
-  it('无活跃会话且已是默认预设：拒绝，不误报已是当前', async () => {
+  it('无活跃会话且已是默认预设：如实回「已是当前」，不重复写 settings', async () => {
     const { service, set } = fakePermissions(); // defaultPreset = workspace-write
-    const manager = createManager(service);
+    const settings = { update: vi.fn(async () => {}) };
+    const manager = createManager(service, undefined, undefined, settings);
 
     const outcome = await manager.setPermissionPreset('c2c', PEER, 'workspace-write');
 
-    expect(outcome).toEqual({ ok: false, reason: 'no-session' });
+    expect(outcome).toEqual({ ok: true, preset: 'workspace-write', unchanged: true });
     expect(set).not.toHaveBeenCalled();
+    expect(settings.update).not.toHaveBeenCalled();
     expect(manager.getSessionRecord('c2c', PEER)).toBeUndefined();
   });
 
@@ -210,15 +217,19 @@ describe('切换权限', () => {
     expect(set).toHaveBeenCalledWith(record.agent.session, 'auto');
   });
 
-  it('无活跃会话：拒绝，不为了切换拉起会话', async () => {
+  it('无活跃会话：写部署默认预设，不为了切换拉起会话', async () => {
     const { service, set } = fakePermissions();
-    const manager = createManager(service);
+    const settings = { update: vi.fn(async () => {}) };
+    const registry = createRegistry();
+    const manager = createManager(service, undefined, registry, settings);
 
     const outcome = await manager.setPermissionPreset('c2c', PEER, 'auto');
 
-    expect(outcome).toEqual({ ok: false, reason: 'no-session' });
+    expect(outcome).toEqual({ ok: true, preset: 'auto' });
+    expect(settings.update).toHaveBeenCalledWith('permission', { defaultPreset: 'auto' });
     expect(set).not.toHaveBeenCalled();
     expect(manager.getSessionRecord('c2c', PEER)).toBeUndefined();
+    expect(registry.create).not.toHaveBeenCalled();
   });
 
   it('未知预设：拒绝且不写会话、不建会话', async () => {

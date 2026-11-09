@@ -123,10 +123,11 @@ When several private chats talk at once, the reply goes to the chat of the lates
 Model and reasoning effort follow the **current session**; the preset is a deployment-level setting. All three reuse host core behaviour:
 
 - A new session (`/new`, the first message) takes the host's current value: `settings.yaml` → host `agentDefaultModel` → `deepseek-official/deepseek-v4-flash`. The plugin config has no `provider` / `model` / `preset`; the host owns those three.
-- `/model` goes through the same host switch path: the choice is recorded in the current session (no rebuild, no history rewrite) and applies next turn; without a live session it refuses and asks you to send a message first.
-- `/reasoning` uses the same entry point: written into the current session, effective next turn; per core behaviour it also becomes the global current choice, so new sessions follow it.
+- `/model` goes through the same host switch path: with a live session the choice is recorded in that session (no rebuild, no history rewrite) and applies next turn; without one it writes the deployment default directly, with the same confirmation text.
+- `/reasoning` uses the same entry point: with a live session it is written into that session and effective next turn; per core behaviour it also becomes the global current choice, so new sessions follow it. Without a live session it writes the deployment default.
 - `/preset` is the same entry as the settings page's "make default": the written preset applies to sessions created afterwards, while an already started session keeps its own.
-- With no session, the `/model`, `/reasoning`, and `/permission` views still show the current value — the core default, i.e. what a new session would get; switching still requires a session.
+- With no session, the `/model`, `/reasoning`, and `/permission` views still show the current value — the deployment default, i.e. what a new session would get.
+- `/permission` applies to the current session immediately when one is live; with no session it writes the deployment default preset.
 
 ### Access control (access)
 

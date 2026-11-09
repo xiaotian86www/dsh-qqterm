@@ -91,8 +91,8 @@ export function modelCommand({ manager, config, logger }: CommandDeps): Categori
       }
 
       const outcome = await manager.setModelOverride(scope, peerId, { provider, model });
-      if (outcome.reason === 'no-session') {
-        return '⚠️ 当前没有会话';
+      if (outcome.reason === 'unknown-model') {
+        return `⚠️ 未知模型: \`${provider}/${model}\``;
       }
       if (outcome.reason === 'failed') {
         return `❌ 模型切换失败: ${outcome.message ?? '未知错误'}`;

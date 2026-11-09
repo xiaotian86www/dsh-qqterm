@@ -8,6 +8,7 @@ export {
   buildUserAgent,
   pluginVersion,
   shortSessionId,
+  outsideHmrTransaction,
 } from './utils.ts';
 export { getScopePeer } from './scope.ts';
 export { PLUGIN_HOME, resolveAgentCwd } from './dirs.ts';

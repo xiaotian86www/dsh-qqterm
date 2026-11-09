@@ -9,8 +9,8 @@
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it, afterEach } from 'vitest';
-import { getProfileDir } from './utils.ts';
+import { describe, expect, it, afterEach, vi } from 'vitest';
+import { getProfileDir, outsideHmrTransaction } from './utils.ts';
 
 const tempDirs: string[] = [];
 
@@ -183,5 +183,43 @@ describe('getProfileDir', () => {
     mkdirSync(source, { recursive: true });
 
     expect(getProfileDir(source)).toBeNull();
+  });
+});
+
+describe('outsideHmrTransaction', () => {
+  const hmrCtx = (store: unknown, exit: (cb: () => unknown) => unknown) => ({
+    get: (name: string) => (name === 'hmr' ? { executing: { getStore: () => store, exit } } : undefined),
+  });
+
+  it('事务里：退出上下文后执行', () => {
+    const exit = vi.fn(<T>(cb: () => T) => cb());
+    const ctx = hmrCtx(true, exit);
+
+    expect(outsideHmrTransaction(ctx, () => 'ok')).toBe('ok');
+    expect(exit).toHaveBeenCalledTimes(1);
+  });
+
+  it('不在事务里：直接执行，不碰 exit', () => {
+    const exit = vi.fn(<T>(cb: () => T) => cb());
+    const ctx = hmrCtx(undefined, exit);
+
+    expect(outsideHmrTransaction(ctx, () => 'ok')).toBe('ok');
+    expect(exit).not.toHaveBeenCalled();
+  });
+
+  it('没有 hmr 服务（headless / SDK）：按原样执行', () => {
+    const ctx = { get: () => undefined };
+
+    expect(outsideHmrTransaction(ctx, () => 'ok')).toBe('ok');
+  });
+
+  it('ctx 结构异常：回退为直接执行', () => {
+    const ctx = {
+      get: () => {
+        throw new Error('service unavailable');
+      },
+    };
+
+    expect(outsideHmrTransaction(ctx, () => 'ok')).toBe('ok');
   });
 });

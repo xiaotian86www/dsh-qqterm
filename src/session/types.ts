@@ -115,8 +115,8 @@ export interface ModelSwitchOutcome {
   model: string;
   /** true = 目标就是当前模型，未写选择 */
   unchanged?: boolean;
-  /** no-session = 没有活跃会话；failed = 宿主 selectModel 抛错 */
-  reason?: 'no-session' | 'failed';
+  /** unknown-model = 宿主的模型目录里没有这个路由；failed = 宿主写选择抛错 */
+  reason?: 'unknown-model' | 'failed';
   message?: string;
 }
 
@@ -148,7 +148,7 @@ export interface EffortView {
 /** 思考强度切换结果 */
 export interface EffortSwitchOutcome {
   ok: boolean;
-  reason?: 'unsupported' | 'unknown-effort' | 'no' | 'failed';
+  reason?: 'unsupported' | 'unknown-effort' | 'failed';
   /** 切换后生效的档位 id（恢复默认时为模型解析出的默认值） */
   effort?: string;
   /** true = 目标就是当前值，未改动会话 */
@@ -237,7 +237,7 @@ export interface PermissionPresetEntry {
 /** 权限预设切换结果 */
 export interface PermissionSwitchOutcome {
   ok: boolean;
-  reason?: 'unknown-preset' | 'no-session' | 'failed';
+  reason?: 'unknown-preset' | 'failed';
   preset?: string;
   /** true = 目标就是当前预设，未写会话 */
   unchanged?: boolean;

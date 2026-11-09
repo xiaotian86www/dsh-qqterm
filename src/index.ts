@@ -9,7 +9,7 @@ import type { Context } from '@deepseek-ai/cordis';
 import { ConfigSchema, type QQTermConfig } from './config.ts';
 import { bootstrapGateway } from './gateway/index.ts';
 import type { DshAgentRegistry } from './session/index.ts';
-import { getProfileDir, resolveEnv } from './shared/index.ts';
+import { getProfileDir, outsideHmrTransaction, resolveEnv } from './shared/index.ts';
 import { ensureCredentials, persistCredentialsToProfile, registerBoundCredentialRoutes } from './setup/index.ts';
 import type { Logger } from './types.ts';
 
@@ -86,11 +86,13 @@ export async function apply(ctx: Context, config: QQTermConfig): Promise<void> {
 
         const startGateway = (): void => {
           boundAppId = credentials.appId;
-          void bootstrapGateway(ctx, agents, {
+          // 网关必须建在 HMR 事务之外：否则它派生的每条入站消息都带着
+          // 「正在应用变更」标记，之后写配置会被宿主当成嵌套事务拒绝
+          void outsideHmrTransaction(ctx, () => bootstrapGateway(ctx, agents, {
             ...config,
             appId: credentials.appId,
             appSecret: credentials.appSecret,
-          }, logger).catch((err: unknown) => {
+          }, logger)).catch((err: unknown) => {
             boundAppId = null;
             logger.error(`网关启动失败: ${err instanceof Error ? err.message : String(err)}`);
           });
@@ -123,5 +125,5 @@ export async function apply(ctx: Context, config: QQTermConfig): Promise<void> {
 
   const resolvedConfig: QQTermConfig = { ...config, appId, appSecret };
 
-  await bootstrapGateway(ctx, agents, resolvedConfig, logger);
+  await outsideHmrTransaction(ctx, () => bootstrapGateway(ctx, agents, resolvedConfig, logger));
 }

@@ -80,8 +80,6 @@ export function permissionCommand({ manager, config, logger }: CommandDeps): Cat
         switch (outcome.reason) {
           case 'unknown-preset':
             return `⚠️ 未知权限预设: ${target}`;
-          case 'no-session':
-            return '⚠️ 当前没有会话';
           default:
             return `❌ 权限切换失败: ${outcome.message ?? '未知错误'}`;
         }

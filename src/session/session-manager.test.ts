@@ -79,7 +79,10 @@ function hostCtxServices() {
         return { selected };
       },
     },
-    agentDefaultModel: { currentSelection: () => ({ provider: 'p', model: 'm' }) },
+    agentDefaultModel: {
+      currentSelection: () => ({ provider: 'p', model: 'm' }),
+      saveSelection: async () => {},
+    },
     sessionPersistence: { stat: async () => undefined },
     sessionQuery: { listSessions: async () => [], readTitleSnapshots: async () => [] },
     sessionTitle: { rename: () => ({}) },
@@ -534,20 +537,84 @@ describe('切换类操作 — 可重入', () => {
     expect(manager.getEffectiveModel('c2c', PEER)).toEqual({ provider: 'p', model: 'm' });
   });
 
-  it('模型：没有活跃会话时拒绝切换，也不写任何状态', async () => {
+  it('模型：没有活跃会话时写部署默认值，不新开会话', async () => {
     const { registry } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
-    const manager = createManager(registry);
+    const saveSelection = vi.fn(async () => {});
+    const ctx = {
+      ...hostCtxServices(),
+      llm: {
+        listProviders: () => [{ id: 'p', name: 'p' }],
+        listModels: async () => [{ id: 'other' }],
+        resolveModelInfo: async () => ({}),
+      },
+      agentDefaultModel: {
+        currentSelection: () => ({ provider: 'p', model: 'm' }),
+        saveSelection,
+      },
+      on: vi.fn(),
+    } as unknown as Context;
+    const manager = createManagerWithCtx(registry, ctx);
 
-    const outcome = await manager.setModelOverride('c2c', PEER, { provider: 'p', model: 'm' });
+    const outcome = await manager.setModelOverride('c2c', PEER, { provider: 'p', model: 'other' });
 
-    expect(outcome.reason).toBe('no-session');
+    expect(outcome).toEqual({ provider: 'p', model: 'other' });
+    expect(saveSelection).toHaveBeenCalledWith({ provider: 'p', model: 'other' });
+    expect(registry.create).not.toHaveBeenCalled();
     expect(new PrefsStore().getSessionId(KEY)).toBeUndefined();
   });
 
-  it('权限：没有会话时目标等于默认值也拒绝，不误报已是当前', async () => {
+  it('模型：没有活跃会话且路由不在模型目录时拒绝，不写默认值', async () => {
     const { registry } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
+    const saveSelection = vi.fn(async () => {});
     const ctx = {
       ...hostCtxServices(),
+      llm: {
+        listProviders: () => [{ id: 'p', name: 'p' }],
+        listModels: async () => [{ id: 'm' }],
+        resolveModelInfo: async () => ({}),
+      },
+      agentDefaultModel: {
+        currentSelection: () => ({ provider: 'p', model: 'm' }),
+        saveSelection,
+      },
+      on: vi.fn(),
+    } as unknown as Context;
+    const manager = createManagerWithCtx(registry, ctx);
+
+    const outcome = await manager.setModelOverride('c2c', PEER, { provider: 'p', model: 'nope' });
+
+    expect(outcome.reason).toBe('unknown-model');
+    expect(saveSelection).not.toHaveBeenCalled();
+  });
+
+  it('权限：没有会话时写部署默认预设，不新开会话', async () => {
+    const { registry } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
+    const settings = { update: vi.fn(async () => {}) };
+    const ctx = {
+      ...hostCtxServices(),
+      settings,
+      on: vi.fn(),
+      permissionPresets: {
+        names: ['read-only', 'workspace-write'],
+        optionOf: () => undefined,
+        defaultPreset: 'read-only',
+      },
+    } as unknown as Context;
+    const manager = createManagerWithCtx(registry, ctx);
+
+    const outcome = await manager.setPermissionPreset('c2c', PEER, 'workspace-write');
+
+    expect(outcome).toEqual({ ok: true, preset: 'workspace-write' });
+    expect(settings.update).toHaveBeenCalledWith('permission', { defaultPreset: 'workspace-write' });
+    expect(registry.create).not.toHaveBeenCalled();
+  });
+
+  it('权限：没有会话时目标等于部署默认值 → 已是当前，不重复写 settings', async () => {
+    const { registry } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
+    const settings = { update: vi.fn(async () => {}) };
+    const ctx = {
+      ...hostCtxServices(),
+      settings,
       on: vi.fn(),
       permissionPresets: {
         names: ['read-only'],
@@ -559,7 +626,8 @@ describe('切换类操作 — 可重入', () => {
 
     const outcome = await manager.setPermissionPreset('c2c', PEER, 'read-only');
 
-    expect(outcome).toEqual({ ok: false, reason: 'no-session' });
+    expect(outcome).toEqual({ ok: true, preset: 'read-only', unchanged: true });
+    expect(settings.update).not.toHaveBeenCalled();
   });
 
   it('preset：目标就是当前默认值时不重复写 settings', async () => {
@@ -843,14 +911,20 @@ describe('思考强度 — 宿主选择与重建', () => {
     expect(await manager.selectEffort('c2c', PEER, 'high')).toEqual({ ok: false, reason: 'unsupported' });
   });
 
-  it('没有会话时拒绝切换，不写宿主', async () => {
+  it('没有会话时写部署默认思考强度，不新开会话', async () => {
     const { registry } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
     const host = effortCtx(REASONING);
     const manager = createManagerWithCtx(registry, host.ctx);
 
-    expect(await manager.selectEffort('c2c', PEER, 'max')).toEqual({ ok: false, reason: 'no' });
+    expect(await manager.selectEffort('c2c', PEER, 'max')).toEqual({ ok: true, effort: 'max' });
     expect(host.selectModel).not.toHaveBeenCalled();
+    expect(host.state.saved).toEqual({ provider: 'p', model: 'm', reasoningEffort: 'max' });
     expect(registry.create).not.toHaveBeenCalled();
+    // 视图读的是同一份部署默认值
+    expect(await manager.getEffortView('c2c', PEER)).toMatchObject({
+      current: { id: 'max' },
+      defaulted: false,
+    });
   });
 });
 

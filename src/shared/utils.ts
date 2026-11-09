@@ -184,3 +184,34 @@ export function formatRelativeTime(ts?: number): string {
   if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h 前`;
   return `${Math.floor(diff / 86_400_000)}d 前`;
 }
+
+/** 宿主 HMR 事务的 AsyncLocalStorage 形状（只用到判断与退出） */
+interface HmrExecuting {
+  getStore?: () => unknown;
+  exit?: <R>(callback: () => R) => R;
+}
+
+/**
+ * 在宿主 HMR 事务上下文之外执行
+ *
+ * 宿主的「正在应用变更」标记是 AsyncLocalStorage：热重载时插件 `apply` 在事务里
+ * 执行，此时创建的长生命周期对象（socket、定时器）会一直带着这个标记，之后由它们
+ * 派生的每条消息再写配置，都会被宿主判成嵌套事务并拒绝
+ * （`HMR transactions cannot be nested`）。启动网关前退出该上下文，后续异步链
+ * 就都不再继承它——宿主自己的 `watchConfig` 也是这么做的（dsh-hmr/lib/index.js:772）。
+ *
+ * hmr 在 headless / SDK 组合里不存在，取不到就按原样执行。
+ */
+export function outsideHmrTransaction<T>(ctxLike: unknown, run: () => T): T {
+  let executing: HmrExecuting | undefined;
+  try {
+    const hmr = (ctxLike as { get?: (name: string) => unknown })?.get?.('hmr') as
+      | { executing?: HmrExecuting }
+      | undefined;
+    executing = hmr?.executing;
+    if (executing?.getStore?.() !== true || typeof executing.exit !== 'function') return run();
+  } catch {
+    return run();
+  }
+  return executing.exit(run);
+}

@@ -40,6 +40,7 @@ function makeManager(
     current?: ModelRoute;
     models?: ModelEntry[];
     unchanged?: boolean;
+    unknownModel?: boolean;
     noSession?: boolean;
     effort?: { options?: Array<{ id: string; name: string }>; current?: { id: string; name: string }; defaulted: boolean };
   } = {},
@@ -53,7 +54,7 @@ function makeManager(
     setModelOverride: vi.fn(async (_scope: unknown, _peer: unknown, route: ModelRoute) => ({
       ...route,
       ...(options.unchanged ? { unchanged: true } : {}),
-      ...(options.noSession ? { reason: 'no-session' as const } : {}),
+      ...(options.unknownModel ? { reason: 'unknown-model' as const } : {}),
     })),
   } as unknown as SessionManager;
 }
@@ -202,8 +203,8 @@ describe('/model（切换）', () => {
     });
   });
 
-  it('没有活跃会话时拒绝切换，只报原因', async () => {
-    const text = await run(makeManager({ noSession: true }), 'openrouter/deepseek-v4-flash');
-    expect(text).toBe('⚠️ 当前没有会话');
+  it('模型目录里没有该路由时只报原因', async () => {
+    const text = await run(makeManager({ unknownModel: true }), 'openrouter/deepseek-v4-flash');
+    expect(text).toBe('⚠️ 未知模型: `openrouter/deepseek-v4-flash`');
   });
 });

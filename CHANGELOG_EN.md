@@ -6,6 +6,13 @@ This file records product-level changes to QQ SuperTerm, focusing on user-visibl
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [Unreleased]
+
+### Changed
+
+- **Consolidated GUI entry**: binding, credential replacement, unbinding, and config editing now live only in the "QQ SuperTerm" settings section. The sidebar binding page, sidebar main panel, and plugin-detail entry are gone, and an unbound instance no longer opens a page automatically.
+- **Defaults can change without a session**: switching `/model`, `/reasoning`, or `/permission` with no session now writes the deployment default, which new sessions pick up; the confirmation text matches the with-session case.
+
 ## [0.0.1] - 2026-11-08
 
 ### Added

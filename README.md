@@ -35,7 +35,7 @@ QQ 用户 → QQ WebSocket → dsh-qqterm → ctx.agents → dsh agent loop → 
                                        (assistant reply → QQ sendMarkdown)
 ```
 
-插件本身是一个纯 Cordis 插件：宿主加载 `lib/index.js`，浏览器加载 `lib/client.js` 提供设置页与侧栏入口，不修改宿主 loop。
+插件本身是一个纯 Cordis 插件：宿主加载 `lib/index.js`，浏览器加载 `lib/client.js` 提供设置页入口，不修改宿主 loop。
 
 ## 安装
 
@@ -122,10 +122,11 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqterm/cordis.dev.yml
 模型与思考强度跟着**当前会话**走，preset 是部署级设置，都沿用宿主核心行为：
 
 - 新会话（`/new`、第一条消息）取宿主核心的当前值：`settings.yaml` → 宿主 agentDefaultModel → `deepseek-official/deepseek-v4-flash`。插件配置里没有 `provider` / `model` / `preset`，这三项以宿主为准。
-- `/model` 走宿主同一条切换路径：选择记进当前会话（不重建、不改历史），下一轮生效；没有活跃会话时拒绝，先发一条消息。
-- `/reasoning` 走同一个入口：写进当前会话，下一轮生效；按核心行为，它同时成为全局的当前选择，新会话会跟随。
+- `/model` 走宿主同一条切换路径：选择记进当前会话（不重建、不改历史），下一轮生效；没有活跃会话时直接写部署默认值，回执与有会话时一致。
+- `/reasoning` 走同一个入口：写进当前会话，下一轮生效；按核心行为，它同时成为全局的当前选择，新会话会跟随；没有活跃会话时同样写部署默认值。
 - `/preset` 与设置页「设为默认」是同一个入口：写入的 preset 对之后新建的会话生效，已开始的会话保持自己的 preset。
-- 没有会话时，`/model`、`/reasoning`、`/permission` 的查看视图照常展示当前值——那就是核心默认值（新建会话会拿到的值），写法不变；切换仍要有会话。
+- 没有会话时，`/model`、`/reasoning`、`/permission` 的查看视图照常展示当前值——那就是部署默认值（新建会话会拿到的值），写法不变。
+- `/permission` 有会话时立即作用于当前会话；没有会话时写部署默认预设。
 
 ### 访问控制（access）
 
@@ -278,7 +279,7 @@ src/
 │   ├── qr-svg.ts               # 二维码 SVG 渲染（宿主侧）
 │   └── persist.ts              # 凭据写入 cordis.patch.yml
 ├── client/                     # 浏览器半边（dsh.client Web Bundle）
-│   ├── index.ts                # 设置页/侧栏入口注册
+│   ├── index.ts                # 设置页入口注册
 │   ├── bind-page.ts            # 端内绑定页（二维码 + 状态轮询）
 │   └── config-panel.ts         # 设置面板（可编辑配置）
 ├── gateway/                    # 网关装配
