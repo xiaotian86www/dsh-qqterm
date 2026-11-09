@@ -58,7 +58,7 @@
       "dshReleases": {
         "0.2.1-rc.5": "compatible"
       },
-      "note": "0.2.1-rc.5 为当前唯一验收版本：插件硬依赖 agents / llm / sessionController / agentDefaultModel / sessionProjections / sessionPersistence / sessionQuery / sessionTitle / workspaceRegistry / agentPresets / permissionPresets / tools / attachments / webServer（全部写入 inject），缺任一服务插件不激活；不再为精简 profile 做能力降级。compaction 由会话绑定的 agent preset 提供，不进 inject，/compact 也不从宿主面取引擎。客户端依赖 settings.section / sidebarRightTabs / sidebar.right.pane.tab 席位契约与 dsh.client 模块系统，宿主大版本升级后请重新验收席位行为。"
+      "note": "0.2.1-rc.5 为当前唯一验收版本：插件硬依赖 agents / llm / sessionController / agentDefaultModel / sessionProjections / sessionPersistence / sessionQuery / sessionTitle / workspaceRegistry / agentPresets / permissionPresets / tools / attachments / webServer（全部写入 inject），缺任一服务插件不激活；不再为精简 profile 做能力降级。compaction 由会话绑定的 agent preset 提供，不进 inject，/compact 也不从宿主面取引擎。客户端依赖 settings.section 席位契约与 dsh.client 模块系统，宿主大版本升级后请重新验收席位行为。"
     }
   },
   "dependencies": {

@@ -77,25 +77,6 @@ export function installPanelStyles(): void {
   font: inherit; font-size: 13px; cursor: pointer; color: inherit;
 }
 .qqterm-bind-ghost:hover { opacity: 1; text-decoration: underline; }
-/* 插件详情「设置」按钮：30px，略高于旁边的 sm 次要按钮 */
-.qqterm-bind-pluginOpen {
-  display: inline-flex; align-items: center; justify-content: center;
-  box-sizing: border-box; height: 30px; padding: 0 14px;
-  border: 1px solid var(--dsw-alias-border-l2, rgba(128, 128, 128, 0.4));
-  border-radius: 8px; background: var(--dsw-alias-bg-layer-1, transparent);
-  color: var(--dsw-alias-label-primary, inherit); font: inherit;
-  font-size: 13px; line-height: 20px; cursor: pointer;
-}
-.qqterm-bind-pluginOpen:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(128, 128, 128, 0.12)); }
-.qqterm-bind-pluginOpen:focus-visible { outline: 2px solid var(--dsw-alias-brand, #4d6bfe); outline-offset: 3px; }
-@media (pointer: coarse) { .qqterm-bind-pluginOpen { height: 44px; } }
-/* 主面板页面容器（layout.selectPanel 目标）：滚动 + 留白 */
-.qqterm-bind-pluginPage {
-  height: 100%; min-height: 0; overflow: auto; box-sizing: border-box;
-  padding: 24px clamp(16px, 4vw, 48px) 32px;
-  color: var(--dsw-alias-label-primary, #1f2329);
-}
-.qqterm-bind-pluginPageContent { max-width: 1080px; margin: 0 auto; }
 .qqterm-bind-pill {
   padding: 5px 16px; border-radius: 999px; font-size: 13px;
   border: 1px solid var(--dsw-alias-border-l2, rgba(128, 128, 128, 0.4)); background: transparent;
