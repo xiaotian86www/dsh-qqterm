@@ -40,11 +40,12 @@ export interface HostAdapter {
    */
   attachSessionToWorkspace(sessionId: string, cwd: string): Promise<void>;
   /**
-   * 列出宿主可见的全部会话（与 Web 侧栏同一来源，`sessionQuery.listSessions()`）。
+   * 列出宿主持久化的全部会话；`updatedAt` / `blank` 取自
+   * `sessionController.list()`（Web 侧栏同一份摘要）。
    * 后端故障时抛错，由调用方决定如何降级展示。
    *
-   * 注意：宿主列表**不过滤归档**（过滤是客户端的活），调用方要自己按
-   * {@link archivedSessionIds} 区分。
+   * 注意：宿主列表**不过滤归档、不按 Web 的可见性裁剪**（live / cwd / blank
+   * 的取舍由调用方决定），调用方要自己按 {@link archivedSessionIds} 区分。
    */
   listSessions(): Promise<HostSessionInfo[]>;
   /**
@@ -155,6 +156,11 @@ export interface HostSessionInfo {
   readonly origin?: 'subagent';
   /** 是否正被宿主进程内的 agent 占用 */
   readonly live: boolean;
+  /**
+   * 是否还是空白会话（宿主 `sessionListMetadata.blank`：还没有过人类轮次）。
+   * Web 侧栏只显示当前打开的那个 blank 会话。
+   */
+  readonly blank: boolean;
 }
 
 /** 会话 header 的最小结构（只读插件关心的字段；`agentPreset` 在 header 顶层） */
@@ -270,6 +276,7 @@ function hostSessionFrom(record: unknown, liveFallback: boolean): HostSessionInf
     updatedAt: typeof header['createdAt'] === 'number' ? header['createdAt'] : 0,
     isSeeded: header['isSeeded'] === true,
     live: raw?.live === true || liveFallback,
+    blank: false,
     ...(typeof header['cwd'] === 'string' ? { cwd: header['cwd'] } : {}),
     ...(typeof header['parentSession'] === 'string' ? { parentSession: header['parentSession'] } : {}),
     ...(header['origin'] === 'subagent' ? { origin: 'subagent' as const } : {}),
@@ -292,28 +299,30 @@ function collectTitles(results: readonly unknown[], sink: Map<string, string>): 
 }
 
 /**
- * 读宿主会话摘要里的活跃时间（Web 侧栏排序用的是同一份 `updatedAt`）。
+ * 读宿主会话摘要里的活跃时间与 blank 标记（Web 侧栏用的是同一份摘要）。
  *
- * 宿主没有 `list`（旧版本）或读取失败时返回空表：列表回退成按创建时间排。
+ * 宿主没有 `list`（旧版本）或读取失败时返回空表：列表回退成按创建时间排，
+ * blank 一律按 false 处理。
  */
-async function sessionRecency(
+async function sessionListMeta(
   controller: SessionControllerLike | undefined,
   logger?: AdapterLogger,
-): Promise<Map<string, number>> {
+): Promise<{ recency: Map<string, number>; blank: Set<string> }> {
   const recency = new Map<string, number>();
-  if (typeof controller?.list !== 'function') return recency;
+  const blank = new Set<string>();
+  if (typeof controller?.list !== 'function') return { recency, blank };
   try {
     const result = await controller.list({});
     for (const item of result?.items ?? []) {
-      const raw = item as { sessionId?: unknown; updatedAt?: unknown } | null;
-      if (raw !== null && typeof raw.sessionId === 'string' && typeof raw.updatedAt === 'number') {
-        recency.set(raw.sessionId, raw.updatedAt);
-      }
+      const raw = item as { sessionId?: unknown; updatedAt?: unknown; blank?: unknown } | null;
+      if (raw === null || typeof raw.sessionId !== 'string') continue;
+      if (typeof raw.updatedAt === 'number') recency.set(raw.sessionId, raw.updatedAt);
+      if (raw.blank === true) blank.add(raw.sessionId);
     }
   } catch (err) {
     logger?.warn?.(`host adapter: sessionController.list 失败，活跃时间回退成创建时间: ${err instanceof Error ? err.message : String(err)}`);
   }
-  return recency;
+  return { recency, blank };
 }
 
 /** 模块级函数的动态 import 结果缓存（spec 变量路径绕开本地依赖类型检查） */
@@ -457,16 +466,20 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
 
     async listSessions() {
       try {
-        const [records, recency] = await Promise.all([
+        const [records, meta] = await Promise.all([
           query.listSessions(),
-          sessionRecency(controller, logger),
+          sessionListMeta(controller, logger),
         ]);
         return records
           .map((record) => hostSessionFrom(record, false))
           .filter((info): info is HostSessionInfo => info !== undefined)
           .map((info) => {
-            const updatedAt = recency.get(info.id);
-            return updatedAt === undefined ? info : { ...info, updatedAt };
+            const updatedAt = meta.recency.get(info.id);
+            return {
+              ...info,
+              ...(meta.blank.has(info.id) ? { blank: true } : {}),
+              ...(updatedAt === undefined ? {} : { updatedAt }),
+            };
           });
       } catch (err) {
         logger?.warn?.(`host adapter: sessionQuery.listSessions 失败: ${err instanceof Error ? err.message : String(err)}`);

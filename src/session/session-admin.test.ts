@@ -45,6 +45,10 @@ interface StoredSession {
   parentSession?: string;
   origin?: 'subagent';
   createdAt?: number;
+  /** 宿主摘要的 blank：还没有过人类轮次 */
+  blank?: boolean;
+  /** 是否 live（没有 cwd 的 live 会话在 Web 侧栏也可见） */
+  live?: boolean;
 }
 
 function fakeAgent(id: string, cwd?: string): DshAgent {
@@ -135,7 +139,7 @@ function createCtx(options: {
   };
   const query = options.withQuery
     ? {
-      listSessions: async () => sessions.map((session) => ({ header: session, live: false })),
+      listSessions: async () => sessions.map((session) => ({ header: session, live: session.live === true })),
       readTitleSnapshots: async (ids: readonly string[]) => ids.map((id) => ({
         sessionId: id,
         status: 'fulfilled' as const,
@@ -177,7 +181,7 @@ function createCtx(options: {
     ...hostServices(),
     sessionPersistence: persistence,
     sessionQuery: query ?? {
-      listSessions: async () => sessions.map((session) => ({ header: session, live: false })),
+      listSessions: async () => sessions.map((session) => ({ header: session, live: session.live === true })),
       readTitleSnapshots: async () => [],
     },
     workingDirectory: options.workingDirectory,
@@ -188,7 +192,11 @@ function createCtx(options: {
     sessionTitle: options.sessionTitle ?? { rename: () => ({ title: '' }) },
     sessionController: {
       list: async () => ({
-        items: Object.entries(options.recency ?? {}).map(([sessionId, updatedAt]) => ({ sessionId, updatedAt })),
+        items: sessions.map((session) => ({
+          sessionId: session.id,
+          updatedAt: options.recency?.[session.id] ?? session.createdAt ?? 0,
+          blank: session.blank === true,
+        })),
       }),
     },
     agentPresets: { serviceFor: () => undefined },
@@ -376,6 +384,74 @@ describe('listWorkspaceGroups', () => {
 
     expect(groups.flatMap((group) => group.sessions.map((session) => session.id)))
       .toEqual(['session-a', 'session-b', 'session-c']);
+  });
+
+  it('cwd 落在工作区但未记账的会话进「未分组」（与 Web 一致，不再按 cwd 兜底）', async () => {
+    const ctx = createCtx({
+      withQuery: true,
+      sessions: [{ id: 'session-loose', cwd: WORKSPACE(), createdAt: 1 }],
+      workspaces: [{ id: 'w1', path: WORKSPACE(), title: 'repo', sessionIds: [] }],
+    });
+    const { manager } = createManager(ctx);
+
+    const groups = await manager.listWorkspaceGroups('c2c', PEER);
+
+    expect(groups.find((group) => group.id === 'w1')?.sessions).toEqual([]);
+    expect(groups.find((group) => group.id === 'ungrouped')?.sessions.map((session) => session.id))
+      .toEqual(['session-loose']);
+  });
+
+  it('分组只认 workspace.sessionIds：成员 cwd 不一致也留在原工作区', async () => {
+    const ctx = createCtx({
+      withQuery: true,
+      sessions: [{ id: 'session-moved', cwd: join(env.home, 'elsewhere'), createdAt: 1 }],
+      workspaces: [{ id: 'w1', path: WORKSPACE(), title: 'repo', sessionIds: ['session-moved'] }],
+    });
+    const { manager } = createManager(ctx);
+
+    const groups = await manager.listWorkspaceGroups('c2c', PEER);
+
+    expect(groups.find((group) => group.id === 'w1')?.sessions.map((session) => session.id))
+      .toEqual(['session-moved']);
+    expect(groups.some((group) => group.id === 'ungrouped')).toBe(false);
+  });
+
+  it('blank 会话只显示当前那个（Web 侧栏同一口径）', async () => {
+    const ctx = createCtx({
+      withQuery: true,
+      sessions: [
+        { id: 'session-blank', cwd: WORKSPACE(), createdAt: 2, blank: true },
+        { id: 'session-live', cwd: WORKSPACE(), createdAt: 1 },
+      ],
+      workspaces: [{ id: 'w1', path: WORKSPACE(), title: 'repo', sessionIds: ['session-blank', 'session-live'] }],
+    });
+    const { manager } = createManager(ctx);
+
+    const before = await manager.listWorkspaceGroups('c2c', PEER);
+    expect(before.find((group) => group.id === 'w1')?.sessions.map((session) => session.id))
+      .toEqual(['session-live']);
+
+    await manager.switchSession('c2c', PEER, 'session-blank', PEER, REPLY);
+    const after = await manager.listWorkspaceGroups('c2c', PEER);
+    expect(after.find((group) => group.id === 'w1')?.sessions.map((session) => session.id))
+      .toEqual(['session-blank', 'session-live']);
+  });
+
+  it('没有 cwd 的会话只留 live 的（Web 的列表口径）', async () => {
+    const ctx = createCtx({
+      withQuery: true,
+      sessions: [
+        { id: 'session-live', live: true, createdAt: 2 },
+        { id: 'session-cold', createdAt: 1 },
+      ],
+      workspaces: [{ id: 'w1', path: WORKSPACE(), title: 'repo', sessionIds: ['session-live', 'session-cold'] }],
+    });
+    const { manager } = createManager(ctx);
+
+    const groups = await manager.listWorkspaceGroups('c2c', PEER);
+
+    expect(groups.find((group) => group.id === 'w1')?.sessions.map((session) => session.id))
+      .toEqual(['session-live']);
   });
 });
 

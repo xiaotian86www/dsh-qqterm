@@ -75,7 +75,7 @@ describe('host adapter', () => {
     ]));
   });
 
-  it('listSessions：合并 sessionController.list 的 updatedAt（Web 侧栏同一份摘要）', async () => {
+  it('listSessions：合并 sessionController.list 的 updatedAt 与 blank（Web 侧栏同一份摘要）', async () => {
     const adapter = createHostAdapter(makeCtx({
       sessionQuery: {
         listSessions: async () => [
@@ -84,30 +84,35 @@ describe('host adapter', () => {
         ],
       },
       sessionController: {
-        list: async () => ({ items: [{ sessionId: 'a', updatedAt: 900 }, { sessionId: 'b', updatedAt: 200 }] }),
+        list: async () => ({
+          items: [
+            { sessionId: 'a', updatedAt: 900, blank: true },
+            { sessionId: 'b', updatedAt: 200, blank: false },
+          ],
+        }),
       },
     }));
 
     const sessions = await adapter.listSessions();
 
-    expect(sessions.map((session) => [session.id, session.createdAt, session.updatedAt])).toEqual([
-      ['a', 100, 900],
-      ['b', 200, 200],
+    expect(sessions.map((session) => [session.id, session.createdAt, session.updatedAt, session.blank])).toEqual([
+      ['a', 100, 900, true],
+      ['b', 200, 200, false],
     ]);
   });
 
-  it('listSessions：sessionController 缺失或抛错时 updatedAt 回退成 createdAt', async () => {
+  it('listSessions：sessionController 缺失或抛错时 updatedAt 回退成 createdAt，blank 为 false', async () => {
     const query = {
       listSessions: async () => [{ header: { id: 'a', cwd: '/w', createdAt: 100 }, live: false }],
     };
     const withoutController = createHostAdapter(makeCtx({ sessionQuery: query }));
-    expect((await withoutController.listSessions())[0]?.updatedAt).toBe(100);
+    expect((await withoutController.listSessions())[0]).toMatchObject({ updatedAt: 100, blank: false });
 
     const failing = createHostAdapter(makeCtx({
       sessionQuery: query,
       sessionController: { list: async () => { throw new Error('EIO'); } },
     }));
-    expect((await failing.listSessions())[0]?.updatedAt).toBe(100);
+    expect((await failing.listSessions())[0]).toMatchObject({ updatedAt: 100, blank: false });
   });
 });
 

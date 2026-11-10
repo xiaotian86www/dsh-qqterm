@@ -1725,9 +1725,9 @@ export class SessionManager {
   /**
    * 按宿主的 workspace 分组列出全部会话（`/sessions all`）。
    *
-   * 数据来源是「registry 分组 + sessionQuery 清单」的并集：registry 提供分组、
-   * 路径与手动顺序，sessionQuery 提供 live / 来源 / 创建时间等 registry 不存的字段。
-   * registry 记账可能漏掉别的入口新建的会话，所以差集单独归到「未分组」。
+   * 与 Web 侧栏同一口径：分组只认 registry 的 `sessionIds` 记账，记账之外
+   * （哪怕 cwd 正好落在某个工作区）一律进「未分组」；可见性只保留 live 或
+   * 带 cwd 的 cold 会话，blank 会话只留当前那个。数据字段来自 sessionQuery。
    *
    * @param scope 当前 chat 作用域（用于标记 current）
    * @param peerId 当前 chat 的 peer id
@@ -1741,7 +1741,10 @@ export class SessionManager {
     const all = await this.host.listSessions();
     const sessions = all
       .filter((session) => session.origin !== 'subagent')
-      .filter((session) => session.cwd !== undefined)
+      // 与 Web 的列表口径一致：live 会话全部可见，cold 会话只留带 cwd 的
+      .filter((session) => session.live || session.cwd !== undefined)
+      // Web 侧栏只显示当前打开的那个 blank 会话
+      .filter((session) => !session.blank || session.id === currentId)
       .sort((a, b) => (b.updatedAt - a.updatedAt) || (a.id < b.id ? -1 : 1));
 
     /** 分组条目：标题由调用方按需补（fillSessionTitles，只读要展示的行） */
@@ -1772,15 +1775,11 @@ export class SessionManager {
     const consumed = new Set<string>();
 
     for (const workspace of this.host.workspaceList()) {
-      const accounted = workspace.sessionIds
+      // 与 Web 一致：只认 registry 记账，不再按 cwd 兜底归组
+      const merged = workspace.sessionIds
+        .filter((id) => !consumed.has(id))
         .map((id) => byId.get(id))
-        .filter((session): session is HostSessionInfo => session !== undefined)
-        .filter((session) => samePath(session.cwd ?? '', workspace.path));
-      // registry 记账之外、cwd 落在本工作区的会话也补进来（别的入口新建、尚未 attach）
-      const extra = sessions.filter((session) => !consumed.has(session.id)
-        && !workspace.sessionIds.includes(session.id)
-        && samePath(session.cwd ?? '', workspace.path));
-      const merged = [...extra, ...accounted];
+        .filter((session): session is HostSessionInfo => session !== undefined);
       for (const session of merged) consumed.add(session.id);
 
       merged.sort((left, right) => {
@@ -1791,7 +1790,6 @@ export class SessionManager {
         return recency !== 0 ? recency : left.id < right.id ? -1 : 1;
       });
 
-      for (const session of merged) consumed.add(session.id);
       groups.push({
         id: workspace.id,
         title: workspace.title,
