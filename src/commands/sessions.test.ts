@@ -189,7 +189,7 @@ describe('/sessions 持有视图', () => {
     const text = await run(manager, '');
 
     expect(text).toContain('### 🗂 工作中会话（1 个工作区 · 2 个会话）');
-    expect(text).toContain('**repo** · `/repo`');
+    expect(text).toContain('**repo** · <qqbot-cmd-input text="/new /repo" show="/repo"/>');
     expect(text).not.toContain('未分组');
     expect(text).toContain('#cccc1111 · 当前会话 · 生成中');
     expect(text).toContain('#dddd2222 · 旧会话 · 空闲');
@@ -236,8 +236,8 @@ describe('/sessions 持有视图', () => {
     const text = await run(manager, '');
 
     // 组标题与 /sessions all 同一写法，组之间空行；行内不再重复工作区后缀
-    expect(text).toContain('**repo** · `/repo`');
-    expect(text).toContain('**docs** · `/docs`');
+    expect(text).toContain('**repo** · <qqbot-cmd-input text="/new /repo" show="/repo"/>');
+    expect(text).toContain('**docs** · <qqbot-cmd-input text="/new /docs" show="/docs"/>');
     expect(text).toContain('show="#aaaa1111 · 本区会话 · 空闲');
     expect(text).toContain('show="#bbbb2222 · 别的项目 · 空闲');
     expect(text.indexOf('**repo**')).toBeLessThan(text.indexOf('**docs**'));
@@ -256,6 +256,43 @@ describe('/sessions 持有视图', () => {
     const text = await run(manager, '');
 
     expect(text).toContain('**gone** · `/gone`\n⚠️ 目录不存在');
+  });
+
+  it('工作区标题只把路径做成新会话入口，名字保持纯文本', async () => {
+    const manager = makeManager({
+      listHeldSessions: vi.fn(async () => [entry({
+        held: true,
+        workspace: 'repo',
+        workspacePath: 'D:\\my_ws & co',
+      })]),
+    });
+    const text = await run(manager, '');
+
+    // 名字不参与链接；路径原样保留 `_`，属性里的 `&` 转义
+    expect(text).toContain(
+      '**repo** · <qqbot-cmd-input text="/new D:\\my_ws &amp; co" show="D:\\my_ws &amp; co"/>',
+    );
+  });
+
+  it('未分组与目录不存在的工作区不给新会话入口', async () => {
+    const ungrouped = makeManager({
+      listHeldSessions: vi.fn(async () => [entry({ held: true })]),
+    });
+    const ungroupedText = await run(ungrouped, '');
+    expect(ungroupedText).toContain('**未分组**');
+    expect(ungroupedText).not.toContain('text="/new');
+
+    const gone = makeManager({
+      listHeldSessions: vi.fn(async () => [entry({
+        held: true,
+        workspace: 'gone',
+        workspacePath: 'D:\\gone',
+        workspaceMissing: true,
+      })]),
+    });
+    const goneText = await run(gone, '');
+    expect(goneText).toContain('**gone** · `D:\\gone`');
+    expect(goneText).not.toContain('text="/new');
   });
 
   it('当前项在别的页时只补当前行，不出现恢复入口', async () => {
@@ -450,6 +487,11 @@ describe('/sessions all', () => {
     expect(text).toContain('全部会话（2 个工作区 · 2 个会话）');
     expect(text).toContain('**dsh-qqterm**');
     expect(text).toContain('**default-workspace**');
+    expect(text).toContain(
+      '**dsh-qqterm** · <qqbot-cmd-input text="/new D:\\thirdparty\\dsh-qqterm" show="D:\\thirdparty\\dsh-qqterm"/>',
+    );
+    // 目录不存在时不给「新会话」入口
+    expect(text).not.toContain('text="/new C:');
     expect(text).toContain('⚠️ 目录不存在');
     // 所有视图都只用短 id，不编号
     expect(text).not.toMatch(/^\d+\. /m);

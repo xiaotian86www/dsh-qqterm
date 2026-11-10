@@ -19,7 +19,8 @@
  *
  * 输出统一走 sendMarkdownChunked（与 /model、/preset 一致）：普通字符串回复
  * 不会按 markdown 渲染，`###` 和 `<qqbot-cmd-input>` 会原样显示成文本。
- * 列表里每条会话渲染成可点击命令，点一下就把对应子命令填进输入框。
+ * 列表里每条会话渲染成可点击命令，点一下就把对应子命令填进输入框；
+ * 工作区组标题只把路径做成这样的命令（填入 `/new <路径>`），名字保持纯文本。
  *
  * 归档走宿主 `workspaceRegistry.archiveSession`：只往 registry 的全局归档集里
  * 加一个 id，Web 侧栏与本命令都不再列出它，磁盘日志原样保留，随时可取消归档。
@@ -28,6 +29,7 @@
  * 又容易撞上文件占用（Windows 上会话被 Web 端打开就删不掉）。归档是可逆的，
  * 足够满足「从列表里拿掉」的需求。
  */
+import { isAbsolute } from 'node:path';
 import type { CommandDeps, CategorizedCommand } from './types.ts';
 import { ownerOnlyAuth } from './auth.ts';
 import { getScopePeer, formatRelativeTime, sendMarkdownChunked, shortSessionId } from '../shared/index.ts';
@@ -212,17 +214,40 @@ function shortTitle(entry: WorkspaceSession): string {
 }
 
 /**
+ * 工作区路径做成可点击命令：点一下把 `/new <绝对路径>` 填进输入框。
+ *
+ * 路径不走 cleanInline——它会把 `_` `*` `~` 之类删掉，按钮上的地址就和
+ * 真实目录对不上；这里只去换行，再按属性值转义。
+ */
+function workspaceLink(path: string): string {
+  const label = path.replace(/[\r\n]+/g, ' ').trim();
+  return `<qqbot-cmd-input text="${attrValue(`/new ${label}`)}" show="${attrValue(label)}"/>`;
+}
+
+/**
  * 工作区标题行。
  *
- * 目录不存在时单独一行：状态图标只能放行首，不能跟在路径后面。
+ * `linkable` 只在浏览视图里开：目录存在时把路径渲染成 `/new <路径>` 命令，
+ * 工作区名保持纯文本。未分组、目录不存在、不是绝对路径时保持纯文本——
+ * 点了也到不了那个目录。目录不存在时单独一行：状态图标只能放行首。
  */
 function workspaceHeader(
   title: string,
   path: string,
   missing: boolean,
+  linkable = false,
 ): string[] {
   const name = clip(cleanInline(title)) || '未命名工作区';
-  const lines = [path === '' ? `**${name}**` : `**${name}** · \`${path}\``];
+  if (path === '') {
+    return missing ? [`**${name}**`, '⚠️ 目录不存在'] : [`**${name}**`];
+  }
+  // 宿主的 workspace.path 都是绝对路径；相对路径交给 /new 会落到进程目录，
+  // 不是用户点的那个工作区，所以不给入口
+  const absolute = isAbsolute(path) || /^[A-Za-z]:[\\/]/.test(path);
+  const target = linkable && !missing && absolute
+    ? workspaceLink(path)
+    : `\`${path}\``;
+  const lines = [`**${name}** · ${target}`];
   if (missing) lines.push('⚠️ 目录不存在');
   return lines;
 }
@@ -658,7 +683,9 @@ function groupHeldEntries(
       const title = cleanInline(entry.workspace ?? '');
       group = {
         title: title === '' ? '未分组' : title,
-        path: cleanInline(entry.workspacePath ?? ''),
+        // 路径要原样进可点击命令，只去换行。cleanInline 会删掉 `_` 等字符，
+        // 用净化后的路径开新会话就落到别的目录了。
+        path: (entry.workspacePath ?? '').replace(/[\r\n]+/g, ' ').trim(),
         missing: entry.workspaceMissing === true,
         rows: [],
       };
@@ -734,7 +761,7 @@ function renderHeldList(
 
   groupHeldEntries(shown).forEach((group, groupIndex) => {
     if (groupIndex > 0) lines.push('');
-    lines.push(...workspaceHeader(group.title, group.path, group.missing), '');
+    lines.push(...workspaceHeader(group.title, group.path, group.missing, true), '');
     for (const row of group.rows) {
       lines.push(renderLine(row, renderRow(row, {
         showStatus: true,
@@ -778,6 +805,7 @@ function renderArchivePicker(
   ];
   groupHeldEntries(shown).forEach((group, groupIndex) => {
     if (groupIndex > 0) lines.push('');
+    // 候选页只管挑会话，组标题不挂「新会话」入口，避免和本页动作抢点击
     lines.push(...workspaceHeader(group.title, group.path, group.missing), '');
     for (const row of group.rows) {
       const label = renderRow(row, { showHeld: true });
@@ -861,7 +889,7 @@ function renderGroups(groups: readonly WorkspaceGroup[], page = 1): string {
   for (const { group, entry } of shown) {
     if (group.id !== lastGroupId) {
       if (lastGroupId !== undefined) lines.push('');
-      lines.push(...workspaceHeader(group.title, group.path, group.missing), '');
+      lines.push(...workspaceHeader(group.title, group.path, group.missing, true), '');
       lastGroupId = group.id;
     }
     lines.push(renderLine(entry, renderRow(entry, { showHeld: true })));
@@ -874,7 +902,7 @@ function renderGroups(groups: readonly WorkspaceGroup[], page = 1): string {
     if (shown.length > 0) lines.push('');
     allArchived.forEach((group, index) => {
       if (index > 0) lines.push('');
-      lines.push(...workspaceHeader(group.title, group.path, group.missing), '');
+      lines.push(...workspaceHeader(group.title, group.path, group.missing, true), '');
       lines.push(`${group.sessions.length} 个会话全部已归档`);
     });
   }
