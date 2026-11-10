@@ -130,6 +130,7 @@ export async function bootstrapGateway(
     config,
     logger,
     (record) => manager.directoryForAgent(record.agent),
+    // 非当前会话：来源头 + 尾部链接行（回复 / 恢复），与普通消息同一套装饰
     (record, text) => (manager.isCurrentSession(record.sessionId)
       ? text
       : decorateSessionMessage(text, record.sessionId, sessionTitleOf(record))),

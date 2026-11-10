@@ -39,32 +39,32 @@ describe('sourceTitle', () => {
   });
 });
 
-describe('来源行与尾部链接', () => {
+describe('来源行与尾部动作', () => {
   it('来源行独占一行，只留短 id 与标题（不带图标）', () => {
     expect(sessionSourceHeader('session-04de1556-8c54-4b78-93e1-5714e079fca6', '修登录'))
       .toBe('> `#04de1556` · 修登录');
   });
 
-  it('回复链接把 /to #短id 填进输入框，按钮文本不再重复 id', () => {
+  it('回复链接把 /to #短id 填进输入框，标签写全动作、不再重复 id', () => {
     expect(sessionReplyLink('session-04de1556-8c54-4b78-93e1-5714e079fca6'))
       .toBe('<qqbot-cmd-input text="/to #04de1556 " show="回复"/>');
   });
 
-  it('恢复链接切回该会话，按钮文本同样只写动作', () => {
+  it('恢复链接切回该会话，标签同样写全动作', () => {
     expect(sessionResumeLink('session-04de1556-8c54-4b78-93e1-5714e079fca6'))
       .toBe('<qqbot-cmd-input text="/sessions resume #04de1556" show="恢复"/>');
   });
 
   it('尾部行是回复 + 恢复两个链接', () => {
     expect(sessionLinkRow('session-04de1556'))
-      .toBe('> <qqbot-cmd-input text="/to #04de1556 " show="回复"/>'
+      .toBe('<qqbot-cmd-input text="/to #04de1556 " show="回复"/>'
         + ' · <qqbot-cmd-input text="/sessions resume #04de1556" show="恢复"/>');
   });
 
-  it('整段装饰：来源头 + 空行 + 正文 + 空行 + 链接行', () => {
+  it('整段装饰：来源头 + 正文 + 链接行', () => {
     expect(decorateSessionMessage('hello', 'session-04de1556', '修登录'))
       .toBe('> `#04de1556` · 修登录\n\nhello\n\n'
-        + '> <qqbot-cmd-input text="/to #04de1556 " show="回复"/>'
+        + '<qqbot-cmd-input text="/to #04de1556 " show="回复"/>'
         + ' · <qqbot-cmd-input text="/sessions resume #04de1556" show="恢复"/>');
   });
 });
@@ -90,13 +90,15 @@ describe('chunkDecoratedSessionMessage', () => {
   const id = 'session-04de1556-8c54-4b78-93e1-5714e079fca6';
   const body = Array.from({ length: 30 }, (_, i) => `第 ${i} 行：内容内容内容内容`).join('\n');
 
-  it('首片带来源头、末片带链接行，中间片不重复', () => {
+  it('首片带来源头、末片带尾部链接行、中间片不重复', () => {
     const chunks = chunkDecoratedSessionMessage(body, id, '修登录', 260);
 
     expect(chunks.length).toBeGreaterThan(1);
     expect(chunks[0]!.startsWith('> `#04de1556` · 修登录\n\n')).toBe(true);
-    expect(chunks[0]).not.toContain('<qqbot-cmd-input');
-    expect(chunks[chunks.length - 1]!.endsWith('show="恢复"/>')).toBe(true);
+    expect(chunks.join('\n')).toContain('<qqbot-cmd-input');
+    const last = chunks[chunks.length - 1]!;
+    expect(last).not.toContain('***');
+    expect(last).toContain('show="恢复"');
     for (const chunk of chunks.slice(1, -1)) {
       expect(chunk).not.toContain('#04de1556');
     }

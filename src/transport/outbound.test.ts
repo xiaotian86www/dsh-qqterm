@@ -201,11 +201,11 @@ describe('OutboundRouter.routeStreamFrame', () => {
 
 describe('OutboundRouter: 多会话标记', () => {
   const sourceOf = (id: string, title = '未命名会话'): string => `> \`#${id}\` · ${title}`;
-  const linksOf = (id: string): string =>
-    `> <qqbot-cmd-input text="/to #${id} " show="回复"/>`
+  const footerOf = (id: string): string =>
+    `<qqbot-cmd-input text="/to #${id} " show="回复"/>`
     + ` · <qqbot-cmd-input text="/sessions resume #${id}" show="恢复"/>`;
 
-  it('非当前会话：来源头和回复链接各占一行，正文不会被拼进标记', async () => {
+  it('非当前会话：来源头 + 正文 + 动作链接行', async () => {
     const { outbound, bot } = setup({ current: false });
 
     outbound.routeSessionEvent({ header: { id: 'sess-qq' } }, {
@@ -217,7 +217,7 @@ describe('OutboundRouter: 多会话标记', () => {
     expect(bot.openStream).not.toHaveBeenCalled();
     expect(bot.sendMarkdown).toHaveBeenCalledWith(
       c2cTarget,
-      `${sourceOf('sess-qq')}\n\nhello\n\n${linksOf('sess-qq')}`,
+      `${sourceOf('sess-qq')}\n\nhello\n\n${footerOf('sess-qq')}`,
     );
   });
 
@@ -238,7 +238,7 @@ describe('OutboundRouter: 多会话标记', () => {
 
     expect(bot.sendMarkdown).toHaveBeenCalledWith(
       c2cTarget,
-      `${sourceOf('sess-qq')}\n\nhello\n\n${linksOf('sess-qq')}`,
+      `${sourceOf('sess-qq')}\n\nhello\n\n${footerOf('sess-qq')}`,
     );
   });
 
@@ -258,7 +258,7 @@ describe('OutboundRouter: 多会话标记', () => {
 
     expect(bot.sendMarkdown).toHaveBeenCalledWith(
       c2cTarget,
-      `${sourceOf('sess-qq', '修登录')}\n\nhello\n\n${linksOf('sess-qq')}`,
+      `${sourceOf('sess-qq', '修登录')}\n\nhello\n\n${footerOf('sess-qq')}`,
     );
   });
 

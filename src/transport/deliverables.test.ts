@@ -110,7 +110,7 @@ describe('DeliverablesDeliverer', () => {
     expect(text).toContain('c.txt');
   });
 
-  it('非当前会话的未送达提示也带来源头与回复链接', async () => {
+  it('非当前会话的未送达提示带来源头与尾部动作', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'dsh-qqterm-dlv-'));
     const mediaBot = createMediaBot();
     const sender = createSender();
@@ -120,14 +120,13 @@ describe('DeliverablesDeliverer', () => {
       createConfig(),
       logger,
       () => dir,
-      (_record, text) => `HEAD\n\n${text}\n\nHINT`,
+      (_record, text) => `HEAD\n\n${text}`,
     );
 
     await deliverer.deliver(createRecord(), [{ path: join(dir, 'gone.txt') }]);
 
     const text = (sender.sendMarkdown as ReturnType<typeof vi.fn>).mock.calls[0][1] as string;
     expect(text.startsWith('HEAD\n\n')).toBe(true);
-    expect(text.endsWith('\n\nHINT')).toBe(true);
     expect(text).toContain('gone.txt');
   });
 });

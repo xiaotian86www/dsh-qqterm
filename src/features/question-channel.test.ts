@@ -106,18 +106,24 @@ describe('formatQuestion', () => {
       isCurrent: false,
       title: '修登录',
     });
-    expect(text.startsWith('> `#04de1556` · 修登录\n**❓ 需要你的回答**\n\n')).toBe(true);
+    expect(text.startsWith('> `#04de1556` · 修登录\n\n**❓ 需要你的回答**\n\n')).toBe(true);
     expect(text).not.toContain('[#');
     expect(text).toContain('show="回答"');
     expect(text).toContain('show="恢复"');
   });
 
-  it('非当前会话带按钮时文案与当前会话一致，只把「直接回复」换成链接', () => {
+  it('非当前会话带按钮时引导点按钮，同时留「直接回复」链接', () => {
     const text = formatQuestion(q2(), true, { sessionId: 'session-04de1556', isCurrent: false, title: '修登录' });
-    expect(text.startsWith('> `#04de1556` · 修登录\n**❓ 需要你的回答**\n\n')).toBe(true);
-    expect(text).toContain('> 👇 点击下方按钮选择 · 或者');
-    // 文案与当前会话卡片一致，只把「直接回复」换成链接：点它把 `/to #id ` 填进输入框
-    expect(text).toContain('<qqbot-cmd-input text="/to #04de1556 " show="直接回复"/>');
+    expect(text.startsWith('> `#04de1556` · 修登录\n\n**❓ 需要你的回答**\n\n')).toBe(true);
+    expect(text).toContain('点击下方按钮选择');
+    expect(text).toContain('show="直接回复"');
+  });
+
+  it('非当前会话多选：先说明编号格式，再给回答入口', () => {
+    const q: UserQuestion = { id: 'q', question: '选哪些？', options: [{ label: 'A' }], multiSelect: true };
+    const text = formatQuestion(q, true, { sessionId: 'session-04de1556', isCurrent: false });
+    expect(text).toContain('> 💡 多个编号用逗号分隔（如 1,3）');
+    expect(text).toContain('show="回答"');
   });
 
   it('当前会话不标来源行', () => {
@@ -156,6 +162,12 @@ describe('buildKeyboard', () => {
   it('returns undefined for multi-select or no-options', () => {
     expect(buildKeyboard({ ...q2(), multiSelect: true })).toBeUndefined();
     expect(buildKeyboard({ id: 'q', question: 't' })).toBeUndefined();
+  });
+
+  it('非当前会话也只在键盘里放选项，不另加动作行', () => {
+    const kb = buildKeyboard(q2(), 'session-04de1556');
+    expect(kb?.content.rows).toHaveLength(1);
+    expect(kb?.content.rows[0]?.buttons.every((b) => b.action.type === 1)).toBe(true);
   });
 });
 
@@ -628,7 +640,7 @@ describe('非当前会话的标记', () => {
     await expect(p).rejects.toThrow('timed out');
     await sleep(10);
 
-    expect(sent[0]!.text.startsWith('> `#04de1556` · 修登录\n**❓ 需要你的回答**\n\n')).toBe(true);
+    expect(sent[0]!.text.startsWith('> `#04de1556` · 修登录\n\n**❓ 需要你的回答**\n\n')).toBe(true);
     expect(sent[1]!.text).toBe('> `#04de1556` · 修登录\n\n⚠️ 提问已超时，未收到回答。');
   });
 });

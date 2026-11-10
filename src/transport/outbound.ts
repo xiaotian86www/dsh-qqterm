@@ -8,7 +8,10 @@ import type { SessionManager, SessionRecord } from '../session/index.ts';
 import type { QQTermConfig } from '../config.ts';
 import type { Logger } from '../types.ts';
 import { chunkMarkdownText } from './chunker.ts';
-import { chunkDecoratedSessionMessage, sessionTitleOf } from './session-source.ts';
+import {
+  chunkDecoratedSessionMessage,
+  sessionTitleOf,
+} from './session-source.ts';
 import { OutboundBuffer, type QQBotSender } from './outbound-buffer.ts';
 import { formatToolResult, type ToolsRegistryLike, type ToolResultData } from './tool-presenter.ts';
 import type { DeliverablesDelivererLike } from './deliverables.ts';
@@ -365,8 +368,8 @@ class OutboundRouter {
   }
 
   /**
-   * 在当前发送链内发送：非当前会话整段加来源头，末尾补 `/to` 回复链接。
-   * 来源头只在首片、链接只在末片，避免长回复每片都重复标注。
+   * 在当前发送链内发送：非当前会话整段加来源头与尾部动作。
+   * 来源头只在首片、尾部动作只在末片，避免长回复每片都重复标注。
    */
   private async sendNow(record: SessionRecord, text: string, tag: string): Promise<void> {
     const current = this.manager.isCurrentSession(record.sessionId);

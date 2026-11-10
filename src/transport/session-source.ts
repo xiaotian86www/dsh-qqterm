@@ -2,8 +2,12 @@
  * 非当前会话消息的来源标注与快捷回复入口。
  *
  * 多个已获取会话的输出都回同一个 QQ 聊天：正文前标会话（短 id + 标题），
- * 正文后给「回复」「恢复」两个链接。首尾各占一行、与正文之间空一行——不能把
- * 标记直接拼在正文前面，否则会和 markdown 标题、列表、代码块粘成一段。
+ * 正文后空一行给「回复」「恢复」两个行内指令链接。来源行独占一行、
+ * 与正文之间空一行——不能把标记直接拼在正文前面，否则会和 markdown 标题、
+ * 列表、代码块粘成一段。
+ *
+ * 两个链接都必须保留：`回复` 把 `/to #短id ` 填进输入框，`恢复` 直接切走
+ * 当前指针。两者独占一行、正文之后空一行，位置固定好找。
  */
 import type { SessionEventLike, SessionRecord } from '../session/index.ts';
 import { shortSessionId } from '../shared/utils.ts';
@@ -53,20 +57,20 @@ export function sessionSourceHeader(sessionId: string, title?: string): string {
 /**
  * 回复链接：把 `/to #短id ` 填进输入框（label 可按场景改，如提问用「回答」）。
  *
- * `show` 只写动作，不再跟 `#短id`：id 已经在首行署名里，按钮上重复一遍只是噪音。
+ * `show` 只写动作，不再跟 `#短id`：id 已经在首行署名里，重复一遍只是噪音。
  */
 export function sessionReplyLink(sessionId: string, label = '回复'): string {
   return `<qqbot-cmd-input text="/to #${shortSessionId(sessionId)} " show="${label}"/>`;
 }
 
 /** 恢复链接：把这个会话切回当前（后续消息发给它）；`show` 同样只写动作 */
-export function sessionResumeLink(sessionId: string): string {
-  return `<qqbot-cmd-input text="/sessions resume #${shortSessionId(sessionId)}" show="恢复"/>`;
+export function sessionResumeLink(sessionId: string, label = '恢复'): string {
+  return `<qqbot-cmd-input text="/sessions resume #${shortSessionId(sessionId)}" show="${label}"/>`;
 }
 
-/** 尾部链接行（独占一行）：回复 + 恢复，两个动作各一个可点指令 */
+/** 尾部链接行（正文下方独占一行）：回复 + 恢复 */
 export function sessionLinkRow(sessionId: string): string {
-  return `> ${sessionReplyLink(sessionId)} · ${sessionResumeLink(sessionId)}`;
+  return `${sessionReplyLink(sessionId)} · ${sessionResumeLink(sessionId)}`;
 }
 
 /**
@@ -127,7 +131,9 @@ export function sessionTitleOf(record: SessionRecord): string | undefined {
   return title;
 }
 
-/** 整段文本加来源头与尾部链接（不切分，用于短消息 / 交付物提示） */
+/**
+ * 整段文本加来源头与尾部链接行（不切分，用于短消息 / 交付物提示）。
+ */
 export function decorateSessionMessage(text: string, sessionId: string, title?: string): string {
   const body = text.trim();
   if (body === '') return '';
@@ -135,7 +141,7 @@ export function decorateSessionMessage(text: string, sessionId: string, title?: 
 }
 
 /**
- * 切分并装饰：首片带来源头、末片带尾部链接。
+ * 切分并装饰：首片带来源头，末片带尾部链接行。
  *
  * 正文按「上限 - 首尾开销」切，保证加完装饰后每条仍不超过 textChunkLimit。
  */
@@ -146,12 +152,13 @@ export function chunkDecoratedSessionMessage(
   limit: number,
 ): string[] {
   const header = sessionSourceHeader(sessionId, title);
-  const hint = sessionLinkRow(sessionId);
+  const footer = sessionLinkRow(sessionId);
   const body = text.trim();
   if (body === '') return [];
-  const reserve = header.length + hint.length + 4; // 两处 `\n\n`
+  const reserve = header.length + footer.length + 4; // 两处 `\n\n`
   const chunks = chunkMarkdownText(body, Math.max(1, limit - reserve));
   chunks[0] = `${header}\n\n${chunks[0]}`;
-  chunks[chunks.length - 1] = `${chunks[chunks.length - 1]}\n\n${hint}`;
+  chunks[chunks.length - 1] = `${chunks[chunks.length - 1]}\n\n${footer}`;
   return chunks;
 }
+

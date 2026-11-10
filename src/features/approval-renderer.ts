@@ -24,13 +24,13 @@ export function buildApprovalText(
 ): string {
   const nonCurrent = context.sessionId !== undefined && context.isCurrent === false;
   const lines: string[] = [];
-  // 与消息、提问同一套来源行：id + 标题，不带图标。来源行直接接标题，
-  // 中间不再补空行——QQ 端会把它渲染成标题上方的一段多余留白。
+  // 与消息、提问同一套来源行：id + 标题，不带图标。来源行是引用块（`>`），
+  // 必须与卡片正文之间空一行才能结束引用：只换一行的话 markdown 的 lazy
+  // continuation 会把整张卡片吞进引用块里。
   if (nonCurrent && context.sessionId !== undefined) {
-    lines.push(sessionSourceHeader(context.sessionId, context.title));
+    lines.push(sessionSourceHeader(context.sessionId, context.title), '');
   }
-  // 标题用加粗行（与问答卡片一致，不用 markdown 标题，避免字号被放大）：
-  // 标题后留一个空行，来源行与标题之间不留空行。
+  // 标题用加粗行（与问答卡片一致，不用 markdown 标题，避免字号被放大），标题后留一个空行。
   lines.push('**🔐 执行审批**', '');
   lines.push(`🔧 工具: ${request.toolName}`);
   if (command) {

@@ -149,12 +149,12 @@ describe('buildApprovalText', () => {
       isCurrent: false,
       title: '修登录',
     });
-    expect(text.startsWith('> `#04de1556` · 修登录\n**🔐 执行审批**\n\n🔧 工具: bash')).toBe(true);
+    expect(text.startsWith('> `#04de1556` · 修登录\n\n**🔐 执行审批**\n\n🔧 工具: bash')).toBe(true);
     expect(text).toContain('**🔐 执行审批**');
     expect(text).not.toContain('[#');
   });
 
-  it('来源行与标题之间不留空行，标题后保留一个空行', () => {
+  it('当前会话没有来源行：标题直接在首行，前面不多出空行', () => {
     const text = buildApprovalText(makeRequest({ toolName: 'bash' }), 'ls');
     expect(text.startsWith('**🔐 执行审批**\n\n🔧 工具: bash')).toBe(true);
   });

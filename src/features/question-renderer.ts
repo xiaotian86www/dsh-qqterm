@@ -17,7 +17,7 @@ export interface QuestionRenderContext {
 }
 
 /**
- * 为「单选、带选项」的问题构建内联键盘；不适用时返回 undefined。
+ * 为问题构建内联键盘；没有可点内容时返回 undefined。
  *
  * 多行多列布局：每行 BUTTONS_PER_ROW 个按钮，减少选项多时的刷屏。
  *
@@ -28,38 +28,38 @@ export interface QuestionRenderContext {
  */
 export function buildKeyboard(question: UserQuestion, sessionId?: string): InlineKeyboard | undefined {
   const opts = question.options ?? [];
-  if (opts.length === 0 || question.multiSelect) return undefined;
-
   const rows: InlineKeyboard['content']['rows'] = [];
-  for (let i = 0; i < opts.length; i += BUTTONS_PER_ROW) {
-    rows.push({
-      buttons: opts.slice(i, i + BUTTONS_PER_ROW).map((o, offset) => {
-        const idx = i + offset;
-        return {
-          id: `q-${question.id}-opt-${idx}`,
-          render_data: {
-            label: buttonLabel(o.label),
-            visited_label: '✓ 已选',
-            style: 1,
-          },
-          action: {
-            type: 1,
-            permission: { type: 2 },
-            click_limit: 1,
-            data: encodeButtonData({
-              t: 'question',
-              ...(sessionId !== undefined ? { s: sessionId } : {}),
-              q: question.id,
-              i: idx,
-            }),
-          },
-          // 互斥交给状态机：首答即结算，后续点击因 pending 已清或问题 id
-          // 不匹配而被忽略，不需要键盘层面的分组约束。
-        };
-      }),
-    });
+  if (opts.length > 0 && !question.multiSelect) {
+    for (let i = 0; i < opts.length; i += BUTTONS_PER_ROW) {
+      rows.push({
+        buttons: opts.slice(i, i + BUTTONS_PER_ROW).map((o, offset) => {
+          const idx = i + offset;
+          return {
+            id: `q-${question.id}-opt-${idx}`,
+            render_data: {
+              label: buttonLabel(o.label),
+              visited_label: '✓ 已选',
+              style: 1,
+            },
+            action: {
+              type: 1,
+              permission: { type: 2 },
+              click_limit: 1,
+              data: encodeButtonData({
+                t: 'question',
+                ...(sessionId !== undefined ? { s: sessionId } : {}),
+                q: question.id,
+                i: idx,
+              }),
+            },
+            // 互斥交给状态机：首答即结算，后续点击因 pending 已清或问题 id
+            // 不匹配而被忽略，不需要键盘层面的分组约束。
+          };
+        }),
+      });
+    }
   }
-  return { content: { rows } };
+  return rows.length === 0 ? undefined : { content: { rows } };
 }
 
 /** 把单个问题渲染成 QQ 文本 */
@@ -71,10 +71,11 @@ export function formatQuestion(
   const lines: string[] = [];
   const nonCurrent = context.sessionId !== undefined && context.isCurrent === false;
 
-  // 非当前会话：来源行独占首行，与消息的标注格式保持一致（id + 标题，不带图标），
-  // 直接接标题，中间不补空行。
+  // 非当前会话：来源行独占首行，与消息的标注格式保持一致（id + 标题，不带图标）。
+  // 来源行是引用块（`>`），必须与卡片正文之间空一行才能结束引用，否则整张卡片
+  // 会被 markdown 的 lazy continuation 吞进引用块。当前会话没有来源行，不受影响。
   if (nonCurrent && context.sessionId !== undefined) {
-    lines.push(sessionSourceHeader(context.sessionId, context.title));
+    lines.push(sessionSourceHeader(context.sessionId, context.title), '');
   }
 
   // 标题行：与其他卡片一样先给「图标 + 是什么」，避免整条消息看起来像模型正文；
@@ -95,15 +96,24 @@ export function formatQuestion(
     lines.push(`${i + 1}. ${o.label}${o.description ? ` · ${o.description}` : ''}`);
   });
 
-  // 底部引导：用引用块（>）与正文区分
+  // 底部引导：用引用块（>）与正文区分。
+  // 非当前会话保留自己的引导行：卡片里已经有选项按钮，行内链接只补「回答 / 恢复」
+  // 这种兜底入口，不再套消息那套尾部链接行（那是给正文回复用的）。
   if (nonCurrent && context.sessionId !== undefined) {
-    lines.push('');
-    if (withButtons) {
-      // 按钮自带会话 id，点哪条卡片的按钮就答哪条；想改用编号回复得先带出
-      // /to，否则数字会落到当前会话。所以按钮版也留一个「回复」链接。
-      lines.push(`> 👇 点击下方按钮选择 · 或者${sessionReplyLink(context.sessionId, '直接回复')}`);
+    // 多选没有选项按钮，先说明编号格式，再给「回答 / 恢复」入口
+    if (multi) {
+      lines.push('', '> 💡 多个编号用逗号分隔（如 1,3）');
+      lines.push(
+        '',
+        `> ${sessionReplyLink(context.sessionId, '回答')} · ${sessionResumeLink(context.sessionId)}`,
+      );
+    } else if (withButtons) {
+      lines.push('', `> 👇 点击下方按钮选择 · 或者${sessionReplyLink(context.sessionId, '直接回复')}`);
     } else {
-      lines.push(`> ${sessionReplyLink(context.sessionId, '回答')} · ${sessionResumeLink(context.sessionId)}`);
+      lines.push(
+        '',
+        `> ${sessionReplyLink(context.sessionId, '回答')} · ${sessionResumeLink(context.sessionId)}`,
+      );
     }
   } else if (opts.length > 0) {
     lines.push('');

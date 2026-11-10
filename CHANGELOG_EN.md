@@ -15,6 +15,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Changed
 
+- **Reply entry points for other sessions moved to their own link row**: `回复` / `恢复` stay inline command links, but a blank line after the body puts them on their own line in a fixed position instead of trailing the last paragraph; labels are just two characters, and the source line still opens on its own line without an icon, so the footer stays quiet. Questions from other sessions without option buttons offer reply / resume links on the guidance line.
 - **`/sessions` order matches the Web sidebar**: within a workspace, sessions are now sorted by the time of the latest human message (ties by session id) instead of creation time; the row time now shows that same activity time rather than the creation time; pinned sessions still lead and the workspace order is unchanged.
 - **`/bot-reload` folded into `/plugins reload`**: hot reload is now a subcommand instead of a standalone command, so the help list and command panel have one fewer entry; `/bot-reload` is no longer answered.
 

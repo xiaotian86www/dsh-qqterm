@@ -58,7 +58,7 @@
 
 - 插件只处理 C2C 私聊：群消息在 accessPolicy 层被拦掉，代码里不再有群聊分支。按钮键盘只在 C2C 可用，发送失败必须保留文本回退（现有实现会降级并记 warn）。改问答/审批时在 C2C 验证按钮回退。
 - `ask_user_question` / `approval` 走宿主 waterfall 通道，不要再退回 `userQuestions.ask` 这类服务探测式实现。QQ 卡片投递失败必须 `return nextFn()` 把请求交回宿主的其它通道（Web GUI 仍能弹窗），不能判成 `unavailable` 吞掉——否则用户在两边都看不到审批。
-- 聊天会话 key 固定为 `qqterm:${appId}:chat`：全 bot 只有一个「当前会话」，任何 QQ 窗口共享它；已获取集合（普通消息 / `/sessions resume` / `/to` 实际拿到 agent 的会话）可以有多份，全部输出回 QQ，非当前会话的消息首行标 `` > `#短id` · 标题 ``、末行给「回复」「恢复」两个链接（长回复只在首片带标题、末片带链接；提问 / 审批用同一个首行，见 §4.12）。`/sessions` 默认按工作区分组列出工作中会话（组标题带路径，行带 `生成中` / `空闲` 与当前 `✅`），`/sessions all` 看全部会话，只标 `📌`，不标当前。`/sessions resume` 只改当前指针，`/new` 清掉当前指针（不预先铸 id，下一条消息再建会话），切走不 dispose 旧会话；`/clear`（别名 `/reset`）会先停掉当前会话再开新的，`/clear all` 停掉全部已获取会话。`/stop` 只停当前会话，`/stop all` 停掉所有正在生成的已获取会话。没有映射即视为全新会话，会话 id 由 `mintSessionId()` 铸造。
+- 聊天会话 key 固定为 `qqterm:${appId}:chat`：全 bot 只有一个「当前会话」，任何 QQ 窗口共享它；已获取集合（普通消息 / `/sessions resume` / `/to` 实际拿到 agent 的会话）可以有多份，全部输出回 QQ，非当前会话的消息首行标 `` > `#短id` · 标题 ``，正文之后空一行给「回复」「恢复」两个链接（长回复只在首片带标题、末片带链接；提问 / 审批用同一个首行，见 §4.12）。`/sessions` 默认按工作区分组列出工作中会话（组标题带路径，行带 `生成中` / `空闲` 与当前 `✅`），`/sessions all` 看全部会话，只标 `📌`，不标当前。`/sessions resume` 只改当前指针，`/new` 清掉当前指针（不预先铸 id，下一条消息再建会话），切走不 dispose 旧会话；`/clear`（别名 `/reset`）会先停掉当前会话再开新的，`/clear all` 停掉全部已获取会话。`/stop` 只停当前会话，`/stop all` 停掉所有正在生成的已获取会话。没有映射即视为全新会话，会话 id 由 `mintSessionId()` 铸造。
 - 启动即恢复上次会话：QQ `ready` 后网关调 `SessionManager.restoreCurrentSession()`，按 prefs 指针走 `getOrCreate` 接回（走 singleflight，启动瞬间来消息也只 resume 一次）；盘上已不存在则跳过并清掉指针（避免 `/sessions` 展示无法恢复的「待恢复」当前项），**恢复失败绝不新建**（沿用 `mayCreateAfterResumeFailure` 的语义）；占用 / 后端故障导致恢复失败时指针保持原样。这样「有会话」与「有 record」不会长期分叉，不需要为中间态另写展示分支。
 - 回复目标也持久化：`model-prefs.json` 的 `targets` 段（`sessionKey → openid`）在 `touch()` 里值变化时才写一次；启动恢复失败（locked / 宿主报错）用它主动推一条 `⚠️ 上次的会话没能恢复` + `/sessions resume #短id` 按钮，`not-found` 静默。持久化写在消息路径上而不是卸载钩子里——强杀 / 崩溃时卸载钩子不执行。
 - 模型 / preset / 思考强度尽量沿用宿主核心行为，插件不另立一套：插件不再有 `provider` / `model` / `preset` 配置项，新会话取核心默认值（`settings.yaml` → 宿主 agentDefaultModel → 兜底）。`/model` 与 `/reasoning` 有活跃会话时走宿主 `sessionController.selectModel`，选择记进当前会话的 `model/selection` 事件（不 fork、不重建、插件不另存偏好），下一轮生效，宿主抛错回 `failed`；没有活跃会话时切换直接写部署默认值（模型与思考强度走 `agentDefaultModel.saveSelection`，`/permission` 走 `settings.update('permission', { defaultPreset })`），回执文案与有会话时一致，不为切换拉起会话。没有会话时 `/model`、`/reasoning`、`/permission` 的查看视图照常展示当前值（部署默认值，与新建会话会拿到的值一致，该条目同样标 `✅`），文案保持不变，不另造「全局」之类的标签。宿主每次 `selectModel` 都会顺手把选择存成部署默认，按核心行为接受这一点，不要写回旧值。`/preset` 不按会话存待定值：它写核心 `agent-preset-registry` 的 `selectedDefault`（与设置页「设为默认」同一个 `settings.update` 入口），对之后新建的会话生效，已开始的会话保持自己的 preset；插件不存 preset。回显同样写「当前」，不标「全局」，也不补「之后新建的会话生效」这类提示（机制写在 README，不写进命令回复）。`create` / `resume` 的 `agentOptions` 传响应式 getter 读 `agentDefaultModel.currentSelection()`（会话自己记录过的选择优先）。插件只在 `~/.dsh-qqterm/model-prefs.json` 存 `sessionIds` / `dirs`，键是聊天 key。
@@ -323,11 +323,14 @@ QQ 里只有一个聊天窗口，多个已获取会话的输出、提问、审�
 - 标题取日志里最新一条 `session/title`（`sessionTitleOf`），取不到写 `未命名会话`，压到 20 字以内（`sourceTitle`）。
 - 非当前会话的提问、审批用同一个首行；正文里不再塞 `[#id]` 之类的行内标记（那是同一件事的第二种写法）。
 
-**末行**（独占一行，前面空行）：`> <回复> · <恢复>`
+**尾部动作**（正文之后空一行，独占一行的两个行内指令链接）：`回复`（`/to #短id `）+ `恢复`（`/sessions resume #短id`）
 
-- 两个都要：回复是 `/to #短id `（把消息发过去），恢复是 `/sessions resume #短id`（把当前指针切过去）。`show` 分别写 `回复` / `恢复`——id 已经在首行署名里，按钮上不重复。
-- 长回复只在首片带首行、末片带末行，中间片一律不带（`chunkDecoratedSessionMessage`）。
-- 提问无按钮时末行是 `回答` 与 `恢复`（`sessionReplyLink(id, '回答')`）；有按钮时是 `> 👇 点击下方按钮选择 · 或者直接回复`，与当前会话的卡片文案完全一致，只把「直接回复」换成 `sessionReplyLink(id, '直接回复')`——按钮自带会话 id，但手打编号只会落到当前会话，所以按钮版也要留 `/to` 链接。
+- 为什么还是行内链接而不是键盘按钮：单聊里能在正文内点的只有 `<qqbot-cmd-input>`；链接行独占一行后位置已经好找，标签只写「回复 / 恢复」两个字，不靠加长文字撑点按范围。
+- 链接行前空一行（不加分割线、不带图标、不包引用块），把「消息讲了什么」和「能对它做什么」分开，位置固定，不抢正文结论。
+- 两个动作都要：`回复` 把 `/to #短id ` 填进输入框（用户接着输正文）；`恢复` 直接发送 `/sessions resume #短id`，切走当前指针。id 已在首行署名里，标签上不重复。
+- 长回复只在首片带首行、末片带尾部动作，中间片一律不带（`chunkDecoratedSessionMessage`）。
+- 提问不套这套尾部链接行：非当前会话的卡片在自己的引导行里给 `回答 · 恢复` 链接；带选项按钮时仍写「点击下方按钮选择 · 或者直接回复」。
+- 审批、重试卡片已有自己的按钮键盘，不追加尾部动作。
 - 流式只作用于「发起时是当前会话」的消息（`shouldStream`），QQ 流式接口是整段 update、改不了首行；生成中途切走当前会话，这一段仍会缺署名。要署名完整，等这一轮结束再切——不要为了补标记去动流式链路。
 
 **不套首行的情形**：会话内的状态提示（如提问超时）在非当前会话里要先给首行——它讲的是那条会话的事；而「这条没转发给当前会话」这类路由警告讲的是**当前这条消息**，不套首行，只在句子里带上 `#短id（标题）`（`sessionLabel`）。

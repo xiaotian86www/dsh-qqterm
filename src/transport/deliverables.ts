@@ -25,7 +25,9 @@ export class DeliverablesDeliverer implements DeliverablesDelivererLike {
   private readonly config: QQTermConfig;
   private readonly logger: Logger;
   private readonly dirOf?: (record: SessionRecord) => string | undefined;
-  /** 非当前会话的文字提示装饰（来源头 + 回复链接）；文件本身无法带标记 */
+  /**
+   * 非当前会话的文字提示装饰（来源头 + 尾部动作）；文件本身无法带标记。
+   */
   private readonly decorateOf?: (record: SessionRecord, text: string) => string;
 
   public constructor(
