@@ -18,8 +18,6 @@ export interface AdapterLogger {
 export interface HostAdapter {
   /** 会话事件读取（宿主 snapshotEvents） */
   sessionEvents(session: { snapshotEvents: () => readonly unknown[] }): readonly unknown[];
-  /** preset 作用域服务解析（宿主 registry 的 serviceFor） */
-  serviceFor(agent: { ctx: unknown }, name: string): Promise<unknown | undefined>;
   /** 官方 fork seed 构造；宿主无该导出时返回 undefined */
   buildForkSeed(events: readonly unknown[], boundary: number): Promise<readonly unknown[] | undefined>;
   /** 会话 header 读取（取 agentPreset 等）；会话不存在、服务缺失或读取失败返回 undefined */
@@ -348,7 +346,6 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
     sessionTitle: SessionTitleLike;
     sessionController?: SessionControllerLike;
     workspaceRegistry: WorkspaceRegistryLike;
-    agentPresets: { serviceFor(agent: unknown, name: string): unknown };
     workingDirectory: WorkingDirectoryLike;
   };
   const persistence = host.sessionPersistence;
@@ -356,7 +353,6 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
   const controller = host.sessionController;
   const titleService = host.sessionTitle;
   const registry = host.workspaceRegistry;
-  const presets = host.agentPresets;
 
   const capabilities: string[] = [
     'sessionEvents(snapshotEvents)',
@@ -364,7 +360,6 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
     'workspaceRegistry',
     'sessionQuery',
     'sessionTitle.rename',
-    'serviceFor(agentPresets.serviceFor)',
   ];
 
   /** registry.list() 收窄成纯数据快照；异常降级为空列表 */
@@ -389,10 +384,6 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
 
     sessionEvents(session) {
       return session.snapshotEvents();
-    },
-
-    async serviceFor(agent, name) {
-      return presets.serviceFor(agent, name);
     },
 
     async sessionHeader(sessionId) {

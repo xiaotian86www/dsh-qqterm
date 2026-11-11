@@ -10,7 +10,6 @@
 import type { CommandDeps, CategorizedCommand } from './types.ts';
 import type { ChangeWorkspaceOutcome } from '../session/index.ts';
 import { getScopePeer } from '../shared/index.ts';
-import { shortId } from './sessions.ts';
 
 /** 千分位（与 /status 一致，避免不同环境的本地化分隔符） */
 function num(n: number): string {
@@ -76,10 +75,6 @@ export function newCommand({ manager, config }: CommandDeps): CategorizedCommand
 function describeChangeFailure(outcome: ChangeWorkspaceOutcome): string {
   if (outcome.ok) return '';
   switch (outcome.reason) {
-    case 'has-session': {
-      const id = outcome.sessionId ? `（\`#${shortId(outcome.sessionId)}\`）` : '';
-      return `⚠️ 这个聊天已经有会话${id}，先 \`/new\` 再换工作区。`;
-    }
     case 'missing':
       return `⚠️ 目录不存在: \`${outcome.path}\`\n换一个存在的目录，或直接给绝对路径。`;
     case 'ambiguous':

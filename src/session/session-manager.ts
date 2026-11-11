@@ -57,7 +57,6 @@ import type {
   SessionStatus,
   TokenUsageStats,
   SessionContextUsage,
-  CompactionServiceLike,
   CompactOutcome,
   WorkspaceSession,
   WorkspaceGroup,
@@ -77,14 +76,31 @@ const PRESET_SETTINGS_NS = 'agent-preset-registry';
 /** 权限预设默认值所在的配置条目（与设置页写的是同一个 namespace） */
 const PERMISSION_SETTINGS_NS = 'permission';
 
-/** ManualCompactionError 各 code 的友好提示 */
-const COMPACTION_ERROR_HINTS: Record<string, string> = {
-  busy: '压缩服务忙，请稍后重试',
-  cancelled: '压缩已取消',
-  changed: '历史在压缩过程中发生变化，请重试',
-  commit: '压缩提交失败',
-  persistence: '压缩完成但保存失败',
-};
+/**
+ * 宿主 /compact 的结果只有文案、没有结构化数据，这里按文案片段映射成 QQ 侧结果。
+ * 宿主改文案时退化为通用成功 / 未知失败，不影响压缩本身。
+ */
+const COMPACTION_TEXT_HINTS: ReadonlyArray<readonly [string, CompactOutcome]> = [
+  ['active compaction', { ok: false, reason: 'failed', message: '压缩进行中，稍后再试' }],
+  ['Compaction cancelled', { ok: false, reason: 'failed', message: '压缩已取消' }],
+  ['changed before it could be replaced', { ok: false, reason: 'failed', message: '压缩期间历史发生变化，重试一次' }],
+  // summary = 摘要没有更小 = 历史不足以压缩，属正常结果而非失败
+  ['could not produce a useful summary', { ok: true, shadowed: 0, tokens: 0 }],
+  ['did not finish cleanly', { ok: false, reason: 'failed', message: '压缩未完整结束，先确认当前会话' }],
+  ['could not be saved', { ok: false, reason: 'failed', message: '压缩完成但会话保存失败' }],
+];
+
+/** 宿主 /compact 的 CommandResult → QQ 侧结果（成功文案里带条数与 token） */
+function compactOutcomeOf(result: { kind: 'success' | 'error'; text?: string }): CompactOutcome {
+  const text = result.text ?? '';
+  if (result.kind === 'success') {
+    const counted = /(\d+) history items \(~(\d+) tokens\)/.exec(text);
+    if (counted) return { ok: true, shadowed: Number(counted[1]), tokens: Number(counted[2]) };
+    // 「No compactable history yet.」及其他成功文案
+    return { ok: true, shadowed: 0, tokens: 0 };
+  }
+  return COMPACTION_TEXT_HINTS.find(([needle]) => text.includes(needle))?.[1] ?? { ok: false, reason: 'failed' };
+}
 
 /** 会话列表最多为多少条会话读取标题（每条都要读一遍日志，是列表的耗时大头） */
 const TITLE_FETCH_LIMIT = 10;
@@ -139,6 +155,17 @@ interface SessionControllerLike {
   }): Promise<{ selected: HostSelection }>;
 }
 
+/** 宿主命令登记簿最小接口（/compact 的判定与执行都走它） */
+interface CommandsRegistryLike {
+  find(agent: unknown, name: string): unknown;
+  execute(
+    agent: unknown,
+    line: string,
+    attachments: readonly unknown[],
+    signal: AbortSignal,
+  ): Promise<{ result: { kind: 'success' | 'error'; text?: string } } | undefined>;
+}
+
 /** 宿主 agentDefaultModel 最小接口 */
 interface AgentDefaultModelLike {
   currentSelection(): HostSelection;
@@ -180,6 +207,14 @@ export class SessionManager {
    * 后写入 records 的覆盖前者且前者无人 dispose（泄漏）。
    */
   private inflight = new Map<string, Promise<SessionRecord>>();
+  /**
+   * 当前这个聊天的工作目录（内存态，唯一读写来源）。
+   *
+   * 构造时优先读回上次记下的目录，没有或已不存在才取宿主默认工作区；
+   * 之后只由 acquire / 切换会话 / `/new <工作区>` / 运行期 `cd` 覆盖并落盘；
+   * 读取不做任何回退。
+   */
+  private chatDir: string;
   private readonly modelResolver: ModelResolver;
   private readonly ctx: Context;
   private readonly host: HostAdapter;
@@ -206,8 +241,12 @@ export class SessionManager {
     this.config = config;
     this.logger = logger;
     this.host = createHostAdapter(ctx, logger);
+    this.chatDir = this.host.defaultWorkspacePath() ?? resolveAgentCwd(undefined);
     this.logger.info(`host adapter capabilities: ${this.host.capabilities.join(', ')}`);
     this.modelResolver = new ModelResolver(ctx, config, logger);
+    // 启动时优先用上次记下的工作目录；目录已不存在才退回默认值
+    const savedDir = this.modelResolver.getDirectory(this.sessionKey());
+    if (savedDir !== undefined && isDirectory(savedDir)) this.chatDir = savedDir;
 
     this.registerAgentDisposed();
   }
@@ -1080,6 +1119,11 @@ export class SessionManager {
     return (this.ctx as unknown as { sessionController: SessionControllerLike }).sessionController;
   }
 
+  /** 宿主命令登记簿（inject 保证存在） */
+  private get commands(): CommandsRegistryLike {
+    return (this.ctx as unknown as { commands: CommandsRegistryLike }).commands;
+  }
+
   /** 宿主会话 projection 注册表（inject 保证存在） */
   private get sessionProjections(): SessionProjectionsLike {
     return (this.ctx as unknown as { sessionProjections: SessionProjectionsLike }).sessionProjections;
@@ -1203,14 +1247,14 @@ export class SessionManager {
     this.logger.info(`getOrCreate: key=${key} sessionId=${sessionId}`);
 
     // 这个聊天的工作目录：新会话落在它里面，恢复的会话以它自己的 header 为准
-    let directory = await this.chatDirectory(key);
+    let directory = this.chatDirectory();
 
     // 已经获取过这个会话（`/to` 先拿到、或 `/sessions resume` 接上）：直接复用记录
     const known = this.records.get(sessionId);
     if (known) {
       this.touch(known, scope, peerId, senderId, replyTarget);
       this.setCurrent(key, sessionId);
-      this.rememberDirectory(key, this.host.sessionDirectory(known.agent.session) ?? directory);
+      this.setChatDir(this.host.sessionDirectory(known.agent.session) ?? directory);
       return known;
     }
 
@@ -1278,8 +1322,8 @@ export class SessionManager {
     this.records.set(sessionId, record);
     this.setCurrent(key, sessionId);
 
-    // 工作区跟着会话走：记下这个聊天当前目录，供下次 /new 或重启后沿用
-    this.rememberDirectory(key, directory);
+    // 工作区跟着会话走：这个聊天当前目录以会话为准
+    if (directory) this.setChatDir(directory);
 
     // 挂载到对应工作区（侧边栏可见性）；fail-soft、异步执行，不阻塞消息处理。
     // 宿主只在客户端 session.create RPC 时挂载会话，插件会话不走那条路径，
@@ -1517,44 +1561,49 @@ export class SessionManager {
   }
 
   /**
-   * 该聊天当前所在的工作目录。
+   * 该聊天当前所在的工作目录（内存态，唯一来源）。
    *
-   * 工作区跟随会话：优先取当前会话的生效目录（`workingDirectory` 覆盖运行期
-   * cd，回退 header.cwd），其次是持久化的 per-chat 目录（`/new` 后仍保留），
-   * 再其次是映射里那个会话的 header，最后才落到宿主的默认工作区目录。
-   *
-   * @param key sessionKey
+   * 初值在构造时取宿主默认工作区；acquire、切换会话、`/new <工作区>` 与运行期
+   * `cd` 会覆盖它。这里不再回退会话 header / 持久化记录 / 默认工作区。
    */
-  private async chatDirectory(key: string): Promise<string> {
-    const record = this.currentRecord(key);
-    const live = record ? this.host.sessionDirectory(record.agent.session) : undefined;
-    if (live) return live;
-
-    const stored = this.modelResolver.getDirectory(key);
-    if (stored) return stored;
-
-    const mapped = this.modelResolver.getSessionId(key);
-    if (mapped) {
-      const header = await this.host.sessionHeader(mapped).catch(() => undefined);
-      const cwd = (header as { cwd?: unknown } | undefined)?.cwd;
-      if (typeof cwd === 'string' && cwd !== '') return cwd;
-    }
-
-    return this.host.defaultWorkspacePath() ?? resolveAgentCwd(undefined);
+  private chatDirectory(): string {
+    return this.chatDir;
   }
 
-  /** 记录该聊天当前的工作目录（工作区跟着会话走，重启后仍然有效） */
-  private rememberDirectory(key: string, directory: string | undefined): void {
-    if (directory === undefined || directory === '') return;
-    this.modelResolver.setDirectory(key, directory);
+  /**
+   * 覆盖聊天工作目录并落盘（启动时优先读回的记忆）。
+   *
+   * 内存仍是唯一读写来源；磁盘只做镜像，值没变不写。
+   */
+  private setChatDir(directory: string): void {
+    if (this.chatDir === directory) return;
+    this.chatDir = directory;
+    this.modelResolver.setDirectory(this.sessionKey(), directory);
+  }
+
+  /**
+   * 运行期 `cd`：宿主在会话里追加 `working-directory/change`。
+   *
+   * 只认当前会话的目录变化；非当前会话的 `cd` 不影响这个聊天的工作区。
+   */
+  noteWorkingDirectory(session: unknown, cwd: unknown): void {
+    if (typeof cwd !== 'string' || cwd === '') return;
+    const record = this.currentRecord();
+    if (record === undefined) return;
+    // 事件里的 session 可能是宿主的投影包装，先按 id 认，再退回引用相等
+    const sessionLike = session as { id?: unknown; header?: { id?: unknown } } | null | undefined;
+    const id = sessionLike?.header?.id ?? sessionLike?.id;
+    if (id !== record.sessionId && record.agent.session !== session) return;
+    if (this.chatDir === cwd) return;
+    this.setChatDir(cwd);
+    this.logger.info(`chat working directory changed: dir=${cwd}`);
   }
 
   /** 某个 agent 所属会话当前的工作目录（qqbot_send_file 等按会话判定的白名单用） */
   directoryForAgent(agent: DshAgent): string | undefined {
     const record = this.findByAgent(agent);
     if (!record) return undefined;
-    return this.host.sessionDirectory(record.agent.session)
-      ?? this.modelResolver.getDirectory(record.sessionKey);
+    return this.host.sessionDirectory(record.agent.session);
   }
 
   // ── 会话管理（列表 / 恢复 / 归档 / 取消归档，/sessions 命令用） ──
@@ -1572,7 +1621,7 @@ export class SessionManager {
    */
   async listWorkspaceSessions(_scope: ChatScope, _peerId: string): Promise<WorkspaceSession[]> {
     const key = this.sessionKey();
-    const workspace = await this.chatDirectory(key);
+    const workspace = this.chatDirectory();
     const currentId = this.currentSessionId(key);
     const archived = this.host.archivedSessionIds();
 
@@ -1685,8 +1734,7 @@ export class SessionManager {
     _scope: ChatScope,
     _peerId: string,
   ): Promise<{ title: string; path: string; missing: boolean } | undefined> {
-    const key = this.sessionKey();
-    const workspace = await this.chatDirectory(key);
+    const workspace = this.chatDirectory();
     const info = this.host.workspaceList().find((item) => samePath(item.path, workspace));
     if (info) {
       return { title: info.title, path: info.path, missing: !isDirectory(info.path) };
@@ -1739,9 +1787,7 @@ export class SessionManager {
   /**
    * 改这个聊天的工作区（下一个会话落在哪个目录）。
    *
-   * 只在会话还没落盘时生效：已有会话时改目录是静默无效的——resume 回来的会话
-   * 以自己的 header.cwd 为准，紧接着 `rememberDirectory` 会把记录覆盖回去——所以
-   * 这里直接拒绝，由调用方给出下一步。
+   * 只覆盖内存里的工作目录，等下一个会话创建时生效；当前已获取的会话不受影响。
    *
    * @param scope 当前 chat 作用域
    * @param peerId 当前 chat 的 peer id
@@ -1755,25 +1801,9 @@ export class SessionManager {
     const resolved = this.resolveWorkspace(arg);
     if (!resolved.ok) return resolved;
 
-    const key = this.sessionKey();
-    const blocked = await this.workspaceBlocker(key);
-    if (blocked !== undefined) return { ok: false, reason: 'has-session', sessionId: blocked };
-
-    this.modelResolver.setDirectory(key, resolved.path);
-    this.logger.info(`chat workspace changed: key=${key} dir=${resolved.path}`);
+    this.setChatDir(resolved.path);
+    this.logger.info(`chat workspace changed: dir=${resolved.path}`);
     return resolved;
-  }
-
-  /** 挡住工作区修改的会话 id；undefined = 还没有落盘的会话，可以改 */
-  private async workspaceBlocker(key: string): Promise<string | undefined> {
-    const live = this.currentRecord(key);
-    if (live) return live.sessionId;
-
-    const mapped = this.currentSessionId(key);
-    if (mapped === undefined) return undefined;
-    // undefined = 宿主没有 stat 能力，按「已有会话」处理（与 resume 同一约定）
-    const exists = await this.host.sessionExists(mapped).catch(() => undefined);
-    return exists === false ? undefined : mapped;
   }
 
   /**
@@ -1972,7 +2002,7 @@ export class SessionManager {
     if (existing) {
       this.touch(existing, scope, peerId, senderId, replyTarget);
       this.setCurrent(key, sessionId);
-      this.rememberDirectory(key, this.host.sessionDirectory(existing.agent.session));
+      this.setChatDir(this.host.sessionDirectory(existing.agent.session) ?? this.chatDir);
       this.logger.info(`session switched (already acquired): key=${key} sessionId=${sessionId}`);
       return wasCurrent
         ? (unarchived ? { ok: true, reason: 'same', unarchived: true } : { ok: true, reason: 'same' })
@@ -2016,7 +2046,7 @@ export class SessionManager {
       }
     }
 
-    const directory = this.host.sessionDirectory(agent.session) ?? await this.chatDirectory(key);
+    const directory = this.host.sessionDirectory(agent.session) ?? this.chatDirectory();
     const record: SessionRecord = {
       sessionKey: key,
       sessionId,
@@ -2031,7 +2061,7 @@ export class SessionManager {
     };
     this.records.set(sessionId, record);
     this.setCurrent(key, sessionId);
-    this.rememberDirectory(key, directory);
+    if (directory) this.setChatDir(directory);
     if (directory) void this.host.attachSessionToWorkspace(sessionId, directory);
 
     this.logger.info(`session switched: key=${key} sessionId=${sessionId} acquired=${handle ? 'owned' : 'borrowed'}`);
@@ -2126,8 +2156,9 @@ export class SessionManager {
   /**
    * 原地压缩当前会话历史（保留 sessionId，用摘要替换旧历史）。
    *
-   * compaction 是 preset 作用域服务，只从会话绑定的 preset 解析；
-   * preset 没挂压缩引擎就明确失败，不退回宿主面。
+   * 判定与执行都走 base 的命令登记簿：宿主 /compact 在自己的 preset 作用域里
+   * 取压缩引擎并写 command/run、command/done，qqterm 不解析 preset 服务，
+   * 也就完全不碰 web 组件。preset 没挂压缩组时命令查不到，本地拒绝。
    */
   async compact(
     scope: ChatScope,
@@ -2143,31 +2174,17 @@ export class SessionManager {
     }
     if (record.agent.status !== 'idle') return { ok: false, reason: 'busy' };
 
-    const compaction = (await this.host.serviceFor(record.agent, 'compaction')) as CompactionServiceLike | undefined;
-    if (!compaction) return { ok: false, reason: 'no-compaction' };
-
-    const route = this.routeOf(record);
-    const agentCtx = {
-      session: record.agent.session,
-      options: { provider: route.provider, model: route.model },
-      runMaintenance: record.agent.runMaintenance.bind(record.agent),
-    };
+    if (this.commands.find(record.agent, 'compact') === undefined) {
+      return { ok: false, reason: 'no-compaction' };
+    }
 
     try {
-      const result = await compaction.compactNow(agentCtx, new AbortController().signal);
-      if (result === null) return { ok: true, shadowed: 0, tokens: 0 };
-      return { ok: true, shadowed: result.shadowedSeqs.length, tokens: result.shadowedTokenCount };
+      const executed = await this.commands.execute(record.agent, '/compact', [], new AbortController().signal);
+      if (executed === undefined) return { ok: false, reason: 'no-compaction' };
+      const outcome = compactOutcomeOf(executed.result);
+      if (!outcome.ok) this.logger.debug(`compact declined: key=${key} text=${executed.result.text ?? ''}`);
+      return outcome;
     } catch (err) {
-      const code = (err as { code?: string } | null)?.code;
-      // summary = 摘要没有更小 = 历史不足以压缩，属正常结果而非失败
-      if (code === 'summary') {
-        return { ok: true, shadowed: 0, tokens: 0 };
-      }
-      // 其他 ManualCompactionError 预期失败，给友好文案（debug 记录，不 warn 刷屏）
-      if (code !== undefined && code in COMPACTION_ERROR_HINTS) {
-        this.logger.debug(`compact declined: key=${key} code=${code}`);
-        return { ok: false, reason: 'failed', message: COMPACTION_ERROR_HINTS[code] };
-      }
       const message = err instanceof Error ? err.message : String(err);
       this.logger.warn(`compact failed: key=${key} err=${message}`);
       return { ok: false, reason: 'failed', message };

@@ -62,21 +62,21 @@ describe('PrefsStore 并发安全（E3）', () => {
 
   it('删除墓碑：clear 后并发写盘的旧值不复活', () => {
     const a = store();
-    a.setDirectory('k', 'D:/one');
+    a.setSessionId('k', 's-one');
 
     // 外部进程写入了 k 的旧值（模拟另一写者把条目落盘）
     const external = JSON.parse(readFileSync(path, 'utf8'));
-    external.dirs.k = 'D:/external';
+    external.sessionIds.k = 's-external';
     writeFileSync(path, JSON.stringify(external), 'utf8');
 
-    a.clearDirectory('k'); // 本进程显式删除 → 墓碑
+    a.clearSessionId('k'); // 本进程显式删除 → 墓碑
 
     const disk = JSON.parse(readFileSync(path, 'utf8'));
-    expect('k' in disk.dirs).toBe(false);
+    expect('k' in disk.sessionIds).toBe(false);
 
     // 墓碑解除：重新 set 后正常落盘
-    a.setDirectory('k', 'D:/two');
-    expect(JSON.parse(readFileSync(path, 'utf8')).dirs.k).toBe('D:/two');
+    a.setSessionId('k', 's-two');
+    expect(JSON.parse(readFileSync(path, 'utf8')).sessionIds.k).toBe('s-two');
   });
 
   it('原子写：崩溃不留半截 JSON（写入后文件始终可解析），tmp 带唯一后缀且已清理', () => {
@@ -133,16 +133,33 @@ describe('PrefsStore 回复目标', () => {
     writes.mockRestore();
   });
 
-  it('与旧文件兼容：没有 targets 段时 load 不报错，其它段照常读', () => {
+  it('与旧文件兼容：没有 targets 段时 load 不报错，旧 dirs 段读回并保留', () => {
     writeFileSync(path, JSON.stringify({ sessionIds: { k: 's1' }, dirs: { k: 'D:/x' } }), 'utf8');
     const a = store();
     expect(a.getSessionId('k')).toBe('s1');
-    expect(a.getDirectory('k')).toBe('D:/x');
     expect(a.getTarget('k')).toBeUndefined();
+    expect(a.getDirectory('k')).toBe('D:/x');
 
     a.setTarget('k', 'openid-1'); // 写入时补上 targets 段，且不丢旧条目
     const disk = JSON.parse(readFileSync(path, 'utf8'));
     expect(disk.sessionIds.k).toBe('s1');
     expect(disk.targets.k).toBe('openid-1');
+    expect(disk.dirs.k).toBe('D:/x'); // 别人写的目录镜像不被覆盖掉
+  });
+});
+
+describe('PrefsStore 聊天工作目录', () => {
+  it('写入后重启可读回（启动时优先用它当初值）', () => {
+    store().setDirectory('qqterm:app:chat', 'D:/work');
+    expect(store().getDirectory('qqterm:app:chat')).toBe('D:/work');
+  });
+
+  it('值不变不写盘', () => {
+    const a = store();
+    a.setDirectory('k', 'D:/work');
+    const writes = vi.spyOn(PrefsStore.prototype as unknown as { write: () => void }, 'write');
+    a.setDirectory('k', 'D:/work');
+    expect(writes).not.toHaveBeenCalled();
+    writes.mockRestore();
   });
 });

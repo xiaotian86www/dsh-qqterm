@@ -71,23 +71,6 @@ export interface DshAgent {
   cancel(cause: { kind: string }): void;
   followup(message: unknown): void;
   whenIdle(): Promise<void>;
-  /** 运行一个非 turn 维护任务（compact 等需要 idle 时串行执行的操作） */
-  runMaintenance<T>(task: (signal: AbortSignal) => Promise<T>): Promise<T>;
-}
-
-/** compactNow 返回结果的精简视图（只取展示所需字段） */
-export interface CompactionResultLike {
-  shadowedSeqs: readonly number[];
-  shadowedTokenCount: number;
-}
-
-/** ctx.compaction 服务的最小接口（compactNow 依赖，可选注入） */
-export interface CompactionServiceLike {
-  compactNow(
-    agent: unknown,
-    signal: AbortSignal,
-    sourceCommandId?: string,
-  ): Promise<CompactionResultLike | null>;
 }
 
 /** compact 操作结果 */
@@ -462,7 +445,6 @@ export interface WorkspaceInfo {
 /**
  * 切换工作区结果（按 `reason` 区分失败原因）
  *
- * - has-session：这个聊天已经有落盘的会话，cwd 改不动；
  * - missing：目标目录不存在 / 不是目录；
  * - ambiguous：标题匹配到多个工作区；
  * - not-found：既不是绝对路径，也没有同名工作区。
@@ -476,7 +458,6 @@ export type ChangeWorkspaceOutcome =
     /** 宿主还没有这个工作区，会在下一条消息时创建 */
     isNew: boolean;
   }
-  | { ok: false; reason: 'has-session'; /** 挡住本次修改的会话 id */ sessionId?: string }
   | { ok: false; reason: 'missing'; path: string }
   | { ok: false; reason: 'ambiguous'; matches: string[] }
   | { ok: false; reason: 'not-found'; arg: string };

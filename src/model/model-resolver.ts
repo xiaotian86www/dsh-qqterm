@@ -90,31 +90,24 @@ export class ModelResolver {
   }
 
   /**
-   * 获取指定 sessionKey 当前所在的工作目录（工作区跟随会话）
+   * 上次和这个聊天交互的 QQ 用户（启动恢复时的回复目标）
+   */
+  getTarget(sessionKey: string): string | undefined {
+    return this.prefs.getTarget(sessionKey);
+  }
+
+  /**
+   * 上次记下的聊天工作目录（启动时优先用它当初值）
    */
   getDirectory(sessionKey: string): string | undefined {
     return this.prefs.getDirectory(sessionKey);
   }
 
   /**
-   * 记录指定 sessionKey 当前所在的工作目录并持久化
+   * 记下这个聊天当前的工作目录（值不变时不写盘）
    */
   setDirectory(sessionKey: string, directory: string): void {
     this.prefs.setDirectory(sessionKey, directory);
-  }
-
-  /**
-   * 清除指定 sessionKey 的工作目录记录
-   */
-  clearDirectory(sessionKey: string): boolean {
-    return this.prefs.clearDirectory(sessionKey);
-  }
-
-  /**
-   * 上次和这个聊天交互的 QQ 用户（启动恢复时的回复目标）
-   */
-  getTarget(sessionKey: string): string | undefined {
-    return this.prefs.getTarget(sessionKey);
   }
 
   /**

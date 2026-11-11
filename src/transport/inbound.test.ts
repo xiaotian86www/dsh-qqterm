@@ -44,7 +44,6 @@ function makeRecord(sessionId: string, status: 'idle' | 'running' = 'running'): 
     cancel: vi.fn(),
     followup,
     whenIdle,
-    runMaintenance: vi.fn(),
   };
   const record: SessionRecord = {
     sessionKey: 'qqterm:app:chat',

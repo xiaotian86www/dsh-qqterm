@@ -3,7 +3,7 @@ import { createHostAdapter, _resetAdapterCache } from './adapter.ts';
 
 /** 最小 ctx：服务直接挂在 ctx 上（宿主已通过 inject 保证存在） */
 function makeCtx(services: Record<string, unknown> = {}) {
-  return { agentPresets: { serviceFor: () => undefined }, ...services } as never;
+  return { ...services } as never;
 }
 
 describe('host adapter', () => {
@@ -16,17 +16,6 @@ describe('host adapter', () => {
     const adapter = createHostAdapter(makeCtx());
     const events = [{ type: 'a', seq: 0 }];
     expect(adapter.sessionEvents({ snapshotEvents: () => events })).toBe(events);
-  });
-
-  it('serviceFor：直接用 agentPresets.serviceFor', async () => {
-    const compaction = { compactNow: () => {} };
-    const presets = {
-      serviceFor: (_agent: unknown, name: string) => (name === 'compaction' ? compaction : undefined),
-    };
-    const adapter = createHostAdapter(makeCtx({ agentPresets: presets }));
-    expect(await adapter.serviceFor({ ctx: {} }, 'compaction')).toBe(compaction);
-    expect(await adapter.serviceFor({ ctx: {} }, 'nothing')).toBeUndefined();
-    expect(adapter.capabilities).toContain('serviceFor(agentPresets.serviceFor)');
   });
 
   it('buildForkSeed：模块不可解析时返回 undefined（不抛）', async () => {
@@ -318,7 +307,7 @@ describe('attachSessionToWorkspace', () => {
 describe('workingDirectory（已写进 inject）', () => {
   /** ctx 的最小形态：只挂 adapter 会读的服务，其余保持 undefined */
   function ctxWith(working: unknown) {
-    return { agentPresets: { serviceFor: () => undefined }, workingDirectory: working } as never;
+    return { workingDirectory: working } as never;
   }
 
   beforeEach(() => {

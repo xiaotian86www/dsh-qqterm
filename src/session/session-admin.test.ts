@@ -64,7 +64,6 @@ function fakeAgent(id: string, cwd?: string): DshAgent {
     cancel: vi.fn(),
     followup: vi.fn(),
     whenIdle: vi.fn(async () => {}),
-    runMaintenance: vi.fn(async (task: (signal: AbortSignal) => Promise<unknown>) => task(new AbortController().signal)),
   } as unknown as DshAgent;
 }
 
@@ -704,7 +703,7 @@ describe('工作区跟随会话', () => {
     await manager.getOrCreate('c2c', PEER, PEER, REPLY);
 
     expect(registryStub?.['create']).toHaveBeenCalledWith(defaultWs);
-    expect(new PrefsStore().getDirectory(KEY)).toBe(defaultWs);
+    expect((await manager.currentWorkspaceInfo('c2c', PEER))?.path).toBe(defaultWs);
   });
 
   it('切换到别的工作区的会话后，目录与 /sessions 范围一起跟着切', async () => {
@@ -729,8 +728,8 @@ describe('工作区跟随会话', () => {
     const outcome = await manager.switchSession('c2c', PEER, 'session-b', PEER, REPLY);
 
     expect(outcome.ok).toBe(true);
-    // 目录记录跟着目标会话走，重启后也不会退回旧工作区
-    expect(new PrefsStore().getDirectory(KEY)).toBe(other);
+    // 工作目录跟着目标会话走
+    expect((await manager.currentWorkspaceInfo('c2c', PEER))?.path).toBe(other);
     const entries = await manager.listWorkspaceSessions('c2c', PEER);
     expect(entries.map((entry) => entry.id)).toEqual(['session-b']);
   });
@@ -745,11 +744,30 @@ describe('工作区跟随会话', () => {
     await manager.remove();
     await manager.getOrCreate('c2c', PEER, PEER, REPLY);
 
-    expect(new PrefsStore().getDirectory(KEY)).toBe(defaultWs);
+    expect((await manager.currentWorkspaceInfo('c2c', PEER))?.path).toBe(defaultWs);
     // 两次创建都落在同一个目录
     const calls = (registryStub?.['create'] as ReturnType<typeof vi.fn>).mock.calls;
     expect(calls.length).toBeGreaterThanOrEqual(2);
     expect(calls.every((args) => args[0] === defaultWs)).toBe(true);
+  });
+
+  it('运行期 cd 只跟随当前会话，别的会话改目录不影响', async () => {
+    const moved = join(env.home, 'cd-target');
+    mkdirSync(moved, { recursive: true });
+    const ctx = createCtx({ withQuery: true, sessions: [{ id: 'session-a', cwd: WORKSPACE() }] });
+    const { manager } = createManager(ctx);
+    await manager.getOrCreate('c2c', PEER, PEER, REPLY);
+    const current = manager.getSessionRecord('c2c', PEER);
+
+    // 非当前会话的 working-directory/change：忽略
+    manager.noteWorkingDirectory(fakeAgent('session-other').session, moved);
+    expect((await manager.currentWorkspaceInfo('c2c', PEER))?.path).toBe(`${env.home}/workspace`);
+
+    // 当前会话的 working-directory/change：跟随
+    manager.noteWorkingDirectory(current?.agent.session, moved);
+    expect((await manager.currentWorkspaceInfo('c2c', PEER))?.path).toBe(moved);
+    // 并落盘，重启后仍停在这个目录
+    expect(new PrefsStore().getDirectory(KEY)).toBe(moved);
   });
 });
 
@@ -764,7 +782,28 @@ describe('changeChatWorkspace（换工作区）', () => {
     const outcome = await manager.changeChatWorkspace('c2c', PEER, 'other-ws');
 
     expect(outcome).toMatchObject({ ok: true, title: 'other-ws', path: OTHER(), isNew: false });
+    expect((await manager.currentWorkspaceInfo('c2c', PEER))?.path).toBe(OTHER());
+    // 落盘：重启后靠它优先读回
     expect(new PrefsStore().getDirectory(KEY)).toBe(OTHER());
+  });
+
+  it('重启后优先加载上次记下的工作目录', async () => {
+    mkdirSync(OTHER(), { recursive: true });
+    const ctx = createCtx({ workspaces: [{ id: 'w2', path: OTHER(), title: 'other-ws' }] });
+    const { manager } = createManager(ctx);
+    await manager.changeChatWorkspace('c2c', PEER, 'other-ws');
+
+    // 模拟宿主重启：新实例先从 prefs 读回目录，目录不在了才退回默认值
+    const { manager: restarted } = createManager(ctx);
+    expect((await restarted.currentWorkspaceInfo('c2c', PEER))?.path).toBe(OTHER());
+  });
+
+  it('上次记下的目录已不存在时退回宿主默认工作区', async () => {
+    new PrefsStore().setDirectory(KEY, join(env.home, 'gone'));
+    const ctx = createCtx({ sessions: [] });
+    const { manager } = createManager(ctx);
+
+    expect((await manager.currentWorkspaceInfo('c2c', PEER))?.path).toBe(`${env.home}/workspace`);
   });
 
   it('大小写不敏感，也认目录名和唯一前缀', async () => {
@@ -806,7 +845,7 @@ describe('changeChatWorkspace（换工作区）', () => {
     const outcome = await manager.changeChatWorkspace('c2c', PEER, 'repo');
 
     expect(outcome).toMatchObject({ ok: false, reason: 'ambiguous', matches: ['repo-x', 'repo-y'] });
-    expect(new PrefsStore().getDirectory(KEY)).toBeUndefined();
+    expect((await manager.currentWorkspaceInfo('c2c', PEER))?.path).toBe(`${env.home}/workspace`);
   });
 
   it('全等优先于前缀：repo 不会命中 repo-old', async () => {
@@ -851,10 +890,10 @@ describe('changeChatWorkspace（换工作区）', () => {
       ok: false,
       reason: 'missing',
     });
-    expect(new PrefsStore().getDirectory(KEY)).toBeUndefined();
+    expect((await manager.currentWorkspaceInfo('c2c', PEER))?.path).toBe(`${env.home}/workspace`);
   });
 
-  it('已经有落盘的会话时拒绝，并给出挡路的会话 id', async () => {
+  it('已有会话时也能改：当前会话不动，下一个会话落到新目录', async () => {
     const other = OTHER();
     mkdirSync(other, { recursive: true });
     new PrefsStore().setSessionId(KEY, 'session-a');
@@ -862,16 +901,30 @@ describe('changeChatWorkspace（换工作区）', () => {
       withQuery: true,
       sessions: [{ id: 'session-a', cwd: WORKSPACE() }],
     });
-    const { manager } = createManager(ctx);
+    const { registry } = createRegistry();
+    registry.resume.mockImplementation(async ({ resumeSessionId }: { resumeSessionId: string }) => {
+      // session-a 能 resume；/new 铸的新 id 在盘上不存在，直接走创建分支
+      if (resumeSessionId === 'session-a') return fakeHandle('session-a', WORKSPACE());
+      throw new Error('session not found');
+    });
+    const { manager } = createManager(ctx, registry);
     await manager.getOrCreate('c2c', PEER, PEER, REPLY);
 
     const outcome = await manager.changeChatWorkspace('c2c', PEER, other);
 
-    expect(outcome).toMatchObject({ ok: false, reason: 'has-session', sessionId: 'session-a' });
-    expect(new PrefsStore().getDirectory(KEY)).toBe(WORKSPACE());
+    expect(outcome).toMatchObject({ ok: true, path: other });
+    // 当前会话本身不动（消息仍进 session-a），工作区指针指向下一个会话
+    expect(manager.getSessionRecord('c2c', PEER)?.sessionId).toBe('session-a');
+    expect((await manager.currentWorkspaceInfo('c2c', PEER))?.path).toBe(other);
+
+    await manager.remove(); // = /new
+    await manager.getOrCreate('c2c', PEER, PEER, REPLY);
+
+    const createCall = registry.create.mock.calls.at(-1)?.[0] as { meta?: { cwd?: string } } | undefined;
+    expect(createCall?.meta?.cwd).toBe(other);
   });
 
-  it('/new 之后又能改，且下一个会话真的落在新目录', async () => {
+  it('/new 之后改工作区，下一个会话真的落在新目录', async () => {
     const other = OTHER();
     mkdirSync(other, { recursive: true });
     new PrefsStore().setSessionId(KEY, 'session-a');
@@ -887,10 +940,6 @@ describe('changeChatWorkspace（换工作区）', () => {
     });
     const { manager } = createManager(ctx, registry);
     await manager.getOrCreate('c2c', PEER, PEER, REPLY);
-    expect(await manager.changeChatWorkspace('c2c', PEER, other)).toMatchObject({
-      ok: false,
-      reason: 'has-session',
-    });
 
     await manager.remove(); // = /new
 

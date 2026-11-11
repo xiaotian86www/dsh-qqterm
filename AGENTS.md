@@ -46,7 +46,7 @@
 - 禁止运行时写 `process.env`；凭据只写 profile 的 `cordis.patch.yml`。
 - 未捕获 rejection 在宿主是致命错误，所有异步链必须有兜底 catch。
 - 长生命周期对象（网关 socket、定时器）必须在 `outsideHmrTransaction` 里创建（`src/index.ts` 两处 `bootstrapGateway`）：宿主用 AsyncLocalStorage 标记「正在应用变更」，在事务里建的 socket 会一直带着它，之后每条入站消息写配置都报 `HMR transactions cannot be nested`。
-- `name = 'qqterm'` 与 patch entry id 是兼容契约，改了用户 profile 里按 id 的配置覆盖会失效。`inject` 只进不退（当前 17 项）。`compaction` 不进 `inject`：它挂在 agent preset 作用域，`/compact` 只从会话 preset 取引擎。
+- `name = 'qqterm'` 与 patch entry id 是兼容契约，改了用户 profile 里按 id 的配置覆盖会失效。`inject` 只进不退（当前 18 项）。`compaction` 不进 `inject`：它挂在 agent preset 作用域，`/compact` 的判定与执行都交给 base 的 `commands` 登记簿（`find` 判可见性、`execute` 转发宿主命令），插件不解析 preset 服务。
 
 ### 3.3 客户端
 
@@ -62,7 +62,7 @@
 - `/sessions` 默认按工作区分组列工作中会话（组标题带路径，行带 `生成中` / `空闲` 与 `✅`）；`/sessions all` 看全部、只标 `📌`。`resume` 只改当前指针；`/new` 清指针（不预先铸 id，下一条消息再建会话）；切走不 dispose 旧会话；`/clear`（别名 `/reset`）停当前再开新，`/clear all` 停全部；`/stop` 停当前，`/stop all` 停全部正在生成的。无映射即全新会话，id 由 `mintSessionId()` 铸造。
 - 启动恢复：QQ `ready` 后 `SessionManager.restoreCurrentSession()` 按 prefs 指针走 `getOrCreate`（singleflight）；盘上已无则跳过并清指针，**恢复失败绝不新建**；占用 / 后端故障时指针保持原样。
 - 回复目标持久化在 `model-prefs.json` 的 `targets`（`sessionKey → openid`），`touch()` 里值变化才写。恢复失败（locked / 宿主报错）用它推 `⚠️ 上次的会话没能恢复` + `/sessions resume` 按钮，`not-found` 静默。持久化写在消息路径上，不写卸载钩子（强杀不执行）。
-- 模型 / preset / 思考强度沿用宿主核心行为，插件不另立：没有 `provider` / `model` / `preset` 配置项，新会话取核心默认值。`/model`、`/reasoning` 有活跃会话走 `sessionController.selectModel`（记进 `model/selection`，不 fork 不重建，下轮生效）；无会话时写部署默认值（`agentDefaultModel.saveSelection`；`/permission` 走 `settings.update('permission', { defaultPreset })`），不为切换拉起会话。两种情况下查看视图都显示当前值并标 `✅`，不造「全局」标签。`/preset` 写 `agent-preset-registry.selectedDefault`，对新建会话生效，已开会话保持自己的 preset；插件不存 preset。`create` / `resume` 的 `agentOptions` 传 getter 读 `agentDefaultModel.currentSelection()`。插件只在 `~/.dsh-qqterm/model-prefs.json` 存 `sessionIds` / `dirs`。
+- 模型 / preset / 思考强度沿用宿主核心行为，插件不另立：没有 `provider` / `model` / `preset` 配置项，新会话取核心默认值。`/model`、`/reasoning` 有活跃会话走 `sessionController.selectModel`（记进 `model/selection`，不 fork 不重建，下轮生效）；无会话时写部署默认值（`agentDefaultModel.saveSelection`；`/permission` 走 `settings.update('permission', { defaultPreset })`），不为切换拉起会话。两种情况下查看视图都显示当前值并标 `✅`，不造「全局」标签。`/preset` 写 `agent-preset-registry.selectedDefault`，对新建会话生效，已开会话保持自己的 preset；插件不存 preset。`create` / `resume` 的 `agentOptions` 传 getter 读 `agentDefaultModel.currentSelection()`。插件只在 `~/.dsh-qqterm/model-prefs.json` 存 `sessionIds` / `dirs` / `targets`；聊天工作目录以内存变量为唯一读写来源，磁盘只做镜像：构造时优先读回上次记下的目录（目录已不在才退回宿主默认工作区），之后由已获取会话、切换会话、`/new <工作区|路径>` 与运行期 `working-directory/change` 覆盖并落盘，读取不回退。
 - 会话标题由 `sessionTitle.rename` 写入 `session/title`，写完即固定。`/rename` 只改当前会话；`/sessions rename <id> <标题>` 改已打开会话（同样私聊 + `access.owner`）。两者只接受 live session，冷会话提示先 `/sessions resume`，不偷偷拉起。
 - 入站 `source.kind` 必须是 `user`（`src/session/user-message.ts`）：会话标题、最近提问时间、轮次大纲、replay 断点都以「人类消息」为触发条件。自造 kind 的后果是所有新会话停在「未命名会话」。
 - Markdown 按 `textChunkLimit` 分片，代码块 / 表格感知切分在 `src/transport/chunker.ts`，不要绕过。

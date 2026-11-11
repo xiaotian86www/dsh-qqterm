@@ -1,5 +1,5 @@
 /**
- * PrefsStore — per-peer 会话偏好持久化（会话映射 + 工作目录）
+ * PrefsStore — per-peer 会话偏好持久化（会话映射 + 工作目录 + 回复目标）
  *
  * 隔离文件 I/O 操作，便于单元测试时 mock。
  * 存储路径：~/.dsh-qqterm/model-prefs.json（全局共享，多实例/多进程共存）。
@@ -23,7 +23,7 @@ type ErrorFn = (msg: string) => void;
 interface PrefsFile {
   /** sessionKey → 最新 sessionId（用于重启后恢复当前会话） */
   sessionIds: Record<string, string>;
-  /** sessionKey → 该聊天当前所在的工作目录（换会话后跟着会话走，/new 保留） */
+  /** sessionKey → 聊天的工作目录（内存态，启动时优先读回） */
   dirs: Record<string, string>;
   /** sessionKey → 上次和这个聊天交互的 QQ 用户 openid（重启后主动推送用） */
   targets: Record<string, string>;
@@ -32,21 +32,19 @@ interface PrefsFile {
 /** 各段的删除墓碑（key 集合），合并时用于压住磁盘上的旧值 */
 interface Tombstones {
   sessionIds: Set<string>;
-  dirs: Set<string>;
   targets: Set<string>;
 }
 
 export class PrefsStore {
   /** per-peer 最新 sessionId（内存态） */
   private sessionIds = new Map<string, string>();
-  /** per-peer 当前工作目录（内存态） */
+  /** sessionKey → 聊天工作目录（内存态；启动时优先读回，运行期写盘） */
   private dirs = new Map<string, string>();
   /** per-peer 上次交互的用户 openid（内存态） */
   private targets = new Map<string, string>();
   /** 本进程显式删除的 key（防止并发合并把删除复活） */
   private deleted: Tombstones = {
     sessionIds: new Set(),
-    dirs: new Set(),
     targets: new Set(),
   };
   /** 隔离偏好文件路径 */
@@ -87,26 +85,18 @@ export class PrefsStore {
     return [...this.sessionIds.entries()];
   }
 
-  // ── 工作目录操作 ──
+  // ── 聊天工作目录操作 ──
 
+  /** 上次记下的聊天工作目录（启动时优先用它当初值） */
   getDirectory(sessionKey: string): string | undefined {
     return this.dirs.get(sessionKey);
   }
 
+  /** 记下这个聊天当前的工作目录（值不变不写盘） */
   setDirectory(sessionKey: string, directory: string): void {
     if (this.dirs.get(sessionKey) === directory) return;
     this.dirs.set(sessionKey, directory);
-    this.deleted.dirs.delete(sessionKey);
     this.write();
-  }
-
-  clearDirectory(sessionKey: string): boolean {
-    const deleted = this.dirs.delete(sessionKey);
-    if (deleted) {
-      this.deleted.dirs.add(sessionKey);
-      this.write();
-    }
-    return deleted;
   }
 
   // ── 回复目标操作 ──
@@ -143,9 +133,9 @@ export class PrefsStore {
         }
       }
       if (data.dirs && typeof data.dirs === 'object') {
-        for (const [key, dir] of Object.entries(data.dirs)) {
-          if (typeof dir === 'string' && dir) {
-            this.dirs.set(key, dir);
+        for (const [key, directory] of Object.entries(data.dirs)) {
+          if (typeof directory === 'string' && directory) {
+            this.dirs.set(key, directory);
           }
         }
       }
@@ -206,11 +196,11 @@ export class PrefsStore {
 
   /** 合并内存与磁盘（内存覆盖同 key，磁盘独有的其他写者条目保留，墓碑 key 除外） */
   private mergeDisk(disk: PrefsFile | null): PrefsFile {
-    const pick = <T>(mem: Map<string, T>, diskMap: Record<string, T> | undefined, tomb: Set<string>): Record<string, T> => {
+    const pick = <T>(mem: Map<string, T>, diskMap: Record<string, T> | undefined, tomb?: Set<string>): Record<string, T> => {
       const out = Object.fromEntries(mem.entries());
       if (diskMap && typeof diskMap === 'object') {
         for (const [key, value] of Object.entries(diskMap)) {
-          if (key in out || tomb.has(key)) continue;
+          if (key in out || tomb?.has(key)) continue;
           out[key] = value;
         }
       }
@@ -218,7 +208,8 @@ export class PrefsStore {
     };
     return {
       sessionIds: pick(this.sessionIds, disk?.sessionIds, this.deleted.sessionIds),
-      dirs: pick(this.dirs, disk?.dirs, this.deleted.dirs),
+      // dirs 只增不删，没有墓碑
+      dirs: pick(this.dirs, disk?.dirs),
       targets: pick(this.targets, disk?.targets, this.deleted.targets),
     };
   }

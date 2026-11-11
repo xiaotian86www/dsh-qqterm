@@ -9,6 +9,8 @@ import { QQBot } from '@tencent-connect/qqbot-nodejs';
 import type { GatewayDisconnect, InteractionEvent, MiddlewareContext } from '@tencent-connect/qqbot-nodejs';
 import { SessionManager, type DshAgentRegistry } from '../session/index.ts';
 import { handleInbound, createOutboundHandler } from '../transport/index.ts';
+import type { SessionLike } from '../transport/outbound.ts';
+import type { RawSessionEvent } from '../transport/events.ts';
 import { parseStreamFrame } from '../transport/events.ts';
 import { ReplyStore } from '../transport/reply-store.ts';
 import { createReplyAwareBot } from '../transport/reply-bot.ts';
@@ -138,10 +140,16 @@ export async function bootstrapGateway(
 
   const outbound = createOutboundHandler(manager, sender, config, logger, toolsRegistry, deliverablesDeliverer);
   // session/event 按 agent 作用域派发；带 global 才能收到所有已获取会话的事件，
-  // 不只当前会话（多会话输出都要回 QQ）。
+  // 不只当前会话（多会话输出都要回 QQ）。同一入口顺带跟运行期 cd：只有当前会话
+  // 的 working-directory/change 会覆盖聊天工作区。
   (ctx as unknown as {
     on(event: string, handler: (...args: unknown[]) => void, options?: { global?: boolean }): void;
-  }).on('session/event', outbound.routeSessionEvent as (...args: unknown[]) => void, { global: true });
+  }).on('session/event', ((session: SessionLike, event: RawSessionEvent) => {
+    if (event.type === 'working-directory/change') {
+      manager.noteWorkingDirectory(session, event.data.cwd);
+    }
+    outbound.routeSessionEvent(session, event);
+  }) as (...args: unknown[]) => void, { global: true });
 
   // ── 出站流式：agent/assistant-stream → 流式帧路由 ──
   // 实时流式走瞬态 agent/assistant-stream（chunk 不进 session log）。

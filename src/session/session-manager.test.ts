@@ -91,6 +91,7 @@ function hostCtxServices() {
       create: async () => ({ path: '/', attachSession: async () => {} }),
     },
     agentPresets: { serviceFor: () => undefined },
+    commands: { find: () => undefined, execute: async () => undefined },
     permissionPresets: { names: [], optionOf: () => undefined },
   };
 }
@@ -126,7 +127,6 @@ function fakeAgent(id: string): DshAgent {
     cancel: vi.fn(),
     followup: vi.fn(),
     whenIdle: vi.fn(async () => {}),
-    runMaintenance: vi.fn(async (task: (signal: AbortSignal) => Promise<unknown>) => task(new AbortController().signal)),
   } as unknown as DshAgent;
 }
 
@@ -332,7 +332,7 @@ describe('getOrCreate — E2 并发改写映射', () => {
     expect(persistedId()).toBe(candidate); // 只落真实存在的会话
   });
 
-  it('preset 没有压缩能力时返回 no-compaction', async () => {
+  it('没有 compact 命令时返回 no-compaction', async () => {
     const { registry } = createRegistry(async () => {
       throw notFound('missing');
     });
@@ -341,6 +341,56 @@ describe('getOrCreate — E2 并发改写映射', () => {
     expect(
       await manager.compact('c2c', PEER, { senderId: PEER, replyTarget: REPLY }),
     ).toEqual({ ok: false, reason: 'no-compaction' });
+  });
+
+  it('compact 能力按命令登记簿本地判定：查不到就拒绝，不执行命令', async () => {
+    const { registry } = createRegistry(async () => fakeHandle('s1'));
+    const execute = vi.fn();
+    const ctx = {
+      ...persistenceCtx(async () => undefined),
+      commands: { find: () => undefined, execute },
+    } as unknown as Context;
+    const manager = createManagerWithCtx(registry, ctx);
+
+    expect(
+      await manager.compact('c2c', PEER, { senderId: PEER, replyTarget: REPLY }),
+    ).toEqual({ ok: false, reason: 'no-compaction' });
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('登记簿查得到 compact → 交由宿主命令执行，按结果文案回条数', async () => {
+    const { registry } = createRegistry(async () => fakeHandle('s1'));
+    const execute = vi.fn(async () => ({
+      commandId: 'c1',
+      result: { kind: 'success' as const, text: 'Compacted 2 history items (~300 tokens).' },
+    }));
+    const ctx = {
+      ...persistenceCtx(async () => undefined),
+      commands: { find: () => ({ definitionId: '@deepseek-ai/dsh-command-compact' }), execute },
+    } as unknown as Context;
+    const manager = createManagerWithCtx(registry, ctx);
+
+    expect(
+      await manager.compact('c2c', PEER, { senderId: PEER, replyTarget: REPLY }),
+    ).toEqual({ ok: true, shadowed: 2, tokens: 300 });
+    expect(execute).toHaveBeenCalledWith(expect.anything(), '/compact', [], expect.anything());
+  });
+
+  it('宿主命令的失败文案映射成中文结果', async () => {
+    const { registry } = createRegistry(async () => fakeHandle('s1'));
+    const execute = vi.fn(async () => ({
+      commandId: 'c2',
+      result: { kind: 'error' as const, text: 'Compaction cancelled.' },
+    }));
+    const ctx = {
+      ...persistenceCtx(async () => undefined),
+      commands: { find: () => ({ definitionId: 'x' }), execute },
+    } as unknown as Context;
+    const manager = createManagerWithCtx(registry, ctx);
+
+    expect(
+      await manager.compact('c2c', PEER, { senderId: PEER, replyTarget: REPLY }),
+    ).toEqual({ ok: false, reason: 'failed', message: '压缩已取消' });
   });
 
   it('E2-2 /compact 拉起与普通消息并发 getOrCreate → singleflight 合并为一次 resume/create，无 agent 泄漏', async () => {
@@ -441,7 +491,7 @@ describe('getOrCreate — 会话创建/恢复后挂载到对应工作区', () =>
 
     expect(record.sessionId).toBe('session-current');
     await vi.waitFor(() => expect(ws.attachSession).toHaveBeenCalledWith('session-current'));
-    // 目录来自 chatDirectory 的兜底（mock 的 resolveAgentCwd 用正斜杠拼接）
+    // 目录来自内存 chatDir 的初值（mock 的 resolveAgentCwd 用正斜杠拼接）
     expect(workspaceRegistry.create).toHaveBeenCalledWith(`${env.home}/workspace`);
   });
 });
