@@ -36,6 +36,10 @@ interface StubOptions {
   workspace?: { title: string; path: string; missing: boolean } | undefined;
   /** 思考强度视图：默认支持 high、未显式设置 */
   effort?: { options?: Array<{ id: string; name: string }>; current?: { id: string; name: string }; defaulted: boolean };
+  /** 生效 preset（没有会话时是部署默认值） */
+  preset?: string;
+  /** 生效权限预设（没有会话时是部署默认值） */
+  permission?: string;
 }
 
 function makeManager(options: StubOptions = {}) {
@@ -70,6 +74,9 @@ function makeManager(options: StubOptions = {}) {
       current: { id: 'high', name: 'High' },
       defaulted: true,
     }),
+    getEffectivePreset: vi.fn(() => options.preset ?? 'default'),
+    getPermissionPreset: vi.fn(() => options.permission ?? 'workspace-write'),
+    listPermissionPresets: vi.fn(() => [{ id: 'workspace-write', name: '工作区内修改' }]),
     currentWorkspaceInfo: vi.fn(async () => ('workspace' in options
       ? options.workspace
       : { title: 'repo', path: 'D:\\repo', missing: false })),
@@ -117,6 +124,7 @@ describe('/status（有会话）', () => {
     expect(text).toContain('**模型**: deepseek/deepseek-v4');
     expect(text).toContain('**思考强度**: 高');
     expect(text).toContain('**Preset**: default');
+    expect(text).toContain('**权限**: 工作区内修改 (workspace-write)');
   });
 
   it('模型不支持思考时不显示思考强度行', async () => {
@@ -187,13 +195,28 @@ describe('/status（有会话）', () => {
 });
 
 describe('/status（没有会话）', () => {
-  it('只说明未建立与工作区，不展示会话级字段', async () => {
+  it('展示模型 / 思考强度 / preset / 权限的默认值，不标「默认」', async () => {
     const text = await run(makeManager({ active: false }));
     expect(text).toContain('**会话**: 未建立');
     expect(text).toContain('**工作区**: repo · `D:\\repo`');
-    expect(text).not.toContain('**模型**:');
-    expect(text).not.toContain('**思考强度**:');
-    expect(text).not.toContain('**Preset**:');
+    expect(text).toContain('**模型**: deepseek/deepseek-v4');
+    expect(text).toContain('**思考强度**: 高');
+    expect(text).toContain('**Preset**: default');
+    expect(text).toContain('**权限**: 工作区内修改 (workspace-write)');
+    expect(text).not.toContain('默认');
+  });
+
+  it('不展示会话级字段', async () => {
+    const text = await run(makeManager({ active: false }));
     expect(text).not.toContain('**消息**:');
+    expect(text).not.toContain('**上下文**:');
+    expect(text).not.toContain('**Token**:');
+  });
+
+  it('宿主读不出权限时保留该字段写 —，不整行消失', async () => {
+    const manager = makeManager({ active: false });
+    (manager.getPermissionPreset as unknown as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
+    const text = await run(manager);
+    expect(text).toContain('**权限**: —');
   });
 });

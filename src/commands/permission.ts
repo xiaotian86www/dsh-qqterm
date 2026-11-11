@@ -26,8 +26,8 @@ const PRESET_WARNINGS: Record<string, string> = {
   'danger-full-access': '⚠️ 不启用沙箱，也不再逐次审批',
 };
 
-/** 展示用标签：中文名 (id)；未知预设按 id 展示 */
-function presetLabel(id: string, entry?: PermissionPresetEntry): string {
+/** 展示用标签：中文名 (id)；未知预设按 id 展示（/status 的权限行同用） */
+export function presetLabel(id: string, entry?: PermissionPresetEntry): string {
   const label = PRESET_LABELS[id] ?? entry?.name ?? id;
   return label === id ? id : `${label} (${id})`;
 }

@@ -61,6 +61,12 @@ function fakePermissions(overrides: Partial<Record<keyof PermissionPresetsLike, 
     defaultPreset: 'workspace-write',
     current: vi.fn(() => 'workspace-write'),
     optionOf: vi.fn((name: string) => ({ value: name, name: `name-${name}` })),
+    // 宿主的目录投影：auto 进 options（会话里能选），不进 defaultOptions（不能当默认）
+    catalog: vi.fn(() => ({
+      options: [{ value: 'read-only' }, { value: 'workspace-write' }, { value: 'auto' }],
+      defaultOptions: [{ value: 'read-only' }, { value: 'workspace-write' }],
+      defaultPreset: 'workspace-write',
+    })),
     set,
     ...overrides,
   } as unknown as PermissionPresetsLike;
@@ -138,9 +144,10 @@ afterEach(async () => {
 });
 
 describe('权限预设目录', () => {
-  it('按宿主 names 顺序列出，名称取自 optionOf', () => {
+  it('有会话时按宿主 names 顺序列出，名称取自 optionOf', async () => {
     const { service } = fakePermissions();
     const manager = createManager(service);
+    await manager.getOrCreate('c2c', PEER, PEER, REPLY);
     expect(manager.listPermissionPresets()).toEqual([
       { id: 'read-only', name: 'name-read-only' },
       { id: 'workspace-write', name: 'name-workspace-write' },
@@ -148,8 +155,16 @@ describe('权限预设目录', () => {
     ]);
   });
 
-  it('宿主没有 optionOf 时只给 id', () => {
-    const { service } = fakePermissions({ optionOf: undefined });    const manager = createManager(service);
+  it('没有会话时只列能当部署默认的预设（auto 不出现）', () => {
+    const { service } = fakePermissions();
+    const manager = createManager(service);
+    expect(manager.listPermissionPresets().map((entry) => entry.id)).toEqual(['read-only', 'workspace-write']);
+  });
+
+  it('宿主没有 optionOf 时只给 id', async () => {
+    const { service } = fakePermissions({ optionOf: undefined });
+    const manager = createManager(service);
+    await manager.getOrCreate('c2c', PEER, PEER, REPLY);
     expect(manager.listPermissionPresets().map((entry) => entry.id)).toEqual(['read-only', 'workspace-write', 'auto']);
     expect(manager.listPermissionPresets()[0]?.name).toBeUndefined();
   });
@@ -178,6 +193,49 @@ describe('读取当前权限', () => {
     await manager.getOrCreate('c2c', PEER, PEER, REPLY);
 
     expect(manager.getPermissionPreset('c2c', PEER)).toBe('workspace-write');
+  });
+
+  it('部署默认被写坏（auto 不能当默认）时回正到配置预设，并写回 settings', () => {
+    const settings = { update: vi.fn(async () => {}) };
+    const service = {
+      names: ['read-only', 'workspace-write', 'auto'],
+      get defaultPreset(): string {
+        throw new Error('permission: unknown default preset "auto"');
+      },
+      current: vi.fn(() => 'workspace-write'),
+      optionOf: vi.fn((name: string) => ({ value: name, name: `name-${name}` })),
+      set: vi.fn(),
+      catalog: vi.fn(() => ({
+        options: [],
+        defaultOptions: [{ value: 'read-only' }, { value: 'workspace-write' }],
+        defaultPreset: 'read-only',
+      })),
+    } as unknown as PermissionPresetsLike;
+    const manager = createManager(service, undefined, undefined, settings);
+
+    expect(manager.getPermissionPreset('c2c', PEER)).toBe('read-only');
+    expect(settings.update).toHaveBeenCalledWith('permission', { defaultPreset: 'read-only' });
+  });
+
+  it('写坏之前读到过的默认值优先于目录兜底', () => {
+    let broken = false;
+    const settings = { update: vi.fn(async () => {}) };
+    const service = {
+      names: ['read-only', 'workspace-write', 'auto'],
+      get defaultPreset(): string {
+        if (broken) throw new Error('permission: unknown default preset "auto"');
+        return 'workspace-write';
+      },
+      current: vi.fn(() => 'workspace-write'),
+      set: vi.fn(),
+      catalog: vi.fn(() => ({ options: [], defaultOptions: [{ value: 'read-only' }], defaultPreset: 'read-only' })),
+    } as unknown as PermissionPresetsLike;
+    const manager = createManager(service, undefined, undefined, settings);
+
+    expect(manager.getPermissionPreset('c2c', PEER)).toBe('workspace-write');
+    broken = true;
+    expect(manager.getPermissionPreset('c2c', PEER)).toBe('workspace-write');
+    expect(settings.update).toHaveBeenCalledWith('permission', { defaultPreset: 'workspace-write' });
   });
 });
 
@@ -223,13 +281,25 @@ describe('切换权限', () => {
     const registry = createRegistry();
     const manager = createManager(service, undefined, registry, settings);
 
-    const outcome = await manager.setPermissionPreset('c2c', PEER, 'auto');
+    const outcome = await manager.setPermissionPreset('c2c', PEER, 'read-only');
 
-    expect(outcome).toEqual({ ok: true, preset: 'auto' });
-    expect(settings.update).toHaveBeenCalledWith('permission', { defaultPreset: 'auto' });
+    expect(outcome).toEqual({ ok: true, preset: 'read-only' });
+    expect(settings.update).toHaveBeenCalledWith('permission', { defaultPreset: 'read-only' });
     expect(set).not.toHaveBeenCalled();
     expect(manager.getSessionRecord('c2c', PEER)).toBeUndefined();
     expect(registry.create).not.toHaveBeenCalled();
+  });
+
+  it('无活跃会话不能把 auto 写成部署默认（按未知预设拒绝）', async () => {
+    const { service, set } = fakePermissions();
+    const settings = { update: vi.fn(async () => {}) };
+    const manager = createManager(service, undefined, undefined, settings);
+
+    const outcome = await manager.setPermissionPreset('c2c', PEER, 'auto');
+
+    expect(outcome).toEqual({ ok: false, reason: 'unknown-preset' });
+    expect(settings.update).not.toHaveBeenCalled();
+    expect(set).not.toHaveBeenCalled();
   });
 
   it('未知预设：拒绝且不写会话、不建会话', async () => {

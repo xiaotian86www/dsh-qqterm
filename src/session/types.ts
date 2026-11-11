@@ -225,6 +225,17 @@ export interface PermissionPresetsLike {
   set(session: unknown, name: string): void;
   /** 单条预设的展示信息（可选，缺失时按 id 展示） */
   optionOf?(name: string): { value: string; name?: string; description?: string };
+  /**
+   * 宿主的权限目录投影（可选）
+   *
+   * `options` 是会话里能选的（含在线 auto），`defaultOptions` 才是能当
+   * **部署默认** 的配置预设——宿主 defaultSettings 只认配置表里的键。
+   */
+  catalog?(): {
+    options: Array<{ value: string; name?: string; description?: string }>;
+    defaultOptions: Array<{ value: string; name?: string; description?: string }>;
+    defaultPreset: string;
+  };
 }
 
 /** 权限预设条目（/permission 展示用） */

@@ -192,6 +192,8 @@ export class SessionManager {
   public approvalChannel?: ApprovalChannel;
   /** 由 bootstrap 注入的重发通道（失败卡片 → 「重发 / 放弃」），会话释放时清理其待确认卡片 */
   public retryChannel?: RetryChannel;
+  /** 最近一次读到的有效部署默认权限预设（部署默认被写坏时用它回正） */
+  private lastKnownDefaultPermission?: string;
 
   constructor(
     ctx: Context,
@@ -671,11 +673,17 @@ export class SessionManager {
     return (this.ctx as unknown as { permissionPresets: PermissionPresetsLike }).permissionPresets;
   }
 
-  /** 可切换的权限预设（含在线的 auto） */
+  /**
+   * 可切换的权限预设。
+   *
+   * 有会话时是宿主的 names（配置表 + 在线的 auto，只作用于这个会话）；没有会话时
+   * 只列能当部署默认的配置预设（宿主 catalog 的 defaultOptions）——auto 写不进
+   * 部署默认，列出来也切不了。
+   */
   listPermissionPresets(): PermissionPresetEntry[] {
     const presets = this.getPermissionPresetsService();
     try {
-      const names = Array.isArray(presets.names) ? presets.names : [];
+      const names = this.currentRecord() ? this.permissionNames(presets) : this.deploymentDefaultNames(presets);
       return names.map((name) => {
         const option = presets.optionOf?.(name);
         return { id: name, name: option?.name, description: option?.description };
@@ -685,6 +693,22 @@ export class SessionManager {
       this.logger.warn(`list permission presets failed: ${errorText(err)}`);
       return [];
     }
+  }
+
+  /** 宿主的全量预设名（配置表顺序 + 在线的 auto） */
+  private permissionNames(presets: PermissionPresetsLike): readonly string[] {
+    return Array.isArray(presets.names) ? presets.names : [];
+  }
+
+  /** 能当部署默认的预设名：宿主 defaultOptions；投影缺失时退回配置键（去掉会话级的 auto） */
+  private deploymentDefaultNames(presets: PermissionPresetsLike): readonly string[] {
+    try {
+      const options = presets.catalog?.().defaultOptions;
+      if (options) return options.map((option) => option.value);
+    } catch (err) {
+      this.logger.debug(`permission catalog unavailable: ${errorText(err)}`);
+    }
+    return this.permissionNames(presets).filter((name) => name !== 'auto' && name !== 'custom');
   }
 
   /**
@@ -707,9 +731,35 @@ export class SessionManager {
     }
 
     try {
-      return presets.defaultPreset;
-    } catch {
-      return undefined;
+      const preset = presets.defaultPreset;
+      this.lastKnownDefaultPermission = preset;
+      return preset;
+    } catch (err) {
+      // 部署默认被写成了 auto 这类不能当默认的预设时，宿主 defaultSettings 抛错，
+      // 不但这一行读不出来，之后新建会话也会失败。回正到最近一次读到的有效值。
+      const fallback = this.lastKnownDefaultPermission ?? this.deploymentDefaultNames(presets)[0];
+      if (!fallback) return undefined;
+      this.logger.warn(`default permission preset unreadable, restoring ${fallback}: ${errorText(err)}`);
+      this.restoreDefaultPermission(fallback);
+      return fallback;
+    }
+  }
+
+  /** 这个预设能不能当部署默认（会话级 auto 与派生的 custom 不行） */
+  private isDeploymentDefault(presets: PermissionPresetsLike, preset: string): boolean {
+    return this.deploymentDefaultNames(presets).includes(preset);
+  }
+
+  /** 写回部署默认预设（自愈，失败只记日志，不影响展示） */
+  private restoreDefaultPermission(preset: string): void {
+    try {
+      void this.getSettingsService()
+        .update(PERMISSION_SETTINGS_NS, { defaultPreset: preset })
+        .catch((err: unknown) => {
+          this.logger.warn(`default permission restore failed: preset=${preset} ${errorText(err)}`);
+        });
+    } catch (err) {
+      this.logger.warn(`default permission restore failed: preset=${preset} ${errorText(err)}`);
     }
   }
 
@@ -738,6 +788,10 @@ export class SessionManager {
     }
 
     if (!record) {
+      // 没有会话时只能选能当部署默认的预设：auto 是会话级选项，写成部署默认会让
+      // 宿主 defaultSettings 抛 `unknown default preset`，读默认值与新建会话都会失败
+      if (!this.isDeploymentDefault(presets, preset)) return { ok: false, reason: 'unknown-preset' };
+
       try {
         await this.getSettingsService().update(PERMISSION_SETTINGS_NS, { defaultPreset: preset });
       } catch (err) {

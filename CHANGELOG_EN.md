@@ -32,6 +32,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- **`/status` shows model / reasoning effort / preset / permission without a session**: it reports the deployment defaults that a new session will use, without labelling them as defaults, and now includes the permission preset too. Message count, context, and tokens still appear only once a session exists.
+- **`/permission` lists only deployment defaults without a session**: the list now comes from the host's `defaultOptions`, so session-only values such as `auto` no longer appear, and anything outside the list is rejected as an unknown preset. Storing `auto` as the deployment default used to make the host unable to read the default preset — the `/status` permission row disappeared and new sessions failed afterwards. The permission row is always kept (`—` when unreadable), and a corrupted default is restored to a configured preset.
 - **Old media files no longer pile up when rich-media download is off**: expiry cleanup is decoupled from the download switch, so `media.enabled: false` still cleans `~/.dsh-qqterm/media` per `media.ttlHours`.
 - **`askTimeoutMs: 0` no longer means "reject immediately"**: it now matches the other timeout settings, where 0 disables the timeout.
 

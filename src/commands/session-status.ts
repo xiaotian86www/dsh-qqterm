@@ -1,8 +1,8 @@
 /**
  * 会话状态命令：/status
  *
- * 当前聊天会话的「现场」：会话标题与 id、生成状态、所在工作区、模型 / preset、
- * 消息数、上下文占用、累计 token。
+ * 当前聊天会话的「现场」：会话标题与 id、生成状态、所在工作区、模型 / 思考强度 /
+ * preset / 权限、消息数、上下文占用、累计 token。
  *
  * 与其它状态类命令的分工：
  *   - `/bot-status` 是最小视图（会话 / 模型 / preset / 消息数），与这里共用「会话」写法；
@@ -15,6 +15,7 @@ import type { ChatScope } from '../types.ts';
 import { getScopePeer, sendMarkdownChunked } from '../shared/index.ts';
 import { sessionTargetLabel, sessionTitleOf } from '../transport/session-source.ts';
 import { effortLabel } from '../model/effort-label.ts';
+import { presetLabel } from './permission.ts';
 
 /** 千分位（与 /cost 一致，避免不同环境的本地化分隔符） */
 function num(n: number): string {
@@ -62,17 +63,25 @@ async function renderStatus(
     lines.push(`**工作区**: ${workspace.title} · \`${workspace.path}\`${missing}`);
   }
 
-  // 模型 / 思考强度 / preset 都是会话自己的状态：没有会话时不给默认值
-  if (status.active) {
-    if (status.model) {
-      lines.push(`**模型**: ${status.provider}/${status.model}`);
-    }
-    // 思考强度跟着模型走：只在模型支持时显示
-    const effort = await manager.getEffortView(scope, peerId);
-    if (effort.current) {
-      lines.push(`**思考强度**: ${effortLabel(effort.current)}`);
-    }
-    if (status.preset) lines.push(`**Preset**: ${status.preset}`);
+  // 模型 / 思考强度 / preset / 权限：没有会话时展示部署默认值（新建会话会用它），
+  // 与各命令的「当前」口径一致，不另标默认
+  if (status.model) {
+    lines.push(`**模型**: ${status.provider}/${status.model}`);
+  }
+  // 思考强度跟着模型走：只在模型支持时显示
+  const effort = await manager.getEffortView(scope, peerId);
+  if (effort.current) {
+    lines.push(`**思考强度**: ${effortLabel(effort.current)}`);
+  }
+  const preset = manager.getEffectivePreset(scope, peerId);
+  if (preset) lines.push(`**Preset**: ${preset}`);
+  const permission = manager.getPermissionPreset(scope, peerId);
+  if (permission) {
+    const entry = manager.listPermissionPresets().find((item) => item.id === permission);
+    lines.push(`**权限**: ${presetLabel(permission, entry)}`);
+  } else {
+    // 宿主读不出权限（目录投影缺失等）时也保留字段，不能整行消失
+    lines.push('**权限**: —');
   }
 
   // 以下只在会话已建立时有意义
