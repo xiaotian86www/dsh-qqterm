@@ -21,7 +21,14 @@ import type { ReplyStore } from './reply-store.ts';
 
 type AnyFn = (...args: unknown[]) => unknown;
 
-/** 这些方法只能填 msg_id（sendMessage / 文件接口 / 流式都不支持 event_id） */
+/**
+ * 这些方法只能填 msg_id（sendMessage / 文件接口 / 流式都不支持 event_id）
+ *
+ * 不装饰 `sendMedia`：SDK 的 sendImage / sendVideo / sendFile 内部都走
+ * `this.sendMedia({ target, ...source })`，再包一层会让第一次调用被当成
+ * target 二次解析，source 丢失（表现为 uploadMedia 报「没有 url/fileData/
+ * buffer/localPath」）。媒体一律从三个便利方法进入，够用了。
+ */
 const MSG_ONLY_METHODS = [
   'sendText',
   'sendTextWithKeyboard',
@@ -29,7 +36,6 @@ const MSG_ONLY_METHODS = [
   'sendVideo',
   'sendVoice',
   'sendFile',
-  'sendMedia',
 ] as const;
 
 function bindMethod(bot: QQBot, name: string): AnyFn | undefined {

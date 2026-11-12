@@ -38,10 +38,11 @@
 - **设置页的 `debug` 白名单**：面板从未提供该开关，服务端白名单里的条目只会造成「可提交但不可设置」；`debug` 仍可在 profile 中配置。
 - **`processingTimeoutMs`**：守卫只覆盖「消息交给宿主」这一段，超时既不中断生成也不解开卡住的会话；删掉配置项及其传入的守卫参数，profile / 环境变量里残留的旧值会被忽略，可以直接删掉。
 - **私聊额外 system prompt**：移除 `directPrompt` 配置项、设置页入口与每轮注入逻辑；profile 里残留的旧值不再生效，可以直接删掉。
-- **`sendFile.restrictPaths`**：白名单没有关闭的理由，且关掉后 `qqbot_send_file` 能读任意路径；去掉开关，白名单恒开，profile 里残留的 `false` 会被忽略。
+- **`sendFile.restrictPaths`**：白名单没有关闭的理由，且关掉后 `qqbot_send_file` 能读任意路径；去掉开关，白名单恒开，profile 里残留的 `false` 会被忽略（白名单本身随后也已移除，见「变更」）。
 
 ### 修复
 
+- **媒体发送丢失文件参数**：被动回复装饰器把 `sendMedia` 也包了一层，而 SDK 的 `sendImage` / `sendVideo` / `sendFile` 内部都走 `this.sendMedia`，结果第一个参数被二次解析成 target、source 被丢掉，平台报 `uploadMedia: one of url/fileData/buffer/localPath is required`。`/get`、`present` 交付物与助手图片转发都受影响；现在只装饰三个便利方法。
 - **`/status` 没有会话时也给出模型 / 思考强度 / preset / 权限**：展示新建会话会用的部署默认值，不带「默认」字样；并补上权限预设一行。消息数、上下文与 token 仍只在会话建立后显示。
 - **`/permission` 没有会话时只列部署默认预设**：列表改由宿主 `defaultOptions` 给出，`auto` 这类只能挂在会话上的选项不再出现，列表外的预设按未知预设拒绝；之前把 `auto` 写成部署默认会让宿主读不出默认值，`/status` 的权限行整行消失、之后新建会话也会失败。权限行在任何情况下都保留（读不到时显示 `—`），部署默认已被写坏时自动回正到配置里的预设。
 - **关闭富媒体下载后旧文件不再堆积**：过期清理从「下载开关」里拆出来，`media.enabled: false` 时仍按 `media.ttlHours` 清理 `~/.dsh-qqterm/media`。

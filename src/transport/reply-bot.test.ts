@@ -99,6 +99,30 @@ describe('createReplyAwareBot', () => {
     expect((calls[2]!.args[0] as ReplyTarget).eventId).toBeUndefined();
   });
 
+  it('sendImage 走 SDK 的 sendMedia 委托时 source 不被当成 target', async () => {
+    // 复刻 SDK 真实结构：sendImage(target, source) 内部 this.sendMedia({ target, ...source })
+    const calls: Call[] = [];
+    const raw = {
+      send: () => Promise.resolve({}),
+      sendMedia: async (opts: Record<string, unknown>) => {
+        calls.push({ method: 'sendMedia', args: [opts] });
+        return { upload: { file_uuid: 'u' }, message: { id: 'm' } };
+      },
+      sendImage: async (t: unknown, source: Record<string, unknown>) =>
+        (raw.sendMedia as (opts: unknown) => Promise<unknown>)({ target: t, fileType: 1, ...source }),
+    };
+    const bot = raw as unknown as QQBot;
+    const store = makeStore();
+    createReplyAwareBot(bot, store);
+    store.recordMessage('c2c', 'u1', 'm1');
+
+    await bot.sendImage(target, { localPath: 'a.png' });
+    const opts = calls[0]!.args[0] as Record<string, unknown>;
+    expect(opts['target']).toEqual({ scope: 'c2c', targetId: 'u1', msgId: 'm1' });
+    expect(opts['localPath']).toBe('a.png');
+    expect(opts['fileType']).toBe(1);
+  });
+
   it('openStream 解析出 msgId 后再交给 SDK', async () => {
     const { bot, calls } = makeBot();
     const store = makeStore();
