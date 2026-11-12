@@ -34,25 +34,74 @@ export interface AttachmentReaderLike {
   readImage?(ref: ImageAttachmentLike, signal?: AbortSignal): Promise<{ data: Uint8Array }>;
 }
 
+/** 消息内容的有序片段：一段文本或一组相邻图片 */
+export type MessageSegment =
+  | { kind: 'text'; text: string }
+  | { kind: 'image'; refs: ImageAttachmentLike[] };
+
+/** 把 image 块归一化成发送用的引用；非法引用返回 undefined */
+function imageRefOf(block: MessageContentBlock): ImageAttachmentLike | undefined {
+  if (block.offloaded === true) return undefined;
+  const ref = block.attachment;
+  if (ref === undefined || typeof ref.attachmentId !== 'string' || ref.attachmentId === '') return undefined;
+  return {
+    attachmentId: ref.attachmentId,
+    mediaType: typeof ref.mediaType === 'string' ? ref.mediaType : '',
+    ...(typeof ref.width === 'number' ? { width: ref.width } : {}),
+    ...(typeof ref.height === 'number' ? { height: ref.height } : {}),
+    ...(typeof ref.name === 'string' ? { name: ref.name } : {}),
+  };
+}
+
 /** 从消息内容里挑出 image 块（去重、跳过已 offload 的块，非法引用直接忽略） */
 export function collectImageBlocks(content: readonly MessageContentBlock[]): ImageAttachmentLike[] {
-  const seen = new Set<string>();
   const refs: ImageAttachmentLike[] = [];
   for (const block of content) {
-    if (block.type !== 'image' || block.offloaded === true) continue;
-    const ref = block.attachment;
-    if (ref === undefined || typeof ref.attachmentId !== 'string' || ref.attachmentId === '') continue;
-    if (seen.has(ref.attachmentId)) continue;
-    seen.add(ref.attachmentId);
-    refs.push({
-      attachmentId: ref.attachmentId,
-      mediaType: typeof ref.mediaType === 'string' ? ref.mediaType : '',
-      ...(typeof ref.width === 'number' ? { width: ref.width } : {}),
-      ...(typeof ref.height === 'number' ? { height: ref.height } : {}),
-      ...(typeof ref.name === 'string' ? { name: ref.name } : {}),
-    });
+    if (block.type !== 'image') continue;
+    const ref = imageRefOf(block);
+    if (ref === undefined) continue;
+    if (!refs.some((item) => item.attachmentId === ref.attachmentId)) refs.push(ref);
   }
   return refs;
+}
+
+/**
+ * 按内容块顺序切成文本段与图片组（相邻图片归一组，同一附件只发一次）。
+ *
+ * 出站据此在文本之间按原位置插图，而不是把整条消息的图片统一挪到最后。
+ */
+export function segmentMessageContent(content: readonly MessageContentBlock[]): MessageSegment[] {
+  const segments: MessageSegment[] = [];
+  const seen = new Set<string>();
+  let text: string[] = [];
+  let images: ImageAttachmentLike[] = [];
+
+  const flushText = () => {
+    if (text.length > 0) segments.push({ kind: 'text', text: text.join('\n') });
+    text = [];
+  };
+  const flushImages = () => {
+    if (images.length > 0) segments.push({ kind: 'image', refs: images });
+    images = [];
+  };
+
+  for (const block of content) {
+    if (block.type === 'text') {
+      flushImages();
+      text.push(typeof block.text === 'string' ? block.text : '');
+      continue;
+    }
+    if (block.type !== 'image') continue;
+    const ref = imageRefOf(block);
+    if (ref === undefined || seen.has(ref.attachmentId)) continue;
+    seen.add(ref.attachmentId);
+    flushText();
+    images.push(ref);
+  }
+
+  flushText();
+  flushImages();
+  return segments;
 }
 
 export class OutboundImages {

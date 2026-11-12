@@ -604,6 +604,46 @@ describe('OutboundRouter assistant/message 图片', () => {
     expect(images.send).toHaveBeenCalledTimes(1);
   });
 
+  it('文本与图片按内容块顺序交替发送', async () => {
+    const images = { send: vi.fn().mockResolvedValue(undefined) };
+    const { outbound, bot } = setup({ images, config: createConfig({ streaming: false }) });
+    const { session, event } = imageMessage([
+      { type: 'text', text: '先看图' },
+      { type: 'image', attachment: { attachmentId: 'a1', mediaType: 'image/png' } },
+      { type: 'text', text: '图后还有话' },
+    ]);
+
+    outbound.routeSessionEvent(session, event);
+    for (let i = 0; i < 30; i++) await Promise.resolve();
+
+    const markdown = (bot.sendMarkdown as ReturnType<typeof vi.fn>).mock;
+    expect(markdown.calls.map((call) => call[1])).toEqual(['先看图', '图后还有话']);
+    expect(images.send).toHaveBeenCalledTimes(1);
+    expect(images.send.mock.invocationCallOrder[0]).toBeGreaterThan(markdown.invocationCallOrder[0]!);
+    expect(images.send.mock.invocationCallOrder[0]).toBeLessThan(markdown.invocationCallOrder[1]!);
+  });
+
+  it('流式消息中间插图：流截到图前，图后文本另发一条', async () => {
+    const images = { send: vi.fn().mockResolvedValue(undefined) };
+    const { outbound, bot, session: stream } = setup({ images });
+    outbound.routeStreamFrame('sess-qq', start('a1'));
+    outbound.routeStreamFrame('sess-qq', delta('a1', '前半'));
+    const { session, event } = imageMessage([
+      { type: 'text', text: '前半' },
+      { type: 'image', attachment: { attachmentId: 'a1', mediaType: 'image/png' } },
+      { type: 'text', text: '后半' },
+    ]);
+
+    outbound.routeSessionEvent(session, event);
+    for (let i = 0; i < 30; i++) await Promise.resolve();
+
+    const update = (stream.update as ReturnType<typeof vi.fn>).mock;
+    expect(update.calls.at(-1)?.[0]).toBe('前半');
+    expect(stream.complete).toHaveBeenCalled();
+    expect(images.send).toHaveBeenCalledTimes(1);
+    expect(bot.sendMarkdown).toHaveBeenCalledWith(c2cTarget, '后半');
+  });
+
   it('未注入图片转发器时忽略 image 块', async () => {
     const { outbound, bot } = setup();
     const { session, event } = imageMessage([

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { collectImageBlocks, OutboundImages } from './outbound-images.ts';
+import { collectImageBlocks, OutboundImages, segmentMessageContent } from './outbound-images.ts';
 import type { SessionRecord } from '../session/index.ts';
 import type { Logger } from '../types.ts';
 
@@ -37,6 +37,40 @@ describe('collectImageBlocks', () => {
     ];
 
     expect(collectImageBlocks(blocks)).toEqual([]);
+  });
+});
+
+describe('segmentMessageContent', () => {
+  it('按内容块顺序保留图片位置，相邻图片归一组', () => {
+    const blocks = [
+      { type: 'text', text: '第一段' },
+      { type: 'image', attachment: { attachmentId: 'a1', mediaType: 'image/png' } },
+      { type: 'image', attachment: { attachmentId: 'a2', mediaType: 'image/png' } },
+      { type: 'text', text: '第二段' },
+    ];
+
+    expect(segmentMessageContent(blocks)).toEqual([
+      { kind: 'text', text: '第一段' },
+      {
+        kind: 'image',
+        refs: [
+          { attachmentId: 'a1', mediaType: 'image/png' },
+          { attachmentId: 'a2', mediaType: 'image/png' },
+        ],
+      },
+      { kind: 'text', text: '第二段' },
+    ]);
+  });
+
+  it('重复引用只在第一次出现的位置发一次', () => {
+    const blocks = [
+      { type: 'text', text: 'a' },
+      { type: 'image', attachment: { attachmentId: 'a1', mediaType: 'image/png' } },
+      { type: 'text', text: 'b' },
+      { type: 'image', attachment: { attachmentId: 'a1', mediaType: 'image/png' } },
+    ];
+
+    expect(segmentMessageContent(blocks).map((segment) => segment.kind)).toEqual(['text', 'image', 'text']);
   });
 });
 

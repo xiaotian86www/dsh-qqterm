@@ -109,6 +109,16 @@ export class OutboundBuffer {
     }
   }
 
+  /**
+   * 只发送前 `prefix` 段文本：流式消息收尾到该长度，后续内容由调用方另发。
+   * 用于在文本中间插入图片（QQ 流式消息是一条持续全量替换的消息，插不进图片）。
+   */
+  public async flushUpTo(prefix: string): Promise<void> {
+    this.buffer = prefix;
+    this.writer?.truncate(prefix);
+    await this.flush();
+  }
+
   /** 取消（异常/丢弃），中止流式并清空缓冲 */
   public cancel(): void {
     this.writer?.abort();

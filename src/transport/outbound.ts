@@ -15,7 +15,12 @@ import {
 import { OutboundBuffer, type QQBotSender } from './outbound-buffer.ts';
 import { formatToolResult, type ToolsRegistryLike, type ToolResultData } from './tool-presenter.ts';
 import type { DeliverablesDelivererLike } from './deliverables.ts';
-import { collectImageBlocks, type ImageAttachmentLike, type OutboundImages } from './outbound-images.ts';
+import {
+  segmentMessageContent,
+  type ImageAttachmentLike,
+  type MessageSegment,
+  type OutboundImages,
+} from './outbound-images.ts';
 import { rewriteLocalFileLinks } from './file-links.ts';
 import {
   RETRY_NOTICE_AFTER,
@@ -220,34 +225,66 @@ class OutboundRouter {
   }
 
   /**
-   * 完整 assistant 消息：有流式 buffer 则 flush，否则直接发送文本块；
-   * 文本排完后把 image 块逐张发成 QQ 图片（同一会话发送链内，顺序稳定）。
+   * 完整 assistant 消息：按内容块顺序发送，图片留在它出现的位置。
+   *
+   * - 纯文本：沿用原路径（流式 flush / 静态 sendNow）；
+   * - 有图片：切成「文本段 / 图片组」依次入队，文本段各自成消息；
+   * - 流式消息是全量替换的单条消息，插图时先把流式内容截到第一张图之前收尾，
+   *   再补发图片与后续文本，保证用户看到的顺序与内容块一致。
    */
   private onMessage(sessionId: string, record: SessionRecord, event: MessageEvent): void {
-    const images = collectImageBlocks(event.content);
+    const segments = segmentMessageContent(event.content);
+    const hasImages = segments.some((segment) => segment.kind === 'image');
     const buffer = this.buffers.get(sessionId);
+
     if (buffer !== undefined && buffer.text.trim()) {
-      const text = buffer.text;
       this.buffers.delete(sessionId);
-      if (buffer.isStreaming) {
-        this.trackText(sessionId, this.enqueue(sessionId, () => buffer.flush()));
-      } else {
-        // 非当前会话：buffer 只负责累积，发送交给 sendNow 统一加来源头 / 回复链接
-        buffer.cancel();
-        this.trackText(sessionId, this.enqueue(sessionId, () => this.sendNow(record, text, 'sendMarkdown')));
+      if (!hasImages) {
+        const text = buffer.text;
+        if (buffer.isStreaming) {
+          this.trackText(sessionId, this.enqueue(sessionId, () => buffer.flush()));
+        } else {
+          // 非当前会话：buffer 只负责累积，发送交给 sendNow 统一加来源头 / 回复链接
+          buffer.cancel();
+          this.trackText(sessionId, this.enqueue(sessionId, () => this.sendNow(record, text, 'sendMarkdown')));
+        }
+        return;
       }
-      this.queueImages(sessionId, record, images);
+
+      const firstImage = segments.findIndex((segment) => segment.kind === 'image');
+      const head = segments
+        .slice(0, firstImage)
+        .map((segment) => (segment.kind === 'text' ? segment.text : ''))
+        .join('\n')
+        .trim();
+      if (buffer.isStreaming && head !== '') {
+        this.trackText(sessionId, this.enqueue(sessionId, () => buffer.flushUpTo(head)));
+        this.queueSegments(sessionId, record, segments.slice(firstImage));
+        return;
+      }
+
+      buffer.cancel();
+      this.queueSegments(sessionId, record, segments);
       return;
     }
 
-    const textParts: string[] = [];
-    for (const block of event.content) {
-      if (block.type === 'text' && block.text) textParts.push(block.text);
-    }
-    const fullText = textParts.join('\n');
-    if (fullText.trim()) this.trackText(sessionId, this.send(record, fullText, 'sendMarkdown'));
-    this.queueImages(sessionId, record, images);
     this.buffers.delete(sessionId);
+    this.queueSegments(sessionId, record, segments);
+  }
+
+  /** 按顺序把片段排进发送链：文本段各发一条，图片组交给图片转发器 */
+  private queueSegments(sessionId: string, record: SessionRecord, segments: readonly MessageSegment[]): void {
+    for (const segment of segments) {
+      if (segment.kind === 'image') {
+        this.queueImages(sessionId, record, segment.refs);
+        continue;
+      }
+      if (segment.text.trim() === '') continue;
+      this.trackText(
+        sessionId,
+        this.enqueue(sessionId, () => this.sendNow(record, segment.text, 'sendMarkdown')),
+      );
+    }
   }
 
   /** 把图片发送排到本次文本之后（文本可能为空：只有图片的消息也要发出去） */

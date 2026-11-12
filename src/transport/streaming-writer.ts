@@ -60,6 +60,12 @@ export class StreamingWriter {
     this.fullText = '';
   }
 
+  /** 截断累积文本（只保留要显示的部分）：文本中间插图时提前收尾用 */
+  public truncate(text: string): void {
+    if (this.finished) return;
+    this.fullText = text;
+  }
+
   /** 追加增量文本，节流（throttle）后 update 全量 */
   public append(delta: string): void {
     if (this.finished) return;

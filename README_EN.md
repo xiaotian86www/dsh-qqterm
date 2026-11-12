@@ -339,7 +339,7 @@ Resolution strategy: acquired record → in-process live agent → persisted res
 - **One current session + multiple acquired sessions** — every QQ window continues the same current session; sessions acquired via `/sessions resume` or `/to` stay live and keep sending their output to QQ
 - **Preset support** — mount presets (toolkits, prompts, etc.) via the `agent-presets` service; `/preset` writes the global value, same as the settings page's "make default"
 - **Markdown output** — replies sent as Markdown with code-block/table-aware chunking
-- **Image forwarding** — image blocks in assistant messages are sent to QQ as images automatically
+- **Image forwarding** — image blocks in assistant messages are sent to QQ at the position they appear, with the text split into messages before and after each image
 - **Deliverables** — files declared via `present` are delivered at the end of the turn (enabled by default, any path)
 - **Question interaction** — supports `ask_user_question` with inline keyboard buttons (mutually exclusive) or numbered replies, one question at a time with timeout
 - **Approval confirmation** — supports `approval/request` to ask for user confirmation on critical actions via allow/deny buttons
