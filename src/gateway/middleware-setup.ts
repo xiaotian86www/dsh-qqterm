@@ -82,8 +82,8 @@ export function setupMiddlewares(
   // 6. 斜杠命令（在 concurrencyGuard 之前，命令匹配后不排队直接响应）
   const commandList = buildCommandList({ manager, config, logger, bot, reloader, installer });
   const slash = slashCommand({
-    // 关闭 autoHelp：help 命令由 qqbot 注册为 /bot-help，
-    // 避免 SDK 再自动注册一个无前缀的 /help 造成重复
+    // 关闭 autoHelp：help 命令由 qqbot 自己注册为 /help，
+    // 避免 SDK 再自动注册一个同名命令造成重复
     autoHelp: false,
     // 全角 ／ 与半角 / 等价：中文输入法下很难打出半角斜杠
     prefixes: ['/', '／'],

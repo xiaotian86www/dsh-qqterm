@@ -90,11 +90,16 @@ function thirdParty(bundles: readonly BundleInfoLike[]): BundleInfoLike[] {
 /** 列表一行：`**名字** · \`版本\``；只在后台查到新版本时给箭头与更新入口，停用的补一句 */
 function bundleLine(bundle: BundleInfoLike, latest: Readonly<Record<string, string>>): string {
   const parts = [`**${cleanInline(bundle.name)}**`];
-  if (bundle.version !== undefined && bundle.version !== '') parts.push(`\`${cleanInline(bundle.version)}\``);
+  const version = bundle.version === undefined || bundle.version === '' ? '' : `\`${cleanInline(bundle.version)}\``;
   // 只有「可自动更新 + 后台查到更新的版本」才值得占用行内空间；没有新版本时不给更新链接
   const next = bundle.updatable ? latest[bundle.name] : undefined;
   const hasUpdate = next !== undefined && next !== bundle.version;
-  if (hasUpdate) parts.push(`→ \`${cleanInline(next)}\``);
+  // 版本与箭头是一个整体（`1.0.0 → 1.1.0`），中间不插行内分隔符
+  if (hasUpdate && next !== undefined) {
+    parts.push(version === '' ? `→ \`${cleanInline(next)}\`` : `${version} → \`${cleanInline(next)}\``);
+  } else if (version !== '') {
+    parts.push(version);
+  }
   if (!bundle.enabled) parts.push('已停用');
   if (hasUpdate) parts.push(commandLink(`/plugins update ${bundle.name}`, '更新'));
   return parts.join(' · ');

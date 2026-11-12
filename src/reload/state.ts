@@ -86,7 +86,7 @@ export function writeReloadState(path: string, state: ReloadState, logger?: Logg
   }
 }
 
-/** 状态的一句话描述（`/bot-status` 用）；无记录时返回 undefined */
+/** 状态的一句话描述（`/status` 用）；无记录时返回 undefined */
 export function describeReloadState(state: ReloadState | undefined): string | undefined {
   if (state === undefined) return undefined;
   const when = formatRelativeTime(state.startedAt);

@@ -41,6 +41,20 @@ describe('StreamingWriter', () => {
     expect(session.update).toHaveBeenCalledWith('hello');
   });
 
+  it('发送前对全文做改写（本地文件链接 → /get）', async () => {
+    const session = createSession();
+    const bot = createBot(() => session);
+    const transform = vi.fn((text: string) => text.replace('[a](a.md)', '/get a.md'));
+    const writer = new StreamingWriter({ bot, target, logger: createLogger(), throttleMs: 200, transform });
+
+    writer.append('看 [a](a.md)');
+    await vi.advanceTimersByTimeAsync(200);
+    await writer.finish();
+
+    expect(transform).toHaveBeenCalled();
+    expect(session.update).toHaveBeenCalledWith('看 /get a.md');
+  });
+
   it('同 tick 内多次 append 只触发一次 update', async () => {
     const session = createSession();
     const bot = createBot(() => session);

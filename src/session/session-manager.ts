@@ -1599,7 +1599,7 @@ export class SessionManager {
     this.logger.info(`chat working directory changed: dir=${cwd}`);
   }
 
-  /** 某个 agent 所属会话当前的工作目录（qqbot_send_file 等按会话判定的白名单用） */
+  /** 某个 agent 所属会话当前的工作目录（交付物投递、`/get` 相对路径的基准） */
   directoryForAgent(agent: DshAgent): string | undefined {
     const record = this.findByAgent(agent);
     if (!record) return undefined;

@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createOutboundHandler } from './outbound.ts';
 import type { QQBotSender, StreamSessionLike } from './outbound-buffer.ts';
 import type { SessionManager, SessionRecord } from '../session/index.ts';
@@ -56,6 +59,10 @@ function setup(opts?: {
   retryChannel?: { offer: ReturnType<typeof vi.fn> };
   /** 发送层能不能拿到流式所需的被动凭证 */
   hasCredential?: boolean;
+  /** 图片转发器（不传则不转发 image 块） */
+  images?: { send: ReturnType<typeof vi.fn> };
+  /** 会话工作目录（本地文件链接按它解析相对路径） */
+  dir?: string;
 }) {
   const session = createSession();
   const bot = createBot((opts?.hasCredential ?? true) ? session : undefined);
@@ -63,10 +70,12 @@ function setup(opts?: {
   const manager = {
     findBySessionId: vi.fn((id: string) => (id === 'sess-qq' ? record : undefined)),
     isCurrentSession: vi.fn(() => opts?.current ?? true),
+    directoryForAgent: vi.fn(() => opts?.dir),
     ...(opts?.retryChannel !== undefined ? { retryChannel: opts.retryChannel } : {}),
   } as unknown as SessionManager;
   const outbound = createOutboundHandler(
     manager, bot, opts?.config ?? createConfig(), createLogger(), undefined, opts?.deliverer,
+    opts?.images as never,
   );
   return { outbound, bot, session, record };
 }
@@ -408,6 +417,7 @@ describe('OutboundRouter: deliverables/presented', () => {
     const manager = {
       findBySessionId: vi.fn(() => record),
       isCurrentSession: vi.fn(() => true),
+      directoryForAgent: vi.fn(() => undefined),
     } as unknown as SessionManager;
     const deliver = vi.fn().mockResolvedValue(undefined);
     const outbound = createOutboundHandler(manager, bot, createConfig(), createLogger(), undefined, { deliver });
@@ -430,7 +440,7 @@ describe('OutboundRouter: deliverables/presented', () => {
   it('配置关闭时不投递', async () => {
     const deliver = vi.fn().mockResolvedValue(undefined);
     const { outbound } = setup({
-      config: createConfig({ sendFile: { extraRoots: [], sendPresentedFiles: false, maxFiles: 4 } as QQTermConfig['sendFile'] }),
+      config: createConfig({ sendFile: { sendPresentedFiles: false, maxFiles: 4 } as QQTermConfig['sendFile'] }),
       deliverer: { deliver },
     });
 
@@ -553,5 +563,84 @@ describe('OutboundRouter: deliverables/presented', () => {
     await Promise.resolve();
 
     expect(bot.sendMarkdown).not.toHaveBeenCalled();
+  });
+});
+
+describe('OutboundRouter assistant/message 图片', () => {
+  const imageMessage = (content: unknown[]) => ({
+    session: { header: { id: 'sess-qq' } },
+    event: { type: 'assistant/message', data: { message: { content } } },
+  });
+
+  it('文本发完后才把 image 块交给图片转发器', async () => {
+    const images = { send: vi.fn().mockResolvedValue(undefined) };
+    const { outbound, bot } = setup({ images });
+    const { session, event } = imageMessage([
+      { type: 'text', text: '看图' },
+      { type: 'image', attachment: { attachmentId: 'a1', mediaType: 'image/png' } },
+    ]);
+
+    outbound.routeSessionEvent(session, event);
+    for (let i = 0; i < 6; i++) await Promise.resolve();
+
+    expect(bot.sendMarkdown).toHaveBeenCalledWith(c2cTarget, '看图');
+    expect(images.send).toHaveBeenCalledTimes(1);
+    expect(images.send.mock.calls[0]?.[1]).toEqual([{ attachmentId: 'a1', mediaType: 'image/png' }]);
+    const sendOrder = (bot.sendMarkdown as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0];
+    expect(images.send.mock.invocationCallOrder[0]).toBeGreaterThan(sendOrder!);
+  });
+
+  it('只有图片没有文本也发送', async () => {
+    const images = { send: vi.fn().mockResolvedValue(undefined) };
+    const { outbound, bot } = setup({ images });
+    const { session, event } = imageMessage([
+      { type: 'image', attachment: { attachmentId: 'a2', mediaType: 'image/jpeg' } },
+    ]);
+
+    outbound.routeSessionEvent(session, event);
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+
+    expect(bot.sendMarkdown).not.toHaveBeenCalled();
+    expect(images.send).toHaveBeenCalledTimes(1);
+  });
+
+  it('未注入图片转发器时忽略 image 块', async () => {
+    const { outbound, bot } = setup();
+    const { session, event } = imageMessage([
+      { type: 'image', attachment: { attachmentId: 'a3', mediaType: 'image/png' } },
+    ]);
+
+    outbound.routeSessionEvent(session, event);
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+
+    expect(bot.sendMarkdown).not.toHaveBeenCalled();
+  });
+});
+
+describe('OutboundRouter 本地文件链接', () => {
+  let dir = '';
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'qqterm-link-out-'));
+    writeFileSync(join(dir, 'notes.md'), 'x');
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('发送前把本地文件链接换成 /get 命令', async () => {
+    const { outbound, bot } = setup({ dir });
+
+    outbound.routeSessionEvent({ header: { id: 'sess-qq' } }, {
+      type: 'assistant/message',
+      data: { message: { content: [{ type: 'text', text: '看[notes.md](notes.md)' }] } },
+    });
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+
+    const sent = (bot.sendMarkdown as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string;
+    expect(sent).toContain('<qqbot-cmd-input');
+    expect(sent).toContain(`text="/get ${join(dir, 'notes.md')}"`);
+    expect(sent).toContain('show="notes.md"');
   });
 });

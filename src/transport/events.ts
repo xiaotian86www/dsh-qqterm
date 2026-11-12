@@ -27,10 +27,31 @@ export interface ChunkEvent {
   text: string;
 }
 
+/**
+ * assistant/message 的内容块（只保留出站用得到的字段）
+ *
+ * 宿主 ContentBlock 是 merge-extensible 联合，这里不穷举类型：未知块原样
+ * 忽略；image 块带宿主 attachment 服务的图片引用，由出站转发到 QQ。
+ */
+export interface MessageContentBlock {
+  type: string;
+  text?: string;
+  /** image 块：只读到发送所需的引用字段，其余字段不使用 */
+  attachment?: {
+    attachmentId?: unknown;
+    mediaType?: unknown;
+    width?: unknown;
+    height?: unknown;
+    name?: unknown;
+  };
+  /** 已被宿主离线化（请求超预算），此时不再作为图片发送 */
+  offloaded?: boolean;
+}
+
 /** assistant/message 事件 */
 export interface MessageEvent {
   type: 'assistant/message';
-  content: Array<{ type: string; text?: string }>;
+  content: MessageContentBlock[];
 }
 
 /** tool/call 事件 */
@@ -126,7 +147,7 @@ export function parseEvent(raw: RawSessionEvent): OutboundEvent | undefined {
     }
 
     case 'assistant/message': {
-      const message = (raw.data as { message?: { content?: Array<{ type: string; text?: string }> } }).message;
+      const message = (raw.data as { message?: { content?: MessageContentBlock[] } }).message;
       if (message === undefined || !Array.isArray(message.content)) return undefined;
       return { type: 'assistant/message', content: message.content };
     }

@@ -5,7 +5,7 @@
  *
  * 命令按 category 分两类：
  *   - agent：底层 dsh agent 通用能力（new/compact/model/status/cost）
- *   - qqbot：插件自身特有（bot-ping/bot-version/bot-status/bot-help）
+ *   - qqbot：插件自身特有（status/plugins/help）
  */
 import type { CommandDeps, CategorizedCommand } from './types.ts';
 import { newCommand, resetCommand, compactCommand } from './session.ts';
@@ -13,18 +13,17 @@ import { sessionsCommand } from './sessions.ts';
 import { renameCommand } from './rename.ts';
 import { toCommand } from './to.ts';
 import { lsCommand } from './ls.ts';
+import { getCommand } from './get.ts';
 import { modelCommand } from './model.ts';
 import { reasoningCommand } from './reasoning.ts';
 import { costCommand } from './cost.ts';
 import { sessionStatusCommand } from './session-status.ts';
 import { presetCommand } from './preset.ts';
 import { permissionCommand } from './permission.ts';
-import { statusCommand } from './status.ts';
 import { retryCommand } from './retry.ts';
 import { helpCommand } from './help.ts';
-import { syncCommand } from './sync.ts';
 import { pluginsCommand } from './plugins.ts';
-import { pingCommand, versionCommand, stopCommand, meCommand } from './misc.ts';
+import { stopCommand } from './misc.ts';
 
 /**
  * 构建标准命令列表
@@ -39,6 +38,7 @@ export function buildCommandList(deps: CommandDeps): CategorizedCommand[] {
     renameCommand(deps),
     toCommand(deps),
     lsCommand(deps),
+    getCommand(deps),
     modelCommand(deps),
     reasoningCommand(deps),
     costCommand(deps),
@@ -48,16 +48,11 @@ export function buildCommandList(deps: CommandDeps): CategorizedCommand[] {
     stopCommand(deps),
     retryCommand(deps),
     // QQBot 特有
-    pingCommand(),
-    versionCommand(deps),
-    meCommand(deps),
-    statusCommand(deps),
     pluginsCommand(deps),
   ];
 
-  // help / sync 需要访问完整列表（含自身），通过闭包惰性引用
+  // help 需要访问完整列表（含自身），通过闭包惰性引用
   commands.push(helpCommand(deps, () => commands));
-  commands.push(syncCommand(deps, () => commands));
 
   return commands;
 }

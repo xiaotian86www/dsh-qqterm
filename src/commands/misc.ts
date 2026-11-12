@@ -1,80 +1,11 @@
 /**
  * 杂项命令
  *
- * - /bot-ping /bot-version /bot-me：QQBot 插件特有（连通性测试、版本、身份）
  * - /stop：中止当前生成；`/stop all` 中止所有正在生成的已获取会话
  *   （对应底层 agent cancel，通用能力）
  */
 import type { CommandDeps, CategorizedCommand } from './types.ts';
-import { getScopePeer, pluginVersion, sendMarkdownChunked } from '../shared/index.ts';
-
-/** /bot-ping — 测试当前 dsh 与 QQ 连接的网络延迟 */
-export function pingCommand(): CategorizedCommand {
-  return {
-    name: 'bot-ping',
-    category: 'qqbot',
-    scope: 'all',
-    description: '测试当前 dsh 与 QQ 连接的网络延迟',
-    panelDesc: '测试网络延迟',
-    usage: [
-      '/bot-ping',
-      '',
-      '测试 dsh 主机与 QQ 服务器之间的网络延迟。',
-      '返回网络传输耗时和插件处理耗时。',
-    ].join('\n'),
-    handler: (ctx) => {
-      const now = Date.now();
-      const ts = ctx.message.timestamp;
-      const eventTime = ts ? new Date(ts).getTime() : NaN;
-      if (Number.isNaN(eventTime)) {
-        return '✅ pong!';
-      }
-      const totalMs = now - eventTime;
-      const qqToPlugin = ctx.receivedAt - eventTime;
-      const pluginProcess = now - ctx.receivedAt;
-      return [
-        '✅ pong!',
-        `⏱ 延迟: ${totalMs}ms`,
-        `  ├ 网络传输: ${qqToPlugin}ms`,
-        `  └ 插件处理: ${pluginProcess}ms`,
-      ].join('\n');
-    },
-  };
-}
-
-/** /bot-version — 查看版本信息 */
-export function versionCommand({ manager }: CommandDeps): CategorizedCommand {
-  return {
-    name: 'bot-version',
-    category: 'qqbot',
-    scope: 'all',
-    description: '查看版本信息',
-    handler: () => {
-      const current = manager.getEffectiveModel('c2c', '');
-      const modelInfo = current ? `${current.provider}/${current.model}` : '宿主默认';
-      return `🤖 dsh-qqterm v${pluginVersion()} · model: ${modelInfo}`;
-    },
-  };
-}
-
-/**
- * /bot-me — 查看发送者身份标识
- *
- * 返回 user openid（对应 access.owner 的唯一绑定用户）。
- */
-export function meCommand({ config }: CommandDeps): CategorizedCommand {
-  return {
-    name: 'bot-me',
-    category: 'qqbot',
-    scope: 'all',
-    description: '查看你的 OpenID',
-    handler: async (cmdCtx) => {
-      const senderId = cmdCtx.message.senderId ?? 'unknown';
-      await sendMarkdownChunked(cmdCtx, `🆔 你的 OpenID: **${senderId}**`, config.textChunkLimit);
-      return { kind: 'noop' as const };
-    },
-  };
-}
+import { getScopePeer } from '../shared/index.ts';
 
 /** /stop — 中止当前生成；`/stop all` 中止全部已获取会话（隐藏） */
 export function stopCommand({ manager }: CommandDeps): CategorizedCommand {

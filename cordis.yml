@@ -7,7 +7,6 @@
 #   QQBOT_SECRET    - QQ Bot AppSecret
 #   DEEPSEEK_API_KEY - DeepSeek API Key
 #   DSH_CWD         - Agent 工作目录（可选）
-#   HUNYUAN_API_KEY - 视觉模型 API Key（qqbot_describe_image 工具，hunyuan-vision）
 #   DSH_PRESET_ROOT - 系统预置 preset 目录（可选，默认 ./apps/cli/config/agent-presets）
 
 # ── 核心 spine ──
@@ -42,7 +41,7 @@
         trust: system
     # includeUserRoot 默认 true：额外加载 $DSH_HOME/.agent-presets（用户自定义 preset）
 
-# ── 附件存储（describe_image 工具的 attachments.saveImage 依赖） ──
+# ── 附件存储（助手图片转发依赖 attachments 取图片字节） ──
 - id: attachment-local
   name: '@deepseek-ai/dsh-attachment-local'
 
@@ -51,23 +50,6 @@
   name: '@deepseek-ai/dsh-llm-deepseek'
   config:
     apiKey: ${DEEPSEEK_API_KEY}
-
-# 视觉模型适配器（qqbot_describe_image 工具用 llm.stream 调多模态模型）
-- id: llm-pi-ai
-  name: '@deepseek-ai/dsh-llm-pi-ai'
-  config:
-    providers:
-      hunyuan:
-        displayName: Hunyuan Vision
-        apiKeyEnv: HUNYUAN_API_KEY
-        api: openai-completions
-        baseURL: https://api.hunyuan.cloud.tencent.com/v1
-        defaultInput: [text, image]
-        models:
-          - id: hunyuan-vision
-            name: Hunyuan Vision
-            contextWindow: 32768
-            maxTokens: 4096
 
 # ── 执行能力（按需启用） ──
 - id: tool-bash
@@ -98,7 +80,3 @@
   config:
     appId: ${QQBOT_APPID}
     appSecret: ${QQBOT_SECRET}
-    vision:
-      enabled: false
-      provider: ''   # 视觉模型 provider（需与上方 llm-pi-ai 配置的路由一致，如 hunyuan）
-      model: ''      # 视觉模型 id（如 hunyuan-vision）

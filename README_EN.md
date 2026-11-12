@@ -129,7 +129,7 @@ Model and reasoning effort follow the **current session**; the preset is a deplo
 
 ### Access control (access)
 
-The terminal serves exactly one user: every other private chat is rejected, and group chats are unsupported. QR binding writes the scanning user as the owner automatically; for manual binding or changing the owner, fill in the OpenID in settings (`/bot-me` shows it).
+The terminal serves exactly one user: every other private chat is rejected, and group chats are unsupported. QR binding writes the scanning user as the owner automatically; for manual binding or changing the owner, fill in the OpenID in settings.
 
 | Config | Type | Default | Description |
 |------|------|--------|------|
@@ -143,23 +143,16 @@ The terminal serves exactly one user: every other private chat is rejected, and 
 | `media.maxMB` | number | `200` | Max download size (MB) |
 | `media.ttlHours` | number | `24` | Media lifetime (hours), 0 = never expire |
 
-### Vision (vision)
-
-| Config | Type | Default | Description |
-|------|------|--------|------|
-| `vision.enabled` | boolean | `false` | Enable vision (qqbot_describe_image tool) |
-| `vision.provider` | string | - | Vision model provider (e.g. pi-ai) |
-| `vision.model` | string | - | Vision model id (e.g. qwen-vl-max) |
-| `vision.maxBytes` | number | `10MB` | Max image bytes |
-| `vision.maxTokens` | number | `1024` | Max output tokens |
-
 ### File sending (sendFile)
 
 | Config | Type | Default | Description |
 |------|------|--------|------|
-| `sendFile.extraRoots` | string[] | `[]` | Extra allowed root directories |
+| `sendFile.sendPresentedFiles` | boolean | `true` | Whether present-declared deliverables are sent to the current session |
+| `sendFile.maxFiles` | number | `4` | Max deliverables delivered per turn |
 
-File sending always goes through the path allowlist: only files under `~/.dsh-qqterm/media`, the session's working directory, and `extraRoots` are allowed (checked against real paths, so symlinks cannot escape).
+Deliverables and `/get` only ever go to the single bound user (`access.owner`), so paths are not restricted: `~/.dsh-qqterm/media`, the session's working directory, and any absolute path can be sent. Images in assistant messages are located by the attachment service and sent directly.
+
+Local file links in assistant text (`/`, `./`, `../`, a drive letter, or a relative path that resolves inside the working directory) are rewritten to a `/get <absolute path>` command link before sending: QQ cannot open local paths, so clicking the link asks the plugin to send the file. `/get <path>` also works when typed manually, for any path.
 
 ### Command panel (panel)
 
@@ -167,7 +160,7 @@ File sending always goes through the path allowlist: only files under `~/.dsh-qq
 |------|------|--------|------|
 | `panel.autoSync` | boolean | `true` | Sync the current commands to the command panel when the bot is ready |
 
-The command panel is the list that pops up in mobile QQ when you type `/`. With `panel.autoSync` on, every ready event pushes the plugin's built-in commands (with descriptions) to the private-chat global panel: it creates one when missing and updates the panel this plugin owns (whose `remark` is `qqterm:commands`) in place. To re-push immediately after changing commands, send `/bot-sync` (bound user only).
+The command panel is the list that pops up in mobile QQ when you type `/`. With `panel.autoSync` on, every ready event pushes the plugin's built-in commands (with descriptions) to the private-chat global panel: it creates one when missing and updates the panel this plugin owns (whose `remark` is `qqterm:commands`) in place.
 
 ### Custom menu (menu)
 
@@ -175,9 +168,9 @@ The command panel is the list that pops up in mobile QQ when you type `/`. With 
 |------|------|--------|------|
 | `menu.autoSync` | boolean | `true` | Sync the private-chat custom menu when the bot is ready |
 
-The menu holds the six fixed entries at the **bottom of a private chat**: `会话状态` (`/status`), `会话列表` (`/sessions`), `创建会话` (`/new`), `压缩会话` (`/compact`), plus two collapsible items that carry submenus — `权限` (`查看权限` / `仅可查看` / `工作区内修改` / `完全权限` / `自动审查`) and `思考强度` (`查看强度` / `关闭` / `低` / `高` / `最高`). Clicking any entry fills the matching command into the input box; permission and the current session are still validated by the command itself.
+The menu holds the six fixed entries at the **bottom of a private chat**: `会话状态` (`/status`), `会话列表` (`/sessions`), `重置会话` (`/reset`), `压缩会话` (`/compact`), plus two collapsible items that carry submenus — `权限预设` (`查看权限` / `仅可查看` / `工作区内修改` / `完全权限` / `自动审查`) and `思考强度` (`查看强度` / `关闭` / `低` / `高` / `最高`). Clicking any entry fills the matching command into the input box; permission and the current session are still validated by the command itself.
 
-The menu is bot-wide configuration that every user sees, and changes only show after leaving and re-entering the chat — so it only carries static actions, never per-session dynamic text (check `/status` for context usage). It syncs once when the bot is ready and skips identical content; to re-push manually use `/bot-sync` (bound user only), and `menu.autoSync=false` disables the automatic sync. The menu API replaces the whole thing, so the sync claims this plugin's buttons by `send_message` (collapsible items are claimed by name or by their submenu commands) while buttons added by hand are preserved after them.
+The menu is bot-wide configuration that every user sees, and changes only show after leaving and re-entering the chat — so it only carries static actions, never per-session dynamic text (check `/status` for context usage). It syncs once when the bot is ready and skips identical content; `menu.autoSync=false` disables the automatic sync. The menu API replaces the whole thing: every sync writes this plugin's fixed entries and keeps no other buttons.
 
 ## Built-in Commands
 
@@ -190,6 +183,7 @@ The menu is bot-wide configuration that every user sees, and changes only show a
 | `/rename` | Rename the current session (the title is pinned against automatic titles) |
 | `/to` | Send a message to a specific session, or answer its question |
 | `/ls` | List the subdirectories of a directory; click a row to go deeper |
+| `/get` | Send a file from the workspace into the current chat (images/videos/voice use their own channel) |
 | `/model` | View or switch the current session's model (effective next turn) |
 | `/reasoning` (alias `/think`) | View or switch the current session's reasoning effort (levels depend on the model) |
 | `/preset` | View or switch the current agent preset |
@@ -197,12 +191,7 @@ The menu is bot-wide configuration that every user sees, and changes only show a
 | `/cost` | View token usage of the current session |
 | `/status` | View session status: session name and short id / workspace / model / reasoning effort / context / tokens |
 | `/stop` | Abort the current generation; `/stop all` aborts every acquired session that is generating |
-| `/bot-ping` | Network latency test (transport & processing time) |
-| `/bot-version` | View version info |
-| `/bot-me` | View your OpenID (to fill in `access.owner`) |
-| `/bot-status` | View current session status (brief: session name and short id / model / reasoning effort / preset / message count; see `/status` for the full view) |
-| `/bot-help` | View all commands |
-| `/bot-sync` (alias `/bot-refresh`) | Sync the command panel and custom menu (bound user only) |
+| `/help` | View all commands |
 | `/plugins` | Plugin management: no arguments lists installed plugins; `install <name>` / `update <name> [version]` work against the registry; `reload` applies on-disk plugin changes (bound user only) |
 
 > A misspelled command (like `/modle` or `/sesions`) is not forwarded to the model as a prompt: the bot replies "no such command" and, when the intent is clear enough, offers the correct one as a clickable command. Only "slash + ASCII command name" counts as a command, so text like `/usr/local/bin` or `/今天` still goes to the model; the full-width `／` is equivalent to `/`, so it works straight from a Chinese IME.
@@ -265,7 +254,7 @@ Notes:
 - **Handle rule**: every target is an 8-char short id (like `#3f2a9b1c`; the `#` is optional). Lists are never numbered, so paging and grouping cannot desync from "row N".
 - **Paging**: multi-page views use `上一页 · 第 1/2 页 · 下一页` in the footer, omitting the missing direction; the page number is not in the title and "N more" is not shown.
 - Status words appear only in the working-session list: `生成中` (agent running), `空闲` (held but idle); a current pointer that has not been acquired yet shows `待恢复`. After `/new` there is no current pointer, so no such line is added. Other views only mark acquired sessions with `📌` (QQ holds it), with no current marker and no status.
-- Private chat only, and the operator must be the single bound user (`access.owner`) — titles and archive state touch other chats' data; with no owner configured the command is disabled (`/bot-me` shows your OpenID).
+- Private chat only, and the operator must be the single bound user (`access.owner`) — titles and archive state touch other chats' data; with no owner configured the command is disabled.
 - Archiving goes through the host `workspaceRegistry.archiveSession` and only writes the registry-global archive set — **no file is deleted**. This plugin offers no hard delete; clean up on disk from the Web side or by hand.
 - `workspaceRegistry` is part of the plugin's `inject`, so a profile missing it keeps the plugin inactive rather than exposing a half-working command.
 - Archiving disposes the session's agent in this process; if it is the current session, the chat mapping is cleared and the next message lands in a brand-new session — an archived session is rejected by the host `agent/pre-step` gate, so a chat left bound to it would stop getting replies.
@@ -273,7 +262,7 @@ Notes:
 - **Switching does not release**: `/sessions resume` only moves the current pointer; the old session keeps running and its output keeps flowing to QQ. `/new` only clears the current pointer, and the old session keeps running too. On unload the plugin disposes only the agents it created; borrowed Web/TUI agents are just dereferenced.
 - **Questions are routed per session**: the current session answers with plain text; buttons from other sessions carry the session id and work when clicked; questions without option buttons get reply / resume links on the guidance line. A plain message that did not come through a button or `/to` is never forwarded to the current model — the user is told to use a button or `/to`.
 - The held list is ordered "current → other held (by acquisition time)", and the row time is the session's latest human message time (falling back to creation time). Inside a workspace, `/sessions all` is ordered by that same time, matching the `updatedAt` the Web sidebar uses. Pinned sessions still lead and the workspace order is unchanged.
-- After a cross-workspace resume the agent works inside **that session's own directory**, and the file-send allowlist follows it.
+- After a cross-workspace resume the agent works inside **that session's own directory**, and relative paths (including relative `/get` arguments) resolve against that directory.
 
 
 ## Core Modules
@@ -300,6 +289,7 @@ src/
 ├── transport/                  # Transport layer
 │   ├── inbound.ts              # QQ inbound message → agent.followup()
 │   ├── outbound.ts             # session/event → QQ sendMarkdown
+│   ├── outbound-images.ts      # Assistant image blocks → QQ images
 │   ├── outbound-buffer.ts      # Streaming buffer
 │   ├── streaming-writer.ts     # Streaming writer
 │   ├── reply-store.ts          # Passive reply ids (msgid/eventid + usage, msgid persisted)
@@ -319,8 +309,7 @@ src/
 │   ├── command-panel.ts        # Command panel sync
 │   └── command-menu.ts         # Custom menu sync
 ├── media/                      # Media
-│   ├── vision-tool.ts          # Image vision understanding
-│   ├── send-file-tool.ts       # Send local files
+│   ├── send-media.ts           # Media sending (dispatch by extension)
 │   └── media-cleaner.ts        # Media TTL cleanup
 ├── middleware/                 # Middleware
 │   ├── question-answer.ts      # Q&A answer handling
@@ -350,8 +339,8 @@ Resolution strategy: acquired record → in-process live agent → persisted res
 - **One current session + multiple acquired sessions** — every QQ window continues the same current session; sessions acquired via `/sessions resume` or `/to` stay live and keep sending their output to QQ
 - **Preset support** — mount presets (toolkits, prompts, etc.) via the `agent-presets` service; `/preset` writes the global value, same as the settings page's "make default"
 - **Markdown output** — replies sent as Markdown with code-block/table-aware chunking
-- **Image understanding** — supports `qqbot_describe_image` vision to analyze images sent by users
-- **File sending** — supports `qqbot_send_file` to send local files to users (path allowlist enabled by default)
+- **Image forwarding** — image blocks in assistant messages are sent to QQ as images automatically
+- **Deliverables** — files declared via `present` are delivered at the end of the turn (enabled by default, any path)
 - **Question interaction** — supports `ask_user_question` with inline keyboard buttons (mutually exclusive) or numbered replies, one question at a time with timeout
 - **Approval confirmation** — supports `approval/request` to ask for user confirmation on critical actions via allow/deny buttons
 

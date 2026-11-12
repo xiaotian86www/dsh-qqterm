@@ -12,9 +12,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 - **`/plugins`**: list, install, and update plugins from QQ, and take over the former `/bot-reload`: `/plugins reload` applies on-disk plugin changes. Registry packages take effect immediately (the host reconciles the profile, so no reload is needed); when build scripts are blocked the result offers a "continue" button, and a failed upgrade restores the previous version. Local tgz snapshots still use `pnpm dev:reload` + `/plugins reload`.
 - **Background update check**: the registry is queried 2 minutes after startup and then every 6 hours; results are cached only, and `/plugins` marks rows with a newer version as `→ new version` — nothing is pushed and nothing installs itself.
+- **Assistant image forwarding**: image content blocks in assistant messages are now sent to QQ as images (after the text) instead of staying in the model context only.
+- **`/get` and local file links**: `/get <path>` sends a file from this machine into the chat (images, videos, and voice use their own channel, any path allowed); local file links in assistant text are rewritten to `/get <absolute path>` command links before sending, so one click delivers the file. Links inside fenced or inline code are left alone, only existing regular files are rewritten, and relative paths resolve against the session's working directory.
 
 ### Changed
 
+- **`/bot-help` renamed to `/help`**: back to the prefixless form, and the unknown-command hint points at `/help`; the command panel and help listing pick it up automatically.
+- **File sending no longer restricts directories**: `/get` and `present` deliverables can send files from any path, as long as they exist and are regular files; `sendFile.extraRoots` is removed with the allowlist. The plugin serves only the single bound `access.owner`, so files can only go back to that user's private chat — the allowlist blocked no outside access, it only kept the QQ side from reaching files outside the workspace.
 - **`/compact` no longer goes through the Web plugins**: both the availability check and the execution use the host command registry (`find` tells whether the preset mounted the compaction group, `execute` forwards the host `/compact`, which resolves its engine inside the preset's own scope), so the plugin no longer touches the preset service; a preset without the compaction group is still refused locally.
 - **Chat working directory is persisted**: the in-memory variable is still the single source of truth, and the current directory is also written to `dirs` in `model-prefs.json`; on startup the saved value is loaded first (falling back to the host default workspace only when that directory is gone). New chats start in the host's default workspace; switching / resuming sessions, `/new <workspace|path>`, and a runtime `cd` all override it, and `/status` plus `/sessions` grouping follow along.
 
@@ -27,6 +31,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Removed
 
+- **`/bot-ping`, `/bot-version`, `/bot-me`, `/bot-status`**: four `bot-`-prefixed utility commands are gone, so no `bot-` names remain in the command table; `/bot-status`'s "last reload / last plugin operation" lines moved into `/status`, its other fields already duplicated `/status`, and the OpenID is visible after QR binding and in settings.
+- **`/bot-sync` (alias `/bot-refresh`)**: the command panel and custom menu sync automatically when the bot is ready and their contents are fixed in code, so no command needs to trigger them; the menu sync now replaces the whole menu and keeps no buttons beyond this plugin's own entries.
+- **`qqbot_send_file` and `qqbot_describe_image`**: both tools are no longer registered, and the `vision` config (enabled / provider / model / defaultPrompt / maxBytes / maxTokens) is gone; the README follows. Stale `vision` entries in a profile are ignored and can be deleted. Deliverables still go through `present`, and inbound images are still downloaded locally for the model to analyse.
 - **`vision.timeoutMs`**: nothing ever read it — vision calls are only bounded by the host `exec.signal`; the config, its README row, and the test fixture are gone.
 - **`debug` in the settings whitelist**: the panel never exposed the switch, so the whitelist entry only allowed a value that could not be set; `debug` stays configurable from the profile.
 - **`processingTimeoutMs`**: the guard only covered the message hand-off, so the timeout neither aborted generation nor unblocked a stuck session; the config and the guard option are gone, and stale values in a profile or environment are ignored and can be deleted.

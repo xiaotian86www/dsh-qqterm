@@ -2,10 +2,9 @@
  * 会话状态命令：/status
  *
  * 当前聊天会话的「现场」：会话标题与 id、生成状态、所在工作区、模型 / 思考强度 /
- * preset / 权限、消息数、上下文占用、累计 token。
+ * preset / 权限、消息数、上下文占用、累计 token，以及上次重载 / 插件操作。
  *
  * 与其它状态类命令的分工：
- *   - `/bot-status` 是最小视图（会话 / 模型 / preset / 消息数），与这里共用「会话」写法；
  *   - `/cost` 只看计费口径（累计 token 与缓存命中率）；
  *   - `/status` 是会话相关的完整状态，想知道「这个会话现在什么样」看它。
  */
@@ -39,6 +38,7 @@ async function renderStatus(
   manager: SessionManager,
   scope: ChatScope,
   peerId: string,
+  extras?: Pick<CommandDeps, 'reloader' | 'installer'>,
 ): Promise<string> {
   const status = manager.getStatus(scope, peerId);
   const record = manager.getSessionRecord(scope, peerId);
@@ -97,11 +97,17 @@ async function renderStatus(
     }
   }
 
+  // 插件侧最近一次动作：排障时用来确认重载 / 安装是否真的生效
+  const lastReload = extras?.reloader?.describe();
+  if (lastReload !== undefined) lines.push(`**上次重载**: ${lastReload}`);
+  const lastPlugins = extras?.installer?.describe();
+  if (lastPlugins !== undefined) lines.push(`**上次插件操作**: ${lastPlugins}`);
+
   return lines.join('\n');
 }
 
 /** /status — 查看当前会话的完整状态 */
-export function sessionStatusCommand({ manager, config, logger }: CommandDeps): CategorizedCommand {
+export function sessionStatusCommand({ manager, config, logger, reloader, installer }: CommandDeps): CategorizedCommand {
   return {
     name: 'status',
     category: 'agent',
@@ -112,7 +118,7 @@ export function sessionStatusCommand({ manager, config, logger }: CommandDeps): 
 
       let text: string;
       try {
-        text = await renderStatus(manager, scope, peerId);
+        text = await renderStatus(manager, scope, peerId, { reloader, installer });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         logger?.warn(`/status 失败: ${message}`);

@@ -34,6 +34,8 @@ export class OutboundBuffer {
   private readonly bot: QQBotSender;
   private readonly limit: number;
   private readonly logger: Logger;
+  /** 发送前的文本改写（本地文件链接 → /get）；流式与静态都过一遍 */
+  private readonly transform: ((text: string) => string) | undefined;
 
   public constructor(
     record: SessionRecord,
@@ -41,13 +43,21 @@ export class OutboundBuffer {
     limit: number,
     logger: Logger,
     streamingEnabled: boolean,
+    transform?: (text: string) => string,
   ) {
     this.record = record;
     this.bot = bot;
     this.limit = limit;
     this.logger = logger;
+    this.transform = transform;
     this.writer = streamingEnabled
-      ? new StreamingWriter({ bot, target: record.replyTarget, logger, throttleMs: STREAM_THROTTLE_MS })
+      ? new StreamingWriter({
+        bot,
+        target: record.replyTarget,
+        logger,
+        throttleMs: STREAM_THROTTLE_MS,
+        ...(transform === undefined ? {} : { transform }),
+      })
       : null;
   }
 
@@ -86,7 +96,8 @@ export class OutboundBuffer {
       }
 
       // 降级：静态发送（writer 不存在 or 流式失败）
-      const chunks = chunkMarkdownText(this.buffer, this.limit);
+      const text = this.transform === undefined ? this.buffer : this.transform(this.buffer);
+      const chunks = chunkMarkdownText(text, this.limit);
       for (const chunk of chunks) {
         await this.bot.sendMarkdown(this.record.replyTarget, chunk);
       }

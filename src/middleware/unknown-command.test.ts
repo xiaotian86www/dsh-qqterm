@@ -32,11 +32,7 @@ const COMMANDS = [
   'preset',
   'permission',
   'stop',
-  'bot-ping',
-  'bot-version',
-  'bot-me',
-  'bot-status',
-  'bot-help',
+  'help',
 ];
 
 interface Harness {
@@ -116,7 +112,7 @@ async function run(content: string, options: HarnessOptions = {}): Promise<Harne
 describe('parseCommandCandidate（只把明确的指令形态当指令）', () => {
   it('识别半角与全角前缀', () => {
     expect(parseCommandCandidate('/model')).toEqual({ raw: 'model', name: 'model', prefix: '/' });
-    expect(parseCommandCandidate('／bot-help')).toEqual({ raw: 'bot-help', name: 'bot-help', prefix: '／' });
+    expect(parseCommandCandidate('／help')).toEqual({ raw: 'help', name: 'help', prefix: '／' });
   });
 
   it('保留大小写与尾部标点用于回显，名字归一化成小写', () => {
@@ -144,7 +140,7 @@ describe('suggestCommand（编辑距离建议）', () => {
     expect(suggestCommand('modle', COMMANDS)).toBe('model');
     expect(suggestCommand('stp', COMMANDS)).toBe('stop');
     expect(suggestCommand('sesions', COMMANDS)).toBe('sessions');
-    expect(suggestCommand('bot-hel', COMMANDS)).toBe('bot-help');
+    expect(suggestCommand('hel', COMMANDS)).toBe('help');
     expect(suggestCommand('model', COMMANDS)).toBe('model');
   });
 
@@ -165,7 +161,7 @@ describe('buildUnknownCommandReply', () => {
     const reply = buildUnknownCommandReply(base, 'model');
     expect(reply.markdown).toContain('没有 `/modle` 这个指令');
     expect(reply.markdown).toContain('text="/model"');
-    // 建议本身就是下一步：不再追加通用的 /bot-help 提示
+    // 建议本身就是下一步：不再追加通用的 /help 提示
     expect(reply.markdown.split('\n')).toHaveLength(2);
     expect(reply.text).toContain('你想用的是不是 /model？');
     expect(reply.text).not.toContain('<qqbot-cmd-input');
@@ -174,7 +170,7 @@ describe('buildUnknownCommandReply', () => {
   it('没有建议时提示去掉斜杠再发', () => {
     const reply = buildUnknownCommandReply({ raw: 'zzzzzzz', name: 'zzzzzzz', prefix: '/' }, undefined);
     expect(reply.markdown).toContain('如果只是普通文本');
-    expect(reply.markdown).toContain('/bot-help');
+    expect(reply.markdown).toContain('/help');
     expect(reply.markdown).not.toContain('qqbot-cmd-input');
   });
 
@@ -207,7 +203,7 @@ describe('rejectUnknownCommands（中间件行为）', () => {
   });
 
   it('已注册指令不拦截（正常由 slashCommand 提前短路）', async () => {
-    for (const content of ['/model', '/bot-help', '/new', '/sessions 2']) {
+    for (const content of ['/model', '/help', '/new', '/sessions 2']) {
       const h = await run(content);
       expect(h.next, content).toHaveBeenCalledTimes(1);
       expect(h.isStopped(), content).toBe(false);

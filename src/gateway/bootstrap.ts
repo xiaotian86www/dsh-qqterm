@@ -27,8 +27,8 @@ import type { Logger } from '../types.ts';
 import { setupMiddlewares } from './middleware-setup.ts';
 import { createGatewaySession } from './gateway-session.ts';
 import { startMediaCleanup } from '../media/media-cleaner.ts';
-import { ensureVisionInputModal, registerDescribeImageTool } from '../media/vision-tool.ts';
-import { registerSendFileTool, type MediaSenderLike } from '../media/send-file-tool.ts';
+import type { MediaSenderLike } from '../media/send-media.ts';
+import { OutboundImages, type AttachmentReaderLike, type ImageSenderLike } from '../transport/outbound-images.ts';
 import { DeliverablesDeliverer } from '../transport/deliverables.ts';
 import { formatPanelSummary, syncCommandPanels, type PanelSyncResult } from '../features/command-panel.ts';
 import { syncCommandMenu, type MenuSyncResult } from '../features/command-menu.ts';
@@ -120,12 +120,19 @@ export async function bootstrapGateway(
     openStream: (target) => bot.openStream({ target }),
   };
 
-  // ── 附件发送适配器（qqbot_send_file 工具与交付物投递共用） ──
+  // ── 附件发送适配器（交付物投递使用） ──
   // SDK 文件发送不支持 event_id，装饰器已按 msg_only 处理，这里直接复用实例。
   const mediaSender: MediaSenderLike = bot as unknown as MediaSenderLike;
 
+  // 助手消息里的 image 内容块 → QQ 图片（走宿主 attachment 服务取字节）
+  const outboundImages = new OutboundImages(
+    bot as unknown as ImageSenderLike,
+    (ctx as unknown as { attachments?: AttachmentReaderLike }).attachments,
+    logger,
+  );
+
   // 交付物投递：present 声明的文件在轮末发送到当前会话（outbound 路由触发）
-  // 白名单/相对路径以「该会话当前的工作目录」为基准：工作区跟着会话走，不能再读固定配置。
+  // 相对路径以「该会话当前的工作目录」为基准：工作区跟着会话走，不能再读固定配置。
   const deliverablesDeliverer = new DeliverablesDeliverer(
     sender,
     mediaSender,
@@ -138,7 +145,15 @@ export async function bootstrapGateway(
       : decorateSessionMessage(text, record.sessionId, sessionTitleOf(record))),
   );
 
-  const outbound = createOutboundHandler(manager, sender, config, logger, toolsRegistry, deliverablesDeliverer);
+  const outbound = createOutboundHandler(
+    manager,
+    sender,
+    config,
+    logger,
+    toolsRegistry,
+    deliverablesDeliverer,
+    outboundImages,
+  );
   // session/event 按 agent 作用域派发；带 global 才能收到所有已获取会话的事件，
   // 不只当前会话（多会话输出都要回 QQ）。同一入口顺带跟运行期 cd：只有当前会话
   // 的 working-directory/change 会覆盖聊天工作区。
@@ -266,13 +281,6 @@ export async function bootstrapGateway(
 
   // ── 后台检查插件更新（结果只进 `/plugins` 列表，不推送、不自动装） ──
   startUpdateCheck(ctx, installer, logger);
-
-  // ── 视觉工具注册（qqbot_describe_image，复用 dsh llm + attachments） ──
-  ensureVisionInputModal(config.vision, logger);
-  registerDescribeImageTool(ctx, config.vision, logger);
-
-  // ── 附件发送工具注册（qqbot_send_file，发送器见上方 mediaSender） ──
-  registerSendFileTool(ctx, mediaSender, manager, config, logger);
 
   // ── 生命周期 ──
   (ctx as unknown as { effect(fn: () => (() => Promise<void>) | void, name?: string): void })

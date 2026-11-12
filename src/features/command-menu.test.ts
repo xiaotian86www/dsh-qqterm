@@ -1,6 +1,5 @@
 /**
- * 自定义菜单同步：四个平铺按钮 + 权限 / 思考两个折叠项、认领已有按钮、
- * 保留手工按钮、超限截断
+ * 自定义菜单同步：四个平铺按钮 + 权限 / 思考两个折叠项、整表覆盖
  */
 import { describe, it, expect } from 'vitest';
 import type { OpenApiLike } from '../types.ts';
@@ -43,15 +42,15 @@ function putItems(calls: Call[]): MenuItemPayload[] {
 }
 
 describe('MENU_ENTRIES', () => {
-  it('四个平铺按钮 + 权限 / 思考强度两个折叠项', () => {
+  it('四个平铺按钮 + 权限预设 / 思考强度两个折叠项', () => {
     expect(OUR_ITEMS.map((item) => item.name)).toEqual([
-      '会话状态', '会话列表', '创建会话', '压缩会话', '权限', '思考强度',
+      '会话状态', '会话列表', '重置会话', '压缩会话', '权限预设', '思考强度',
     ]);
-    expect(OUR_ITEMS.filter((item) => item.type === 'menu').map((item) => item.name)).toEqual(['权限', '思考强度']);
+    expect(OUR_ITEMS.filter((item) => item.type === 'menu').map((item) => item.name)).toEqual(['权限预设', '思考强度']);
   });
 
   it('权限子菜单列出查看与四个预设', () => {
-    const permission = OUR_ITEMS.find((item) => item.name === '权限');
+    const permission = OUR_ITEMS.find((item) => item.name === '权限预设');
     expect(permission?.sub_menu_items?.map((child) => child.send_message)).toEqual([
       '/permission',
       '/permission read-only',
@@ -124,45 +123,25 @@ describe('syncCommandMenu', () => {
     expect(calls.some((c) => c.method === 'put')).toBe(false);
   });
 
-  it('保留用户手工加的按钮，接在固定入口之后', async () => {
+  it('整表覆盖：已有其它按钮时直接写本插件的固定入口', async () => {
     const manual = { type: 'link', name: '官网', link: 'https://example.com' };
     const { api, calls } = makeApi([manual]);
-    await syncCommandMenu(api);
-
-    expect(putItems(calls)).toEqual([...OUR_ITEMS, manual]);
-  });
-
-  it('本插件的按钮被改名也按 send_message 认领，不重复追加', async () => {
-    const renamed = { type: 'send_message', name: '看状态', send_message: '/status' };
-    const { api, calls } = makeApi([renamed]);
     const result = await syncCommandMenu(api);
 
-    expect(result.count).toBe(6);
+    expect(result).toEqual({ action: 'updated', count: 6 });
     expect(putItems(calls)).toEqual(OUR_ITEMS);
   });
 
-  it('折叠项被改名也按子菜单命令认领，不重复追加', async () => {
-    const renamed = {
-      type: 'menu',
-      name: '我的权限',
-      sub_menu_items: OUR_ITEMS.find((item) => item.name === '权限')!.sub_menu_items,
-    };
-    const { api, calls } = makeApi([renamed]);
-    await syncCommandMenu(api);
-
-    expect(putItems(calls)).toEqual(OUR_ITEMS);
-  });
-
-  it('总数超过 10 项时截断', async () => {
-    const manual = Array.from({ length: 12 }, (_, i) => ({
+  it('旧版本留下的按钮被整表覆盖，不残留', async () => {
+    const legacy = Array.from({ length: 12 }, (_, i) => ({
       type: 'send_message',
       name: `m${i}`,
       send_message: `/m${i}`,
     }));
-    const { api, calls } = makeApi(manual);
+    const { api, calls } = makeApi(legacy);
     const result = await syncCommandMenu(api);
 
-    expect(result.count).toBe(MENU_MAX_ITEMS);
-    expect(putItems(calls)).toHaveLength(MENU_MAX_ITEMS);
+    expect(result).toEqual({ action: 'updated', count: 6 });
+    expect(putItems(calls)).toEqual(OUR_ITEMS);
   });
 });

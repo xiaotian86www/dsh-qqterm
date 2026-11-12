@@ -50,7 +50,7 @@ function makeApi(records: Array<{ panel_id: string; panel?: { remark?: string } 
 
 describe('displayWidth / clipPanelText（平台口径：汉字算 2）', () => {
   it('ASCII 与中文的宽度', () => {
-    expect(displayWidth('/bot-version')).toBe(12);
+    expect(displayWidth('/help')).toBe(5);
     expect(displayWidth('中文')).toBe(4);
     expect(displayWidth('a中')).toBe(3);
   });
@@ -96,8 +96,8 @@ describe('buildPanelItems（按私聊可见性取命令）', () => {
   });
 
   it('panelDesc 优先于 description（长说明不留半截）', () => {
-    const ping = { ...cmd('bot-ping', '测试当前 dsh 与 QQ 连接的网络延迟'), panelDesc: '测试网络延迟' };
-    expect(buildPanelItems([ping])[0]!.desc).toBe('测试网络延迟');
+    const status = { ...cmd('status', '查看当前会话状态'), panelDesc: '查看会话状态' };
+    expect(buildPanelItems([status])[0]!.desc).toBe('查看会话状态');
   });
 });
 

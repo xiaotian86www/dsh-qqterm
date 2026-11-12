@@ -143,7 +143,7 @@ export function writePluginOpState(path: string, state: PluginOpState, logger?: 
   writeJson(path, state, logger, '插件操作状态');
 }
 
-/** 状态的一句话描述（`/bot-status` 用）；无记录时返回 undefined */
+/** 状态的一句话描述（`/status` 用）；无记录时返回 undefined */
 export function describePluginOpState(state: PluginOpState | undefined): string | undefined {
   if (state === undefined) return undefined;
   const when = formatRelativeTime(state.startedAt);

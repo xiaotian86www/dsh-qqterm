@@ -21,7 +21,7 @@
 | `src/features/` | 问答、审批、指令面板、按钮协议 |
 | `src/session/` | 会话寻址、后台会话切换 |
 | `src/transport/` | 入站、出站、分片、附件、回复目标 |
-| `src/commands/` | `/bot-*`、`/model`、`/preset`、`/sessions` 等指令 |
+| `src/commands/` | `/help`、`/status`、`/model`、`/preset`、`/sessions` 等指令 |
 | `src/plugins/` | 插件安装 / 更新 / 热重载 |
 | `src/media/` | 富媒体理解、附件发送、清理 |
 | `src/host/` | 宿主 Agent/Session 适配 |
@@ -221,7 +221,7 @@ QQ 只有一个窗口，多个已获取会话的输出、提问、审批都回�
 
 - 绝不提交真实 appId / appSecret、OpenID、会话日志；凭据只放 profile 的 `cordis.patch.yml` 或 `QQBOT_APPID` / `QQBOT_SECRET`，示例一律占位符。
 - 白名单只有一个用户：`access.owner` 为空时拒绝所有私聊；群消息一律拒绝；审批 / 提问按钮必须校验点击者等于 owner。
-- 文件发送走路径白名单，按 realpath 判定，禁止绕过符号链接检查。
+- 文件发送只发给 `access.owner`（唯一的接入用户），因此不限制目录：`/get` 与交付物投递可以是任意路径，但目标必须是存在且可读的普通文件；目录仍需 `statSync` 检查，`/get` 拒绝非文件。
 - 媒体 / 缓存落 `~/.dsh-qqterm/`，不进仓库。
 - `.env`、`.dsh-sessions/`、`docs/` 已在 .gitignore，不要为提交方便移除。
 

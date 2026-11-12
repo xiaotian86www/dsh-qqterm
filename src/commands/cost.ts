@@ -2,7 +2,7 @@
  * 用量命令：/cost — 只看计费口径
  *
  * 累计 input/output（每轮都计，反映真实调用量）+ 缓存命中率。
- * 上下文占用属于会话状态，放在 /bot-status 里（见 status.ts）。
+ * 上下文占用属于会话状态，放在 /status 里（见 session-status.ts）。
  *
  * 数据来源（session 事件）：
  *   assistant/message.data.usage.inputTokens/outputTokens/cacheReadTokens/cacheWriteTokens

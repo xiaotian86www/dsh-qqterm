@@ -128,7 +128,7 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqterm/cordis.dev.yml
 
 ### 访问控制（access）
 
-超级终端只服务一个用户：其他私聊一律拒绝，群聊不支持。扫码绑定会把扫码者自动写成唯一用户；手动绑定或换人时在设置页填 OpenID（`/bot-me` 可查）。
+超级终端只服务一个用户：其他私聊一律拒绝，群聊不支持。扫码绑定会把扫码者自动写成唯一用户；手动绑定或换人时在设置页填 OpenID。
 
 | 配置 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
@@ -142,23 +142,16 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqterm/cordis.dev.yml
 | `media.maxMB` | number | `200` | 富媒体下载大小上限(MB) |
 | `media.ttlHours` | number | `24` | 富媒体存活时长(小时)，0=永不过期 |
 
-### 视觉理解（vision）
-
-| 配置 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `vision.enabled` | boolean | `false` | 是否启用视觉理解（qqbot_describe_image 工具） |
-| `vision.provider` | string | - | 视觉模型 provider（如 pi-ai） |
-| `vision.model` | string | - | 视觉模型 id（如 qwen-vl-max） |
-| `vision.maxBytes` | number | `10MB` | 图片字节上限 |
-| `vision.maxTokens` | number | `1024` | 输出 token 上限 |
-
 ### 附件发送（sendFile）
 
 | 配置 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `sendFile.extraRoots` | string[] | `[]` | 额外允许访问的根目录 |
+| `sendFile.sendPresentedFiles` | boolean | `true` | 是否把 present 声明的交付文件发送到当前会话 |
+| `sendFile.maxFiles` | number | `4` | 单轮最多投递的交付文件数 |
 
-发送文件始终走路径白名单：只允许 `~/.dsh-qqterm/media`、当前会话工作目录与 `extraRoots` 内（按真实路径判定，符号链接不可绕过）。
+交付文件与 `/get` 都只发给唯一绑定用户（`access.owner`），因此不再限制目录：`~/.dsh-qqterm/media`、当前会话工作目录、任意绝对路径都能发。助手消息里的图片由附件服务定位后直接发送。
+
+助手正文里的本地文件链接（`/`、`./`、`../`、盘符开头，或相对工作目录能命中的路径）在发送前改写成 `/get <绝对路径>` 命令链接：QQ 点不开本地路径，点这个链接由插件把文件发到聊天里。`/get <路径>` 也可以手动输入，路径不限。
 
 ### 指令面板（panel）
 
@@ -166,7 +159,7 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqterm/cordis.dev.yml
 |------|------|--------|------|
 | `panel.autoSync` | boolean | `true` | 机器人就绪后自动把当前指令同步到指令面板 |
 
-指令面板就是手机 QQ 里输入 `/` 后弹出的指令列表。开启 `panel.autoSync` 后，每次机器人就绪都会把插件内置命令（含说明）推到私聊全局面板；没有面板时创建，已有本插件建的面板（`remark` 为 `qqterm:commands`）时原地更新。改完命令想立即重推，发 `/bot-sync`（仅绑定用户可用）。
+指令面板就是手机 QQ 里输入 `/` 后弹出的指令列表。开启 `panel.autoSync` 后，每次机器人就绪都会把插件内置命令（含说明）推到私聊全局面板；没有面板时创建，已有本插件建的面板（`remark` 为 `qqterm:commands`）时原地更新。
 
 ### 自定义菜单（menu）
 
@@ -174,9 +167,9 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqterm/cordis.dev.yml
 |------|------|--------|------|
 | `menu.autoSync` | boolean | `true` | 机器人就绪后自动同步单聊自定义菜单 |
 
-菜单是**私聊窗口底部**的六个固定入口：`会话状态`（`/status`）、`会话列表`（`/sessions`）、`创建会话`（`/new`）、`压缩会话`（`/compact`），以及两个直接带子菜单的折叠项——`权限`（`查看权限` / `仅可查看` / `工作区内修改` / `完全权限` / `自动审查`）和 `思考强度`（`查看强度` / `关闭` / `低` / `高` / `最高`）。点击任意一项都会把对应命令填进输入框，权限与当前会话仍由命令自己校验。
+菜单是**私聊窗口底部**的六个固定入口：`会话状态`（`/status`）、`会话列表`（`/sessions`）、`重置会话`（`/reset`）、`压缩会话`（`/compact`），以及两个直接带子菜单的折叠项——`权限预设`（`查看权限` / `仅可查看` / `工作区内修改` / `完全权限` / `自动审查`）和 `思考强度`（`查看强度` / `关闭` / `低` / `高` / `最高`）。点击任意一项都会把对应命令填进输入框，权限与当前会话仍由命令自己校验。
 
-菜单是机器人级全局配置，所有用户看到同一份，而且改完要退出对话框再进来才看得到新内容——所以这里只放静态动作，不做按会话变化的动态文案（上下文占比看 `/status`）。机器人就绪时同步一次，内容没变不会重复写；手动重推用 `/bot-sync`（仅绑定用户可用），`menu.autoSync=false` 可关掉自动同步。菜单接口是整体覆盖，同步时按 `send_message` 认领本插件的按钮（折叠项按名字或子菜单命令认领），用户手工加的其它按钮会原样保留在后面。
+菜单是机器人级全局配置，所有用户看到同一份，而且改完要退出对话框再进来才看得到新内容——所以这里只放静态动作，不做按会话变化的动态文案（上下文占比看 `/status`）。机器人就绪时同步一次，内容没变不会重复写；`menu.autoSync=false` 可关掉自动同步。菜单接口是整体覆盖：每次同步写入本插件这一份固定入口，其它按钮不会保留。
 
 ## 内置命令
 
@@ -189,6 +182,7 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqterm/cordis.dev.yml
 | `/rename` | 修改当前会话名（标题固定，不再被自动标题覆盖） |
 | `/to` | 向指定会话发消息，或在它提问时提交答案 |
 | `/ls` | 列出目录里的子目录，点条目逐层进入 |
+| `/get` | 把工作区里的文件发到当前聊天（图片 / 视频 / 语音按类型发送） |
 | `/model` | 查看或切换当前会话的模型（下一轮生效） |
 | `/reasoning`（别名 `/think`） | 查看或切换当前会话的思考强度（档位由模型决定） |
 | `/preset` | 查看或切换当前 agent preset |
@@ -196,12 +190,7 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqterm/cordis.dev.yml
 | `/cost` | 查看当前会话的 token 消耗 |
 | `/status` | 查看会话状态：会话名与短 id / 工作区 / 模型 / 思考强度 / 上下文 / token |
 | `/stop` | 中止当前生成；`/stop all` 中止所有已获取会话中正在生成的 |
-| `/bot-ping` | 网络延迟检测（返回传输与处理耗时） |
-| `/bot-version` | 查看版本信息 |
-| `/bot-me` | 查看你的 OpenID（填到 `access.owner`） |
-| `/bot-status` | 查看当前会话状态（简版：会话名与短 id / 模型 / 思考强度 / preset / 消息数，完整状态看 `/status`） |
-| `/bot-help` | 查看所有指令 |
-| `/bot-sync`（别名 `/bot-refresh`） | 同步指令面板与自定义菜单（仅绑定用户可用） |
+| `/help` | 查看所有指令 |
 | `/plugins` | 插件管理：不带参数列出已安装插件，`install <包名>` / `update <包名> [版本]` 走 registry，`reload` 应用磁盘上的插件变更（仅绑定用户可用） |
 
 > 指令名拼错（如 `/modle`、`/sesions`）不会被当作提问转发给大模型：机器人直接回「没有这个指令」，能猜到意图时给出可点击的正确指令。只有「斜杠 + ASCII 指令名」算指令，`/usr/local/bin`、`/今天` 这类文本照旧交给模型；全角 `／` 与半角 `/` 等价，中文输入法下可以直接敲。
@@ -264,7 +253,7 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqterm/cordis.dev.yml
 - **句柄规则**：所有目标一律用 8 位短 id（形如 `#3f2a9b1c`，`#` 可省略）；列表不编号，翻页、分组后也不存在「第几条」这种写法，避免和实际行对不上。
 - **分页**：多页列表的页脚统一为 `上一页 · 第 1/2 页 · 下一页`，缺哪边省略哪边；页码不放在标题里，也不显示「还有 N 个」。
 - 状态词只在工作中会话列表里出现：`生成中`（agent 正在跑）、`空闲`（持有但待命）；当前指针指向但尚未获取的会话显示 `待恢复`。`/new` 之后没有当前指针，不会补这一行。其它视图只给已持有会话标 `📌`（表示 QQ 已持有），不标当前，也不显示状态。
-- 只允许**私聊**使用，且操作者必须是唯一绑定用户（`access.owner`）——会话标题、归档状态都涉及其他聊天的数据；未配置用户时命令直接不可用（`/bot-me` 可查自己的 OpenID）。
+- 只允许**私聊**使用，且操作者必须是唯一绑定用户（`access.owner`）——会话标题、归档状态都涉及其他聊天的数据；未配置用户时命令直接不可用。
 - 归档走宿主 `workspaceRegistry.archiveSession`，只写 registry 的全局归档集，**不删任何文件**；本插件不提供物理删除，需要清理磁盘请到 Web 端或手动处理。
 - 归档走宿主 `workspaceRegistry.archiveSession`；`workspaceRegistry` 在插件 `inject` 里，profile 缺这个服务时插件整体不激活，不会出现「命令在、归档不可用」的半可用状态。
 - 归档前会释放该会话在本进程内的 agent；如果它就是当前会话，还会清掉聊天映射，下一条消息落到全新会话——归档会话会被宿主的 `agent/pre-step` 闸门拒绝，继续挂在它上面聊天会收不到回复。
@@ -272,7 +261,7 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqterm/cordis.dev.yml
 - **切走不释放**：`/sessions resume` 只改当前指针，旧会话继续在后台跑、输出继续回 QQ；`/new` 只清掉当前指针，旧会话同样继续跑。插件卸载时只 dispose 自己创建的 agent，Web/TUI 创建的只丢引用。
 - **问答按会话路由**：当前会话直接回文本；其它会话的按钮带 session id，点按钮就能答；没有选项按钮的问题在正文引导行给「回答」「恢复」两个链接。一条没走按钮或 `/to` 的纯文本不会误发给当前模型，会提示用按钮或 `/to`。
 - 持有列表按「当前 → 其它持有（获取时间倒序）」排，行里的时间取会话的最近人类消息时间（取不到时回退创建时间）；`/sessions all` 的工作区内顺序同样按这个时间倒序（与 Web 侧栏同一份 `updatedAt`），置顶会话仍在最前，工作区顺序不变。
-- 跨工作区恢复后，agent 会在**那个会话自己的目录**里干活；文件发送白名单也随该目录变化。
+- 跨工作区恢复后，agent 会在**那个会话自己的目录**里干活；相对路径（含 `/get` 的相对写法）也以该目录为准。
 
 
 ## 核心模块
@@ -299,6 +288,7 @@ src/
 ├── transport/                  # 传输层
 │   ├── inbound.ts              # QQ 入站消息 → agent.followup()
 │   ├── outbound.ts             # session/event → QQ sendMarkdown
+│   ├── outbound-images.ts      # 助手消息 image 块 → QQ 图片
 │   ├── outbound-buffer.ts      # 流式缓冲
 │   ├── streaming-writer.ts     # 流式写入
 │   ├── reply-store.ts          # 被动回复凭证（msgid/eventid + 用量，msgid 落盘）
@@ -318,8 +308,7 @@ src/
 │   ├── command-panel.ts        # 指令面板同步
 │   └── command-menu.ts         # 自定义菜单同步
 ├── media/                      # 多媒体
-│   ├── vision-tool.ts          # 图片视觉理解
-│   ├── send-file-tool.ts       # 发送本地文件
+│   ├── send-media.ts           # 媒体发送（按扩展名分发）
 │   └── media-cleaner.ts        # 媒体 TTL 清理
 ├── middleware/                 # 中间件
 │   ├── question-answer.ts      # 问答答案处理
@@ -349,8 +338,8 @@ src/
 - **一个当前会话 + 多份已获取会话** — 任何 QQ 窗口续写同一个当前会话；`/sessions resume` 与 `/to` 获取过的会话继续活着并把输出发回 QQ
 - **Preset 支持** — 可通过 `agent-presets` 服务挂载预设（工具集、prompt 等）；`/preset` 改的是全局值，与设置页「设为默认」一致
 - **Markdown 输出** — 回复以 Markdown 格式发送，支持代码块/表格感知切分
-- **图片理解** — 支持 `qqbot_describe_image` 视觉理解，可分析用户发送的图片
-- **附件发送** — 支持 `qqbot_send_file` 将本地文件发送给用户（默认启用路径白名单）
+- **图片转发** — 助手消息里的图片内容块自动作为 QQ 图片发出
+- **交付文件** — `present` 声明的文件在轮末发送给用户（默认启用，路径不限）
 - **问答互动** — 支持 `ask_user_question`，单选生成内联按钮（点一个其余变灰）、多选回复编号，逐题推进 + 问题级超时
 - **操作确认** — 支持 `approval/request`，关键操作通过「允许/拒绝」按钮请求用户确认
 

@@ -45,7 +45,7 @@ describe('renderPluginList', () => {
     ], 1, { 'dsh-reg': '2.1.0', 'dsh-local': '2.0.0' });
 
     expect(text).toContain(
-      '**dsh-reg** · `2.0.0` · → `2.1.0` · <qqbot-cmd-input text="/plugins update dsh-reg" show="更新"/>',
+      '**dsh-reg** · `2.0.0` → `2.1.0` · <qqbot-cmd-input text="/plugins update dsh-reg" show="更新"/>',
     );
     expect(text).toContain('**dsh-local** · `1.0.0` · 已停用');
     expect(text).not.toContain('/plugins update dsh-local');
@@ -69,7 +69,7 @@ describe('renderPluginList', () => {
       1,
       { 'dsh-a': '1.2.0', 'dsh-b': '2.0.0' },
     );
-    expect(text).toContain('**dsh-a** · `1.0.0` · → `1.2.0`');
+    expect(text).toContain('**dsh-a** · `1.0.0` → `1.2.0`');
     expect(text).toContain('**dsh-b** · `2.0.0`');
     expect(text).not.toContain('→ `2.0.0`');
   });

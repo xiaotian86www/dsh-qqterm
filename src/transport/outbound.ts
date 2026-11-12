@@ -15,6 +15,8 @@ import {
 import { OutboundBuffer, type QQBotSender } from './outbound-buffer.ts';
 import { formatToolResult, type ToolsRegistryLike, type ToolResultData } from './tool-presenter.ts';
 import type { DeliverablesDelivererLike } from './deliverables.ts';
+import { collectImageBlocks, type ImageAttachmentLike, type OutboundImages } from './outbound-images.ts';
+import { rewriteLocalFileLinks } from './file-links.ts';
 import {
   RETRY_NOTICE_AFTER,
   RETRYABLE_FAILURE_CODES,
@@ -94,6 +96,8 @@ class OutboundRouter {
   private readonly logger: Logger;
   private readonly toolsRegistry: ToolsRegistryLike | undefined;
   private readonly deliverer: DeliverablesDelivererLike | undefined;
+  /** assistant/message 里的 image 块 → QQ 图片；未注入时不发图 */
+  private readonly images: OutboundImages | undefined;
 
   public constructor(
     manager: SessionManager,
@@ -102,6 +106,7 @@ class OutboundRouter {
     logger: Logger,
     toolsRegistry: ToolsRegistryLike | undefined,
     deliverer?: DeliverablesDelivererLike,
+    images?: OutboundImages,
   ) {
     this.manager = manager;
     this.bot = bot;
@@ -109,6 +114,7 @@ class OutboundRouter {
     this.logger = logger;
     this.toolsRegistry = toolsRegistry;
     this.deliverer = deliverer;
+    this.images = images;
   }
 
   /** 事件分发入口 */
@@ -192,6 +198,8 @@ class OutboundRouter {
   private appendChunk(sessionId: string, record: SessionRecord, text: string): void {
     let buffer = this.buffers.get(sessionId);
     if (buffer === undefined) {
+      // 相对路径链接按这个会话的工作目录解析
+      const cwd = this.manager.directoryForAgent(record.agent);
       // 流式只给 current；非当前会话走静态消息，来源头 / 回复链接在 sendNow 里加
       buffer = new OutboundBuffer(
         record,
@@ -199,6 +207,7 @@ class OutboundRouter {
         this.config.textChunkLimit,
         this.logger,
         this.shouldStream(record),
+        (full) => rewriteLocalFileLinks(full, cwd),
       );
       this.buffers.set(sessionId, buffer);
     }
@@ -210,8 +219,12 @@ class OutboundRouter {
     return this.config.streaming && this.manager.isCurrentSession(record.sessionId);
   }
 
-  /** 完整 assistant 消息：有流式 buffer 则 flush，否则直接发送文本块 */
+  /**
+   * 完整 assistant 消息：有流式 buffer 则 flush，否则直接发送文本块；
+   * 文本排完后把 image 块逐张发成 QQ 图片（同一会话发送链内，顺序稳定）。
+   */
   private onMessage(sessionId: string, record: SessionRecord, event: MessageEvent): void {
+    const images = collectImageBlocks(event.content);
     const buffer = this.buffers.get(sessionId);
     if (buffer !== undefined && buffer.text.trim()) {
       const text = buffer.text;
@@ -223,6 +236,7 @@ class OutboundRouter {
         buffer.cancel();
         this.trackText(sessionId, this.enqueue(sessionId, () => this.sendNow(record, text, 'sendMarkdown')));
       }
+      this.queueImages(sessionId, record, images);
       return;
     }
 
@@ -231,10 +245,16 @@ class OutboundRouter {
       if (block.type === 'text' && block.text) textParts.push(block.text);
     }
     const fullText = textParts.join('\n');
-    if (!fullText.trim()) return;
-
-    this.trackText(sessionId, this.send(record, fullText, 'sendMarkdown'));
+    if (fullText.trim()) this.trackText(sessionId, this.send(record, fullText, 'sendMarkdown'));
+    this.queueImages(sessionId, record, images);
     this.buffers.delete(sessionId);
+  }
+
+  /** 把图片发送排到本次文本之后（文本可能为空：只有图片的消息也要发出去） */
+  private queueImages(sessionId: string, record: SessionRecord, refs: readonly ImageAttachmentLike[]): void {
+    const sender = this.images;
+    if (refs.length === 0 || sender === undefined) return;
+    this.trackText(sessionId, this.enqueue(sessionId, () => sender.send(record, refs)));
   }
 
   /** 记录每会话最后一笔在途文本任务（自身吞错：错误已由 send/flush 内部记录） */
@@ -373,10 +393,12 @@ class OutboundRouter {
    */
   private async sendNow(record: SessionRecord, text: string, tag: string): Promise<void> {
     const current = this.manager.isCurrentSession(record.sessionId);
+    // 本地文件链接换成 /get 命令：QQ 点不开本地路径
+    const body = rewriteLocalFileLinks(text, this.manager.directoryForAgent(record.agent));
     const chunks = current
-      ? chunkMarkdownText(text, this.config.textChunkLimit)
+      ? chunkMarkdownText(body, this.config.textChunkLimit)
       : chunkDecoratedSessionMessage(
-        text,
+        body,
         record.sessionId,
         sessionTitleOf(record),
         this.config.textChunkLimit,
@@ -396,7 +418,8 @@ class OutboundRouter {
  *
  * 返回 durable 事件与实时流式帧两个入口，分别注册到
  * ctx.on('session/event') 与 ctx.on('agent/assistant-stream', ..., { global: true })。
- * toolsRegistry 用于工具结果的结构化展示；deliverer 用于轮末投递 present 声明的交付文件。
+ * toolsRegistry 用于工具结果的结构化展示；deliverer 用于轮末投递 present 声明的交付文件；
+ * images 用于把 assistant/message 里的 image 块发成 QQ 图片。
  */
 export function createOutboundHandler(
   manager: SessionManager,
@@ -405,8 +428,9 @@ export function createOutboundHandler(
   logger: Logger,
   toolsRegistry?: ToolsRegistryLike,
   deliverer?: DeliverablesDelivererLike,
+  images?: OutboundImages,
 ): OutboundHandlers {
-  const router = new OutboundRouter(manager, bot, config, logger, toolsRegistry, deliverer);
+  const router = new OutboundRouter(manager, bot, config, logger, toolsRegistry, deliverer, images);
   return {
     routeSessionEvent: (session, event) => router.route(session, event),
     routeStreamFrame: (agentId, delta) => router.routeStreamFrame(agentId, delta),

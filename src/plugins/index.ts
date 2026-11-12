@@ -79,7 +79,7 @@ export interface PluginInstaller {
   run(request: PluginOpRequest, bot?: QQBot): void;
   /** 新 fiber 连上、或下一条命令开始前：补发上一次操作的结果 */
   announce(bot: QQBot): Promise<void>;
-  /** 上次操作的一句话描述（`/bot-status` 用） */
+  /** 上次操作的一句话描述（`/status` 用） */
   describe(): string | undefined;
   /** 后台检查的结果（没有检查记录时 undefined）；列表据此标新版本 */
   updates(): PluginUpdateCache | undefined;

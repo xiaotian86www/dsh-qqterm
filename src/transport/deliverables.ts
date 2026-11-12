@@ -9,7 +9,7 @@ import { basename, isAbsolute, resolve } from 'node:path';
 import type { QQTermConfig } from '../config.ts';
 import type { SessionRecord } from '../session/index.ts';
 import type { Logger } from '../types.ts';
-import { isPathAllowed, resolveAgentCwd, sendMediaFile, type MediaSenderLike } from '../media/send-media.ts';
+import { resolveAgentCwd, sendMediaFile, type MediaSenderLike } from '../media/send-media.ts';
 import type { PresentedFileRef } from './events.ts';
 import { chunkMarkdownText } from './chunker.ts';
 import type { QQBotSender } from './outbound-buffer.ts';
@@ -60,10 +60,6 @@ export class DeliverablesDeliverer implements DeliverablesDelivererLike {
       const display = basename(absPath);
       if (index >= limit) {
         missed.push(`${display}（超出单轮投递上限，未发送）`);
-        continue;
-      }
-      if (!isPathAllowed(absPath, this.config.sendFile, cwd)) {
-        missed.push(`${display}（路径不在允许范围）`);
         continue;
       }
       const result = await sendMediaFile(this.mediaBot, record.replyTarget, absPath);

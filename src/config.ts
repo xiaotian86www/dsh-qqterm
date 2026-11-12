@@ -17,25 +17,8 @@ export interface MediaConfig {
   ttlHours: number;
 }
 
-export interface VisionConfig {
-  /** 是否启用视觉理解（qqbot_describe_image 工具） */
-  enabled: boolean;
-  /** 视觉模型 provider（dsh 注册的 llm adapter，如 pi-ai） */
-  provider: string;
-  /** 视觉模型 id（如 qwen-vl-max） */
-  model: string;
-  /** 默认描述 prompt（调用未显式指定时使用） */
-  defaultPrompt: string;
-  /** 图片字节上限，默认 10MB */
-  maxBytes: number;
-  /** 输出 token 上限 */
-  maxTokens: number;
-}
-
-/** 附件发送配置（qqbot_send_file 工具与 present 交付物投递共用） */
+/** 附件投递配置（present 交付物发送；入站下载见 media） */
 export interface SendFileConfig {
-  /** 额外允许访问的根目录（media 和 agent cwd 始终默认允许） */
-  extraRoots: string[];
   /** 是否把 present 声明的交付文件在轮末发送到当前会话 */
   sendPresentedFiles: boolean;
   /** 单轮最多投递的交付文件数 */
@@ -85,9 +68,7 @@ export interface QQTermConfig {
   debug: boolean;
   /** 富媒体理解（图片/视频） */
   media: MediaConfig;
-  /** 视觉理解（qqbot_describe_image 工具，走 dsh llm + attachments） */
-  vision: VisionConfig;
-  /** 附件发送（qqbot_send_file 工具与交付物投递共用） */
+  /** 附件投递（present 交付物发送；入站下载见 media） */
   sendFile: SendFileConfig;
   /** 指令面板（把当前指令写进 QQ 指令面板） */
   panel: PanelConfig;
@@ -119,19 +100,10 @@ export const ConfigSchema: Schema<QQTermConfig> = Schema.object({
     maxMB: Schema.number().default(200).description('富媒体下载大小上限(MB)'),
     ttlHours: Schema.number().default(24).description('富媒体存活时长(小时)，0=永不过期'),
   }).description('富媒体理解配置'),
-  vision: Schema.object({
-    enabled: Schema.boolean().default(false).description('是否启用视觉理解（qqbot_describe_image 工具）'),
-    provider: Schema.string().default('').description('视觉模型 provider（dsh 注册的 llm adapter，如 pi-ai）'),
-    model: Schema.string().default('').description('视觉模型 id（如 qwen-vl-max）'),
-    defaultPrompt: Schema.string().default('Describe this image in detail.').description('默认描述 prompt'),
-    maxBytes: Schema.number().default(10 * 1024 * 1024).description('图片字节上限'),
-    maxTokens: Schema.number().default(1024).description('输出 token 上限'),
-  }).description('视觉理解配置'),
   sendFile: Schema.object({
-    extraRoots: Schema.array(Schema.string()).default([]).description('额外允许访问的根目录'),
     sendPresentedFiles: Schema.boolean().default(true).description('是否将 present 声明的交付文件发送到当前会话'),
     maxFiles: Schema.number().default(4).description('单轮最多投递的交付文件数（小于 1 按 1 处理）'),
-  }).description('附件发送配置'),
+  }).description('附件投递配置'),
   panel: Schema.object({
     autoSync: Schema.boolean().default(true).description('机器人就绪后自动同步指令面板'),
   }).description('指令面板配置'),

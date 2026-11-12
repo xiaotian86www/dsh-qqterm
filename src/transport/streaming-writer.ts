@@ -18,6 +18,8 @@ export interface StreamingWriterDeps {
   logger: Logger;
   /** 节流间隔（ms）：连续 append 累积后，停顿该间隔才 update */
   throttleMs: number;
+  /** 发送前改写全文（每次 update 都是全量替换，改写可重复执行） */
+  transform?: (text: string) => string;
 }
 
 export class StreamingWriter {
@@ -155,7 +157,8 @@ export class StreamingWriter {
     }
 
     try {
-      await this.session.update(this.fullText);
+      const text = this.deps.transform === undefined ? this.fullText : this.deps.transform(this.fullText);
+      await this.session.update(text);
       this.sentChunkCount++;
     } catch (err) {
       // update 失败：不标记 failed（session 已打开，finish 会 complete 关闭）

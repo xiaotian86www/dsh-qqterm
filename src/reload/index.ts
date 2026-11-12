@@ -64,7 +64,7 @@ export interface Reloader {
   readonly available: boolean;
   /** 写状态并调度一次重载；调用方负责先回复用户，并传入发结果用的 bot */
   run(notice?: ReloadNotice, bot?: QQBot): void;
-  /** 上次重载的一句话描述（`/bot-status` 用） */
+  /** 上次重载的一句话描述（`/status` 用） */
   describe(): string | undefined;
   /** 新 fiber 连上、或下一条命令开始前：补发上一次重载留下的结果 */
   announce(bot: QQBot): Promise<void>;

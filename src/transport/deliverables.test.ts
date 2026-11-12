@@ -27,7 +27,7 @@ function createMediaBot(): MediaSenderLike {
 function createConfig(): QQTermConfig {
   return {
     textChunkLimit: 4500,
-    sendFile: { extraRoots: [], sendPresentedFiles: true, maxFiles: 4 },
+    sendFile: { sendPresentedFiles: true, maxFiles: 4 },
   } as unknown as QQTermConfig;
 }
 
@@ -72,7 +72,7 @@ describe('DeliverablesDeliverer', () => {
     expect(text).toContain('gone.txt');
   });
 
-  it('白名单外的路径直接进未送达清单，不调用发送器', async () => {
+  it('工作区外的文件照常发送（文件只发给唯一绑定用户）', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'dsh-qqterm-dlv-'));
     const outside = join(tmpdir(), `outside-${Date.now()}.txt`);
     await writeFile(outside, 'x');
@@ -83,9 +83,7 @@ describe('DeliverablesDeliverer', () => {
 
     await deliverer.deliver(createRecord(), [{ path: outside }]);
 
-    expect(mediaBot.sendFile).not.toHaveBeenCalled();
-    const text = (sender.sendMarkdown as ReturnType<typeof vi.fn>).mock.calls[0][1] as string;
-    expect(text).toContain('路径不在允许范围');
+    expect(mediaBot.sendFile).toHaveBeenCalledTimes(1);
   });
 
   it('maxFiles 截断单轮投递数量，超限文件进未送达提示', async () => {
