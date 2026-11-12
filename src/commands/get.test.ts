@@ -46,14 +46,18 @@ function makeCtx(raw: string): SlashCommandHandlerContext {
   } as unknown as SlashCommandHandlerContext;
 }
 
-async function run(manager: ReturnType<typeof makeManager>, bot: ReturnType<typeof makeBot>, raw: string): Promise<string> {
+async function run(
+  manager: ReturnType<typeof makeManager>,
+  bot: ReturnType<typeof makeBot>,
+  raw: string,
+): Promise<string | { kind: 'noop' }> {
   const command = getCommand({
     manager: manager as unknown as SessionManager,
     config,
     bot: bot as never,
     logger,
   });
-  return String(await command.handler(makeCtx(raw)));
+  return (await command.handler(makeCtx(raw))) as string | { kind: 'noop' };
 }
 
 beforeEach(() => {
@@ -73,7 +77,7 @@ describe('/get', () => {
   it('图片按图片通道发送', async () => {
     const bot = makeBot();
     const text = await run(makeManager(), bot, 'photo.png');
-    expect(text).toBe('✅ 已发送: photo.png');
+    expect(text).toEqual({ kind: 'noop' });
     expect(bot.sendImage).toHaveBeenCalledWith(
       { scope: 'c2c', targetId: 'user1' },
       { localPath: join(root, 'photo.png') },
@@ -102,7 +106,7 @@ describe('/get', () => {
     const file = join(outside, 'secret.txt');
     writeFileSync(file, 'x');
     const text = await run(makeManager(), bot, file);
-    expect(text).toContain('✅ 已发送: secret.txt');
+    expect(text).toEqual({ kind: 'noop' });
     expect(bot.sendFile).toHaveBeenCalledTimes(1);
   });
 

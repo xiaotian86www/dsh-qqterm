@@ -62,7 +62,7 @@ export function getCommand({ manager, config, bot, logger }: CommandDeps): Categ
       const result = await sendMediaFile(sender, replyTargetOf(cmdCtx, peerId), target);
       switch (result.outcome) {
         case 'sent':
-          return `✅ 已发送: ${basename(target)}`;
+          return { kind: 'noop' as const };
         case 'missing':
           return `⚠️ 文件不存在: \`${target}\``;
         default:
