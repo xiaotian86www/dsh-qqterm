@@ -92,11 +92,11 @@ describe('createReplyAwareBot', () => {
 
     await bot.sendText(target, 'hi');
     await bot.sendFile(target, { localPath: 'a.txt' });
-    await bot.sendMedia(target, { fileType: 1, url: 'x' });
+    await bot.sendMedia({ target, fileType: 1, url: 'x' });
     expect(calls.map((call) => call.method)).toEqual(['sendText', 'sendFile', 'sendMedia']);
     expect((calls[0]!.args[0] as ReplyTarget).msgId).toBeUndefined();
     expect((calls[1]!.args[0] as ReplyTarget).eventId).toBeUndefined();
-    expect((calls[2]!.args[0] as ReplyTarget).eventId).toBeUndefined();
+    expect((calls[2]!.args[0] as { target: ReplyTarget }).target.eventId).toBeUndefined();
   });
 
   it('sendImage 走 SDK 的 sendMedia 委托时 source 不被当成 target', async () => {
@@ -121,6 +121,30 @@ describe('createReplyAwareBot', () => {
     expect(opts['target']).toEqual({ scope: 'c2c', targetId: 'u1', msgId: 'm1' });
     expect(opts['localPath']).toBe('a.png');
     expect(opts['fileType']).toBe(1);
+  });
+
+  it('媒体只在 sendMedia 一层解析凭证：一次发送只记一次用量', async () => {
+    // 复刻 SDK 委托结构，连发 4 张图占满被动回复额度，第 5 张应降级为主动推送
+    const calls: Call[] = [];
+    const raw = {
+      send: () => Promise.resolve({}),
+      sendMedia: async (opts: Record<string, unknown>) => {
+        calls.push({ method: 'sendMedia', args: [opts] });
+        return { upload: { file_uuid: 'u' }, message: { id: 'm' } };
+      },
+      sendImage: async (t: unknown, source: Record<string, unknown>) =>
+        (raw.sendMedia as (opts: unknown) => Promise<unknown>)({ target: t, fileType: 1, ...source }),
+    };
+    const bot = raw as unknown as QQBot;
+    const store = makeStore();
+    createReplyAwareBot(bot, store);
+    store.recordMessage('c2c', 'u1', 'm1');
+
+    for (let i = 0; i < 5; i += 1) await bot.sendImage(target, { localPath: `${i}.png` });
+    const targets = calls.map((call) => (call.args[0] as { target: ReplyTarget }).target);
+    expect(targets.slice(0, 4).every((t) => t.msgId === 'm1')).toBe(true);
+    expect(targets[4]!.msgId).toBeUndefined();
+    expect(targets[4]!.targetId).toBe('u1');
   });
 
   it('openStream 解析出 msgId 后再交给 SDK', async () => {

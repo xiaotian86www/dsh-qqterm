@@ -42,7 +42,7 @@
 
 ### 修复
 
-- **媒体发送丢失文件参数**：被动回复装饰器把 `sendMedia` 也包了一层，而 SDK 的 `sendImage` / `sendVideo` / `sendFile` 内部都走 `this.sendMedia`，结果第一个参数被二次解析成 target、source 被丢掉，平台报 `uploadMedia: one of url/fileData/buffer/localPath is required`。`/get`、`present` 交付物与助手图片转发都受影响；现在只装饰三个便利方法。
+- **媒体发送丢失文件参数**：被动回复装饰器把 `sendMedia` 也包了一层，而 SDK 的 `sendImage` / `sendVideo` / `sendFile` 内部都走 `this.sendMedia`，结果第一个参数被二次解析成 target、source 被丢掉，平台报 `uploadMedia: one of url/fileData/buffer/localPath is required`。`/get`、`present` 交付物与助手图片转发都受影响；现在凭证统一在 `sendMedia` 这一层解析（target 在参数对象里），便利方法不再各自解析，避免一次发送记两次用量。
 - **`/status` 没有会话时也给出模型 / 思考强度 / preset / 权限**：展示新建会话会用的部署默认值，不带「默认」字样；并补上权限预设一行。消息数、上下文与 token 仍只在会话建立后显示。
 - **`/permission` 没有会话时只列部署默认预设**：列表改由宿主 `defaultOptions` 给出，`auto` 这类只能挂在会话上的选项不再出现，列表外的预设按未知预设拒绝；之前把 `auto` 写成部署默认会让宿主读不出默认值，`/status` 的权限行整行消失、之后新建会话也会失败。权限行在任何情况下都保留（读不到时显示 `—`），部署默认已被写坏时自动回正到配置里的预设。
 - **关闭富媒体下载后旧文件不再堆积**：过期清理从「下载开关」里拆出来，`media.enabled: false` 时仍按 `media.ttlHours` 清理 `~/.dsh-qqterm/media`。

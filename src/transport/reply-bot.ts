@@ -21,22 +21,8 @@ import type { ReplyStore } from './reply-store.ts';
 
 type AnyFn = (...args: unknown[]) => unknown;
 
-/**
- * 这些方法只能填 msg_id（sendMessage / 文件接口 / 流式都不支持 event_id）
- *
- * 不装饰 `sendMedia`：SDK 的 sendImage / sendVideo / sendFile 内部都走
- * `this.sendMedia({ target, ...source })`，再包一层会让第一次调用被当成
- * target 二次解析，source 丢失（表现为 uploadMedia 报「没有 url/fileData/
- * buffer/localPath」）。媒体一律从三个便利方法进入，够用了。
- */
-const MSG_ONLY_METHODS = [
-  'sendText',
-  'sendTextWithKeyboard',
-  'sendImage',
-  'sendVideo',
-  'sendVoice',
-  'sendFile',
-] as const;
+/** 第一个参数就是 target 的方法：解析后原位替换，其余参数原样传 */
+const TARGET_FIRST_METHODS = ['sendText', 'sendTextWithKeyboard'] as const;
 
 function bindMethod(bot: QQBot, name: string): AnyFn | undefined {
   const fn = (bot as unknown as Record<string, unknown>)[name];
@@ -78,11 +64,21 @@ export function createReplyAwareBot(bot: QQBot, store: ReplyStore): QQBot {
     };
   }
 
-  for (const name of MSG_ONLY_METHODS) {
+  for (const name of TARGET_FIRST_METHODS) {
     const original = bindMethod(bot, name);
     if (original === undefined) continue;
     target[name] = (replyTarget: ReplyTarget, ...rest: unknown[]): unknown =>
       original(store.resolve(replyTarget, false), ...rest);
+  }
+
+  // 媒体只在这一层解析凭证：SDK 的 sendImage / sendVideo / sendVoice / sendFile
+  // 都委托给 `this.sendMedia({ target, ...source })`，target 在参数对象里。
+  // 便利方法不再单独解析（否则同一次发送会记两次用量、吃掉被动回复额度），
+  // 外层调用进来后统一由 sendMedia 填 msgId。
+  const sendMedia = bindMethod(bot, 'sendMedia');
+  if (sendMedia !== undefined) {
+    target['sendMedia'] = (opts: { target: ReplyTarget } & Record<string, unknown>): unknown =>
+      sendMedia({ ...opts, target: store.resolve(opts.target, false) });
   }
 
   const openStream = bindMethod(bot, 'openStream');
