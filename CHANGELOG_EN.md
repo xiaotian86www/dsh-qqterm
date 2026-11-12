@@ -17,6 +17,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Changed
 
+- **`/ls` lists files too**: directory rows still go one level deeper, while file rows now fill `/get` so a file found while browsing can be fetched directly.
 - **`/bot-help` renamed to `/help`**: back to the prefixless form, and the unknown-command hint points at `/help`; the command panel and help listing pick it up automatically.
 - **File sending no longer restricts directories**: `/get` and `present` deliverables can send files from any path, as long as they exist and are regular files; `sendFile.extraRoots` is removed with the allowlist. The plugin serves only the single bound `access.owner`, so files can only go back to that user's private chat — the allowlist blocked no outside access, it only kept the QQ side from reaching files outside the workspace.
 - **`/compact` no longer goes through the Web plugins**: both the availability check and the execution use the host command registry (`find` tells whether the preset mounted the compaction group, `execute` forwards the host `/compact`, which resolves its engine inside the preset's own scope), so the plugin no longer touches the preset service; a preset without the compaction group is still refused locally.

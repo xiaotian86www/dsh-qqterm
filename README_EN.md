@@ -182,7 +182,7 @@ The menu is bot-wide configuration that every user sees, and changes only show a
 | `/sessions` (alias `/session`) | Session management: group working sessions by workspace (status and current marker included); `all` for every session |
 | `/rename` | Rename the current session (the title is pinned against automatic titles) |
 | `/to` | Send a message to a specific session, or answer its question |
-| `/ls` | List the subdirectories of a directory; click a row to go deeper |
+| `/ls` | List subdirectories and files: click a directory to go deeper, click a file to send it (`/get`) |
 | `/get` | Send a file from the workspace into the current chat (images/videos/voice use their own channel) |
 | `/model` | View or switch the current session's model (effective next turn) |
 | `/reasoning` (alias `/think`) | View or switch the current session's reasoning effort (levels depend on the model) |
@@ -227,7 +227,7 @@ A workspace *is* the session's `cwd`. It is written into the session header when
 | `/ls` | Not sure about the path? List directories and click through |
 
 - A workspace is matched by **title**, **directory name** (case-insensitive, unique prefix), or an **absolute path**; the next message creates the session in the new directory and the workspace shows up in the host sidebar. A missing directory (or a file) is rejected without leaving a half-applied state, and `/new <path>` validates the target *before* touching the session, so a typo never costs you the current one.
-- Not sure how to spell the path? Use `/ls`: it lists the subdirectories of the current workspace and every row is clickable to go one level deeper. Rows always fill an absolute path, so descending never drifts.
+- Not sure how to spell the path? Use `/ls`: it lists subdirectories and files of the current workspace. A directory row goes one level deeper, a file row sends the file to the chat, and every row fills an absolute path, so descending never drifts.
 - Same permission surface as `/sessions`: **private chat + the single bound user** (`access.owner`) only — switching workspace means changing the directories the agent may touch. A plain `/new` is unrestricted.
 
 ### Session management (`/sessions`)

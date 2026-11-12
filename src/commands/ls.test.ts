@@ -1,5 +1,5 @@
 /**
- * /ls 命令：列子目录、可点击条目、`.` / `..` 两个固定条目
+ * /ls 命令：列子目录与文件、可点击条目
  *
  * 用真实临时目录（不碰真实 ~/.dsh）；manager 只提供「当前工作区目录」这一条事实。
  * 输出走 markdown 通道，断言看捕获到的文本。
@@ -97,15 +97,22 @@ describe('/ls（当前目录）', () => {
     expect(text).not.toContain(buttonText(`/ls ${root}`, '.'));
   });
 
-  it('只列子目录，不列文件，并按名字排序', async () => {
+  it('目录在前、文件在后，各按名字排序', async () => {
     const text = await run(makeManager());
-    expect(text).not.toContain('gamma.txt');
     const alpha = text.indexOf('show="alpha"');
     const beta = text.indexOf('show="beta"');
     const zeta = text.indexOf('show="zeta"');
+    const gamma = text.indexOf('show="gamma.txt"');
     expect(alpha).toBeGreaterThan(-1);
     expect(alpha).toBeLessThan(beta);
     expect(beta).toBeLessThan(zeta);
+    expect(zeta).toBeLessThan(gamma);
+    expect(gamma).toBeGreaterThan(-1);
+  });
+
+  it('文件条目点下去填的是 /get', async () => {
+    const text = await run(makeManager());
+    expect(text).toContain(buttonText(`/get ${join(root, 'gamma.txt')}`, 'gamma.txt'));
   });
 
   it('每个条目点下去填的是绝对路径的 /ls', async () => {
@@ -113,10 +120,10 @@ describe('/ls（当前目录）', () => {
     expect(text).toContain(buttonText(`/ls ${join(root, 'beta')}`, 'beta'));
   });
 
-  it('没有子目录时明确说明', async () => {
+  it('空目录明确说明', async () => {
     mkdirSync(join(root, 'empty'));
     const text = await run(makeManager(), 'empty');
-    expect(text).toContain('（没有子目录）');
+    expect(text).toContain('（这里是空的）');
   });
 
   it('超过上限时说明还有多少没列', async () => {
@@ -125,7 +132,7 @@ describe('/ls（当前目录）', () => {
       mkdirSync(join(root, 'many', `d${String(index).padStart(2, '0')}`));
     }
     const text = await run(makeManager(), 'many');
-    expect(text).toContain('还有 2 个子目录，');
+    expect(text).toContain('还有 2 个条目，');
   });
 });
 

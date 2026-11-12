@@ -4,12 +4,12 @@
  *   /ls              列出当前工作区的子目录
  *   /ls <路径>       列出指定目录（相对当前工作区 / 绝对路径 / `~` 开头都认）
  *
- * 用途是「在 QQ 里逛目录」：先看当前工作区有哪些项目，点进去继续看，看中了再
- * `/new <路径>` 把会话切过去。所以每个条目都是一个可点击命令，点一下就把该目录
- * 的 `/ls` 填进输入框。
+ * 用途是「在 QQ 里逛目录」：先看当前工作区有哪些项目，点目录进去继续看，点文件
+ * 直接把它发到聊天里（`/get`）。所以每个条目都是一个可点击命令：目录填 `/ls <路径>`、
+ * 文件填 `/get <路径>`。
  *
- * 只列**子目录**：文件对切工作区没有意义。也不给 `.` / `..` 这类固定条目——在
- * QQ 里它们渲染成的按钮太小，点起来费劲，回上一级直接写路径更实在。
+ * 不给 `.` / `..` 这类固定条目——在 QQ 里它们渲染成的按钮太小，点起来费劲，
+ * 回上一级直接写路径更实在。
  *
  * 条目的命令文本一律用**绝对路径**：相对路径的基准会随「当前工作区」变化，点进
  * 第二层就会跑偏，而绝对路径点进任何一层都稳。
@@ -36,7 +36,7 @@ const USAGE = [
 
 /** 列目录的结果 */
 type Listing =
-  | { ok: true; dirs: string[] }
+  | { ok: true; dirs: string[]; files: string[] }
   | { ok: false; reason: 'missing' | 'not-directory' | 'denied' };
 
 /** /ls — 列出目录里的子目录 */
@@ -87,8 +87,8 @@ export function resolveLsTarget(base: string, arg: string): string {
   return isAbsolute(arg) ? resolve(arg) : resolve(base, arg);
 }
 
-/** 列出一个目录里的子目录（符号链接指向目录的也算） */
-function listDirectories(target: string): Listing {
+/** 列出一个目录里的子目录与文件（符号链接按指向的类型归类） */
+function listEntries(target: string): Listing {
   let stats;
   try {
     stats = statSync(target);
@@ -99,11 +99,15 @@ function listDirectories(target: string): Listing {
   if (!stats.isDirectory()) return { ok: false, reason: 'not-directory' };
 
   try {
-    const dirs = readdirSync(target, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory() || (entry.isSymbolicLink() && isDirectoryLink(target, entry.name)))
-      .map((entry) => entry.name)
-      .sort((left, right) => left.localeCompare(right));
-    return { ok: true, dirs };
+    const dirs: string[] = [];
+    const files: string[] = [];
+    for (const entry of readdirSync(target, { withFileTypes: true })) {
+      const isDir = entry.isDirectory()
+        || (entry.isSymbolicLink() && isDirectoryLink(target, entry.name));
+      (isDir ? dirs : files).push(entry.name);
+    }
+    const byName = (left: string, right: string) => left.localeCompare(right);
+    return { ok: true, dirs: dirs.sort(byName), files: files.sort(byName) };
   } catch {
     return { ok: false, reason: 'denied' };
   }
@@ -118,9 +122,14 @@ function isDirectoryLink(parent: string, name: string): boolean {
   }
 }
 
-/** 一个可点击条目：点一下把 `text` 填进输入框，显示 `show` */
-function button(path: string, show: string): string {
+/** 目录条目：点一下把 `/ls <路径>` 填进输入框 */
+function dirButton(path: string, show: string): string {
   return `<qqbot-cmd-input text="${attr(`/ls ${path}`)}" show="${attr(show)}"/>`;
+}
+
+/** 文件条目：点一下把 `/get <路径>` 填进输入框，直接发文件 */
+function fileButton(path: string, show: string): string {
+  return `<qqbot-cmd-input text="${attr(`/get ${path}`)}" show="${attr(show)}"/>`;
 }
 
 /** 属性值转义：目录名里出现引号/尖括号不能把按钮标签弄坏 */
@@ -144,7 +153,7 @@ async function renderListing(
   if (info.missing) return `⚠️ 当前工作区目录不存在: \`${info.path}\``;
 
   const target = resolveLsTarget(info.path, arg);
-  const listing = listDirectories(target);
+  const listing = listEntries(target);
   if (!listing.ok) {
     switch (listing.reason) {
       case 'not-directory':
@@ -157,12 +166,21 @@ async function renderListing(
   }
 
   const lines = [`### 📁 ${basename(target) || target} · \`${target}\``, ''];
-  const shown = listing.dirs.slice(0, MAX_ENTRIES);
-  for (const name of shown) lines.push(button(join(target, name), name));
-  if (listing.dirs.length === 0) lines.push('（没有子目录）');
+  // 目录在前、文件在后，合计不超过上限
+  const entries = [
+    ...listing.dirs.map((name) => ({ name, dir: true })),
+    ...listing.files.map((name) => ({ name, dir: false })),
+  ];
+  const shown = entries.slice(0, MAX_ENTRIES);
+  for (const entry of shown) {
+    lines.push(entry.dir
+      ? dirButton(join(target, entry.name), entry.name)
+      : fileButton(join(target, entry.name), entry.name));
+  }
+  if (entries.length === 0) lines.push('（这里是空的）');
 
-  if (listing.dirs.length > shown.length) {
-    lines.push('', `还有 ${listing.dirs.length - shown.length} 个子目录，用 \`/ls <路径>\` 进去`);
+  if (entries.length > shown.length) {
+    lines.push('', `还有 ${entries.length - shown.length} 个条目，用 \`/ls <路径>\` 看更多`);
   }
   return lines.join('\n');
 }
