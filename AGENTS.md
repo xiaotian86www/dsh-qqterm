@@ -8,7 +8,7 @@
 - dsh（DeepSeek Harness）的 QQ Bot IM 通道插件，纯 Cordis 插件，不改宿主 loop。
 - 宿主加载 `lib/index.js`，浏览器加载 `lib/client.js`（dsh.client 模块）。
 - Node ≥ 20.3、TypeScript ESM、pnpm、vitest、tsdown。
-- 当前宿主 dsh 0.2.1-rc.5 实测可运行；`dsh.compatibility` 只是声明，宿主升级后必须重新验收并更新。
+- 当前宿主 dsh 0.2.2-rc.1 实测可运行；`dsh.compatibility` 只是声明，宿主升级后必须重新验收并更新。
 - `lib/` 的 js 要提交（开箱即用）；`lib/**/*.d.ts`、`lib/**/*.map` 被 .gitignore 排除。
 
 ## 2. 目录地图
