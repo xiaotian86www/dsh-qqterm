@@ -683,4 +683,26 @@ describe('OutboundRouter 本地文件链接', () => {
     expect(sent).toContain(`text="/get ${join(dir, 'notes.md')}"`);
     expect(sent).toContain('show="notes.md"');
   });
+
+  it('正文里的 markdown 图片换成图片消息，文本里不留 ![]()', async () => {
+    writeFileSync(join(dir, 'path.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    const images = { send: vi.fn(), sendPaths: vi.fn().mockResolvedValue(undefined) };
+    const { outbound, bot } = setup({ dir, images, config: createConfig({ streaming: false }) });
+
+    outbound.routeSessionEvent({ header: { id: 'sess-qq' } }, {
+      type: 'assistant/message',
+      data: {
+        message: {
+          content: [{ type: 'text', text: '图与数据\n\n![价格路径](<path.png>)\n\n后面还有话' }],
+        },
+      },
+    });
+    for (let i = 0; i < 30; i++) await Promise.resolve();
+
+    expect(images.sendPaths).toHaveBeenCalledTimes(1);
+    expect(images.sendPaths.mock.calls[0]?.[1]).toEqual([join(dir, 'path.png')]);
+    const sent = (bot.sendMarkdown as ReturnType<typeof vi.fn>).mock.calls.map((call) => call[1] as string);
+    expect(sent.map((text) => text.trim())).toEqual(['图与数据', '后面还有话']);
+    expect(sent.join('')).not.toContain('![');
+  });
 });

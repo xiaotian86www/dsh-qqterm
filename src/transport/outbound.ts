@@ -17,6 +17,7 @@ import { formatToolResult, type ToolsRegistryLike, type ToolResultData } from '.
 import type { DeliverablesDelivererLike } from './deliverables.ts';
 import {
   segmentMessageContent,
+  splitMarkdownImages,
   type ImageAttachmentLike,
   type MessageSegment,
   type OutboundImages,
@@ -233,8 +234,12 @@ class OutboundRouter {
    *   再补发图片与后续文本，保证用户看到的顺序与内容块一致。
    */
   private onMessage(sessionId: string, record: SessionRecord, event: MessageEvent): void {
-    const segments = segmentMessageContent(event.content);
-    const hasImages = segments.some((segment) => segment.kind === 'image');
+    // 正文里的 ![alt](本地图片) 是模型直接写的 markdown，QQ 不渲染，换成真图片消息
+    const cwd = this.manager.directoryForAgent(record.agent);
+    const segments = segmentMessageContent(event.content).flatMap((segment) =>
+      segment.kind === 'text' ? splitMarkdownImages(segment.text, cwd) : [segment],
+    );
+    const hasImages = segments.some((segment) => segment.kind !== 'text');
     const buffer = this.buffers.get(sessionId);
 
     if (buffer !== undefined && buffer.text.trim()) {
@@ -251,7 +256,7 @@ class OutboundRouter {
         return;
       }
 
-      const firstImage = segments.findIndex((segment) => segment.kind === 'image');
+      const firstImage = segments.findIndex((segment) => segment.kind !== 'text');
       const head = segments
         .slice(0, firstImage)
         .map((segment) => (segment.kind === 'text' ? segment.text : ''))
@@ -279,6 +284,10 @@ class OutboundRouter {
         this.queueImages(sessionId, record, segment.refs);
         continue;
       }
+      if (segment.kind === 'image-file') {
+        this.queueImageFiles(sessionId, record, segment.paths);
+        continue;
+      }
       if (segment.text.trim() === '') continue;
       this.trackText(
         sessionId,
@@ -292,6 +301,13 @@ class OutboundRouter {
     const sender = this.images;
     if (refs.length === 0 || sender === undefined) return;
     this.trackText(sessionId, this.enqueue(sessionId, () => sender.send(record, refs)));
+  }
+
+  /** 正文里引用的本地图片：路径已验真，交给图片转发器按本地文件发送 */
+  private queueImageFiles(sessionId: string, record: SessionRecord, paths: readonly string[]): void {
+    const sender = this.images;
+    if (paths.length === 0 || sender === undefined) return;
+    this.trackText(sessionId, this.enqueue(sessionId, () => sender.sendPaths(record, paths)));
   }
 
   /** 记录每会话最后一笔在途文本任务（自身吞错：错误已由 send/flush 内部记录） */
@@ -456,7 +472,7 @@ class OutboundRouter {
  * 返回 durable 事件与实时流式帧两个入口，分别注册到
  * ctx.on('session/event') 与 ctx.on('agent/assistant-stream', ..., { global: true })。
  * toolsRegistry 用于工具结果的结构化展示；deliverer 用于轮末投递 present 声明的交付文件；
- * images 用于把 assistant/message 里的 image 块发成 QQ 图片。
+ * images 用于把 assistant/message 里的 image 块与正文引用的本地图片发成 QQ 图片。
  */
 export function createOutboundHandler(
   manager: SessionManager,

@@ -44,8 +44,18 @@ describe('rewriteLocalFileLinks', () => {
     expect(rewriteLocalFileLinks(`[](report.txt)`, root)).toBe(button(file, 'report.txt'));
   });
 
-  it('去掉行号片段再判定', () => {
-    expect(rewriteLocalFileLinks('[report.txt](report.txt#L3-L5)', root)).toBe(button(file, 'report.txt'));
+  it('带行号锚点的链接保持原样', () => {
+    const text = ['[report.txt](report.txt#L3)', '[report.txt](report.txt#L3-L5)'].join('\n');
+    expect(rewriteLocalFileLinks(text, root)).toBe(text);
+  });
+
+  it('markdown 图片语法不改写（图片走图片链路）', () => {
+    const text = `![报告](${file})`;
+    expect(rewriteLocalFileLinks(text, root)).toBe(text);
+  });
+
+  it('非行号片段仍按路径改写', () => {
+    expect(rewriteLocalFileLinks('[report.txt](report.txt#usage)', root)).toBe(button(file, 'report.txt'));
   });
 
   it('外链、目录、不存在的文件保持原样', () => {

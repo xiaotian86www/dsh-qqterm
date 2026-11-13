@@ -1,5 +1,13 @@
 import { describe, it, expect, vi } from 'vitest';
-import { collectImageBlocks, OutboundImages, segmentMessageContent } from './outbound-images.ts';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import {
+  collectImageBlocks,
+  OutboundImages,
+  segmentMessageContent,
+  splitMarkdownImages,
+} from './outbound-images.ts';
 import type { SessionRecord } from '../session/index.ts';
 import type { Logger } from '../types.ts';
 
@@ -134,3 +142,59 @@ describe('OutboundImages.send', () => {
     expect(bot.sendImage).not.toHaveBeenCalled();
   });
 });
+
+describe('splitMarkdownImages', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'qqterm-md-img-'));
+  mkdirSync(join(dir, 'sub'));
+  writeFileSync(join(dir, 'a.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  writeFileSync(join(dir, 'sub', 'b.webp'), Buffer.from([1]));
+  writeFileSync(join(dir, 'notes.md'), 'x');
+
+  it('把存在的本地图片拆成图片段，正文只留文字', () => {
+    const text = '图与数据\n\n![原始价格路径](<a.png>)\n\n后面还有话';
+
+    expect(splitMarkdownImages(text, dir)).toEqual([
+      { kind: 'text', text: '图与数据\n\n' },
+      { kind: 'image-file', paths: [join(dir, 'a.png')] },
+      { kind: 'text', text: '\n\n后面还有话' },
+    ]);
+  });
+
+  it('相邻图片归一组', () => {
+    const text = '![a](a.png)\n![b](sub/b.webp)';
+
+    expect(splitMarkdownImages(text, dir)).toEqual([
+      { kind: 'image-file', paths: [join(dir, 'a.png'), join(dir, 'sub', 'b.webp')] },
+    ]);
+  });
+
+  it('不存在的文件与非图片扩展名保持原文', () => {
+    const text = '![缺失](missing.png) 与 ![文档](notes.md)';
+
+    expect(splitMarkdownImages(text, dir)).toEqual([{ kind: 'text', text }]);
+  });
+
+  it('没有图片时原样返回一段文本', () => {
+    expect(splitMarkdownImages('纯文本', dir)).toEqual([{ kind: 'text', text: '纯文本' }]);
+  });
+});
+
+describe('OutboundImages.sendPaths', () => {
+  it('按本地路径逐张发送，单张失败只记日志', async () => {
+    const logger = createLogger();
+    const bot = {
+      sendImage: vi.fn().mockRejectedValueOnce(new Error('boom')).mockResolvedValueOnce({}),
+    };
+    const images = new OutboundImages(bot, undefined, logger);
+
+    await images.sendPaths(createRecord(), ['/tmp/a.png', '/tmp/b.png']);
+
+    expect(bot.sendImage).toHaveBeenCalledTimes(2);
+    expect(bot.sendImage).toHaveBeenLastCalledWith(
+      { scope: 'c2c', targetId: 'user1' },
+      { localPath: '/tmp/b.png' },
+    );
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('图片发送失败 path=/tmp/a.png: boom'));
+  });
+});
+
