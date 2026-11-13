@@ -30,7 +30,7 @@
  * 足够满足「从列表里拿掉」的需求。
  */
 import { isAbsolute } from 'node:path';
-import type { CommandDeps, CategorizedCommand } from './types.ts';
+import type { CommandDeps, SlashCommand } from './types.ts';
 import { ownerOnlyAuth } from './auth.ts';
 import { getScopePeer, formatRelativeTime, sendMarkdownChunked, shortSessionId } from '../shared/index.ts';
 import type { ArchiveSessionOutcome, WorkspaceGroup, WorkspaceSession } from '../session/index.ts';
@@ -78,17 +78,18 @@ function attrValue(raw: string): string {
 export const sessionAdminAuth = ownerOnlyAuth;
 
 const USAGE = [
-  '### 🗂 会话管理',
+  '### 📖 /sessions 用法',
   '',
-  '`/sessions` 工作中会话 · `/sessions <页码>` 翻页',
-  '`/sessions all [页码]` 全部会话 · `/sessions archived [页码]` 已归档',
-  '`/sessions resume <id>` 切到某个会话，接上历史（工作区跟着切）',
-  '`/sessions rename <id> <新标题>` 改会话名（标题固定，目标须已打开）',
-  '`/sessions archive [id,…]` 归档，可逆，一次最多 10 个',
-  '`/sessions archive [页码]` 列出候选，只给页码时翻页',
+  '`/sessions [页码]` 工作中会话',
+  '`/sessions all [页码]` 全部会话',
+  '`/sessions archived [页码]` 已归档会话',
+  '`/sessions resume <id>` 恢复会话',
+  '`/sessions rename <id> <新标题>` 重命名会话',
+  '`/sessions archive [页码]` 列出待归档会话',
+  '`/sessions archive <id>[,…]` 归档会话',
   '`/sessions unarchive <id>[,…]` 取消归档',
   '',
-  '目标一律用 8 位短 id（行首 `#` 后那串）',
+  '目标用 8 位短 id（行首 `#` 后那串）',
 ].join('\n');
 
 /** 目标解析结果 */
@@ -179,12 +180,9 @@ function resolveTargets(
 }
 
 /** 拆 token 并做数量校验；返回字符串表示要直接回给用户 */
-function parseTargetsOrError(
-  raw: string,
-  usage: string,
-): { tokens: string[] } | { message: string } {
+function parseTargetsOrError(raw: string): { tokens: string[] } | { message: string } {
   const tokens = parseTargetTokens(raw);
-  if (tokens.length === 0) return { message: `⚠️ 缺少目标 · 用法: \`${usage}\`` };
+  if (tokens.length === 0) return { message: '⚠️ 缺少目标 · 用法: /help sessions' };
   if (tokens.length > MAX_TARGETS) {
     return { message: `⚠️ 一次最多处理 ${MAX_TARGETS} 个会话，分两次执行` };
   }
@@ -340,14 +338,13 @@ function pageLinks(
   return links;
 }
 
-export function sessionsCommand({ manager, config, logger }: CommandDeps): CategorizedCommand {
+export function sessionsCommand({ manager, config, logger }: CommandDeps): SlashCommand {
   return {
     name: ['sessions', 'session'],
-    category: 'agent',
     // 会话里可能含其它 chat 的历史标题，归档会影响所有人的列表：只允许私聊 + 唯一绑定用户
     scope: 'c2c',
     authorized: sessionAdminAuth(config, logger),
-    description: '列出工作中会话、恢复、改名、归档',
+    description: '管理会话',
     usage: USAGE,
     handler: async (cmdCtx) => {
       const raw = (cmdCtx.command?.raw ?? '').trim();
@@ -493,10 +490,10 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Categ
             const arg = rest[0] ?? '';
             const title = rest.slice(1).join(' ').trim();
             if (arg.trim() === '') {
-              return `⚠️ 缺少目标 · 用法: \`/sessions rename <id> <新标题>\``;
+              return '⚠️ 缺少目标 · 用法: /help sessions';
             }
             if (title === '') {
-              return `⚠️ 缺少新标题 · 用法: \`/sessions rename <id> <新标题>\``;
+              return '⚠️ 缺少新标题 · 用法: /help sessions';
             }
 
             const target = await resolveOne(arg);
@@ -553,7 +550,7 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Categ
               return renderArchivePicker(candidates, pickerPage);
             }
 
-            const parsed = parseTargetsOrError(rest.join(' '), '/sessions archive <id>[,…]');
+            const parsed = parseTargetsOrError(rest.join(' '));
             if ('message' in parsed) return parsed.message;
 
             // 目标需要跨工作区全量清单（可能来自 /sessions all），
@@ -605,7 +602,7 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Categ
               return `⚠️ 缺少目标 · ${commandLink('/sessions archived', '查看已归档')}`;
             }
 
-            const parsed = parseTargetsOrError(rest.join(' '), '/sessions unarchive <id>[,…]');
+            const parsed = parseTargetsOrError(rest.join(' '));
             if ('message' in parsed) return parsed.message;
 
             const batch = resolveTargets(all, parsed.tokens);
@@ -635,7 +632,7 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Categ
             return USAGE;
 
           default:
-            return `⚠️ 未知子命令: ${safeArg(sub)} · ${commandLink('/sessions help', '查看用法')}`;
+            return `⚠️ 未知子命令: ${safeArg(sub)} · 用法: /help sessions`;
         }
       };
 

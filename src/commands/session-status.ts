@@ -8,7 +8,7 @@
  *   - `/cost` 只看计费口径（累计 token 与缓存命中率）；
  *   - `/status` 是会话相关的完整状态，想知道「这个会话现在什么样」看它。
  */
-import type { CommandDeps, CategorizedCommand } from './types.ts';
+import type { CommandDeps, SlashCommand } from './types.ts';
 import type { SessionContextUsage, SessionManager } from '../session/index.ts';
 import type { ChatScope } from '../types.ts';
 import { getScopePeer, sendMarkdownChunked } from '../shared/index.ts';
@@ -107,12 +107,11 @@ async function renderStatus(
 }
 
 /** /status — 查看当前会话的完整状态 */
-export function sessionStatusCommand({ manager, config, logger, reloader, installer }: CommandDeps): CategorizedCommand {
+export function sessionStatusCommand({ manager, config, logger, reloader, installer }: CommandDeps): SlashCommand {
   return {
     name: 'status',
-    category: 'agent',
     scope: 'all',
-    description: '查看会话状态（含上下文与 token）',
+    description: '查看会话状态',
     handler: async (cmdCtx) => {
       const { scope, peerId } = getScopePeer(cmdCtx);
 

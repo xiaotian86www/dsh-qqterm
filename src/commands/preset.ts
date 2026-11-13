@@ -4,18 +4,23 @@
  * preset 由核心 agent-preset-registry 持有：这里只改它的默认值（与设置页「设为默认」
  * 同一个入口），对之后新建的会话生效；已经开始的会话保持自己的 preset。
  */
-import type { CommandDeps, CategorizedCommand } from './types.ts';
+import type { CommandDeps, SlashCommand } from './types.ts';
 import { ownerOnlyAuth } from './auth.ts';
 import { getScopePeer, sendMarkdownChunked } from '../shared/index.ts';
 
-export function presetCommand({ manager, config, logger }: CommandDeps): CategorizedCommand {
+export function presetCommand({ manager, config, logger }: CommandDeps): SlashCommand {
   return {
     name: 'preset',
-    category: 'agent',
     // 管理类指令：私聊可用，但仅限绑定用户（复用审批的 owner 语义）
     scope: 'all',
     authorized: ownerOnlyAuth(config, logger),
-    description: '查看或切换当前 agent preset（用法: /preset [id]）',
+    description: '查看或切换 preset',
+    usage: [
+      '### 📖 /preset 用法',
+      '',
+      '`/preset` 查看可用 preset',
+      '`/preset <id>` 切换 preset',
+    ].join('\n'),
     handler: async (cmdCtx) => {
       const { scope, peerId } = getScopePeer(cmdCtx);
       const args = (cmdCtx.command?.raw ?? '').trim();

@@ -190,7 +190,7 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqterm/cordis.dev.yml
 | `/cost` | 查看当前会话的 token 消耗 |
 | `/status` | 查看会话状态：会话名与短 id / 工作区 / 模型 / 思考强度 / 上下文 / token |
 | `/stop` | 中止当前生成；`/stop all` 中止所有已获取会话中正在生成的 |
-| `/help` | 查看所有指令 |
+| `/help` | 查看所有指令；`/help <命令>` 查看该命令的参数与用法 |
 | `/plugins` | 插件管理：不带参数列出已安装插件，`install <包名>` / `update <包名> [版本]` 走 registry，`reload` 应用磁盘上的插件变更（仅绑定用户可用） |
 
 > 指令名拼错（如 `/modle`、`/sesions`）不会被当作提问转发给大模型：机器人直接回「没有这个指令」，能猜到意图时给出可点击的正确指令。只有「斜杠 + ASCII 指令名」算指令，`/usr/local/bin`、`/今天` 这类文本照旧交给模型；全角 `／` 与半角 `/` 等价，中文输入法下可以直接敲。

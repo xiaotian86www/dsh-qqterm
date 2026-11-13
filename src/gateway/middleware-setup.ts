@@ -23,7 +23,7 @@ import type { Reloader } from '../reload/index.ts';
 import type { PluginInstaller } from '../plugins/index.ts';
 import type { Logger } from '../types.ts';
 import { buildCommandList } from '../commands/index.ts';
-import type { CategorizedCommand } from '../commands/types.ts';
+import type { SlashCommand } from '../commands/types.ts';
 import { attachmentProcessor } from '../middleware/attachment.ts';
 import { questionAnswer } from '../middleware/question-answer.ts';
 import { replyRecorder } from '../middleware/reply-recorder.ts';
@@ -38,7 +38,7 @@ export function setupMiddlewares(
   replyStore: ReplyStore,
   reloader?: Reloader,
   installer?: PluginInstaller,
-): CategorizedCommand[] {
+): SlashCommand[] {
   // 1. 错误兜底（最外层洋葱皮）
   bot.use(errorHandler());
 

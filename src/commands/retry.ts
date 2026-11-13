@@ -4,13 +4,12 @@
  * 轮次因上游故障失败后，失败卡片上的「重发」按钮失效（超时 / 键盘不可用）时，
  * 用它兜底，用户不必重打原文。
  */
-import type { CommandDeps, CategorizedCommand } from './types.ts';
+import type { CommandDeps, SlashCommand } from './types.ts';
 import { getScopePeer } from '../shared/index.ts';
 
-export function retryCommand({ manager }: CommandDeps): CategorizedCommand {
+export function retryCommand({ manager }: CommandDeps): SlashCommand {
   return {
     name: 'retry',
-    category: 'agent',
     scope: 'all',
     description: '重发上一条消息',
     handler: async (cmdCtx) => {

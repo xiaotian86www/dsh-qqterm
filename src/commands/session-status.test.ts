@@ -107,10 +107,9 @@ beforeEach(() => {
 });
 
 describe('/status 命令声明', () => {
-  it('是通用能力命令，私聊可用', () => {
+  it('私聊可用', () => {
     const command = sessionStatusCommand({ manager: makeManager(), config, logger });
     expect(command.name).toBe('status');
-    expect(command.category).toBe('agent');
     expect(command.scope).toBe('all');
   });
 });

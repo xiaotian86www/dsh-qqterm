@@ -8,7 +8,7 @@
  * 平台限制：每机器人最多 20 个面板、每面板最多 20 项；
  * name 最多 14 字符（约 7 个汉字）、desc 最多 30 字符（约 15 个汉字）。
  */
-import type { CategorizedCommand } from '../commands/types.ts';
+import type { SlashCommand } from '../commands/types.ts';
 import type { Logger, OpenApiLike } from '../types.ts';
 
 /** 面板归属标记：列表里靠它认出「这个面板是本插件建的」 */
@@ -114,7 +114,7 @@ function shortPanelDesc(text: string): string {
 
 /** 按私聊可见性筛选命令，拼成面板元素 */
 export function buildPanelItems(
-  commands: readonly CategorizedCommand[],
+  commands: readonly SlashCommand[],
 ): PanelItem[] {
   const items: PanelItem[] = [];
   for (const cmd of commands) {
@@ -124,7 +124,7 @@ export function buildPanelItems(
     const name = Array.isArray(cmd.name) ? cmd.name[0] : cmd.name;
     if (!name) continue;
 
-    const desc = cmd.panelDesc ?? cmd.description;
+    const desc = cmd.description;
     items.push({
       type: 'command',
       name: clipPanelText(`/${name}`, PANEL_NAME_MAX),
@@ -149,7 +149,7 @@ async function findManagedPanel(api: OpenApiLike, scope: PanelScope): Promise<st
  */
 export async function syncCommandPanels(
   api: OpenApiLike,
-  commands: readonly CategorizedCommand[],
+  commands: readonly SlashCommand[],
   logger?: Pick<Logger, 'debug' | 'warn'>,
 ): Promise<PanelSyncResult[]> {
   const results: PanelSyncResult[] = [];

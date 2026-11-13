@@ -2,19 +2,23 @@
  * 杂项命令
  *
  * - /stop：中止当前生成；`/stop all` 中止所有正在生成的已获取会话
- *   （对应底层 agent cancel，通用能力）
  */
-import type { CommandDeps, CategorizedCommand } from './types.ts';
+import type { CommandDeps, SlashCommand } from './types.ts';
 import { getScopePeer } from '../shared/index.ts';
 
 /** /stop — 中止当前生成；`/stop all` 中止全部已获取会话（隐藏） */
-export function stopCommand({ manager }: CommandDeps): CategorizedCommand {
+export function stopCommand({ manager }: CommandDeps): SlashCommand {
   return {
     name: 'stop',
-    category: 'agent',
     scope: 'all',
-    description: '中止当前生成，或 /stop all 停全部会话',
+    description: '中止生成',
     hidden: true,
+    usage: [
+      '### 📖 /stop 用法',
+      '',
+      '`/stop` 中止当前生成',
+      '`/stop all` 中止全部生成',
+    ].join('\n'),
     handler: (cmdCtx) => {
       const { scope, peerId } = getScopePeer(cmdCtx);
       const arg = (cmdCtx.command?.raw ?? '').trim();

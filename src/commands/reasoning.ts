@@ -4,7 +4,7 @@
  * 档位由宿主 adapter 提供（`ctx.llm.resolveModelInfo` 的 reasoning 段），
  * 读与写都交给宿主（sessionController / agentDefaultModel），插件不存偏好。
  */
-import type { CommandDeps, CategorizedCommand } from './types.ts';
+import type { CommandDeps, SlashCommand } from './types.ts';
 import { ownerOnlyAuth } from './auth.ts';
 import { getScopePeer, sendMarkdownChunked } from '../shared/index.ts';
 import { effortLabel } from '../model/effort-label.ts';
@@ -13,15 +13,19 @@ import type { EffortOption } from '../model/types.ts';
 /** 不支持思考强度时的原因（只报原因，不给下一步） */
 const UNSUPPORTED_REASON = '⚠️ 当前模型不支持思考强度';
 
-export function reasoningCommand({ manager, config, logger }: CommandDeps): CategorizedCommand {
+export function reasoningCommand({ manager, config, logger }: CommandDeps): SlashCommand {
   return {
     name: ['reasoning', 'think'],
-    category: 'agent',
     scope: 'all',
     // 管理类指令：与 /model 同一权限面
     authorized: ownerOnlyAuth(config, logger),
-    description: '查看或切换当前会话的思考强度（用法: /reasoning [档位]）',
-    panelDesc: '切换思考强度',
+    description: '查看或切换思考强度',
+    usage: [
+      '### 📖 /reasoning 用法',
+      '',
+      '`/reasoning` 查看当前思考强度',
+      '`/reasoning <档位>` 切换思考强度',
+    ].join('\n'),
     handler: async (cmdCtx) => {
       const { scope, peerId } = getScopePeer(cmdCtx);
       const args = (cmdCtx.command?.raw ?? '').trim().toLowerCase();

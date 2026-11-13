@@ -1130,10 +1130,10 @@ describe('sessionAdminAuth', () => {
 });
 
 describe('其它入口', () => {
-  it('help 用统一的视图标题，并保留全部子命令入口', async () => {
+  it('help 用统一的用法页标题，并保留全部子命令入口', async () => {
     const text = await run(makeManager(), 'help');
 
-    expect(text.startsWith('### 🗂 会话管理')).toBe(true);
+    expect(text.startsWith('### 📖 /sessions 用法')).toBe(true);
     expect(text).toContain('/sessions resume');
     expect(text).toContain('/sessions archive');
     expect(text).toContain('/sessions unarchive');
@@ -1147,7 +1147,7 @@ describe('其它入口', () => {
   it('未知子命令只回一行指引，不刷整屏用法', async () => {
     const text = await run(makeManager(), 'whatever');
     expect(text).toContain('未知子命令');
-    expect(text).toContain('/sessions help');
+    expect(text).toContain('/help sessions');
     expect(text.split('\n').length).toBe(1);
     // 物理删除已下线，用法里不应再出现 delete
     expect(text).not.toContain('/sessions delete');

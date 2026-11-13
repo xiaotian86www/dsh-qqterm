@@ -1,19 +1,24 @@
 /**
  * 模型命令：/model — 查看或切换模型
  */
-import type { CommandDeps, CategorizedCommand } from './types.ts';
+import type { CommandDeps, SlashCommand } from './types.ts';
 import { ownerOnlyAuth } from './auth.ts';
 import { getScopePeer, sendMarkdownChunked } from '../shared/index.ts';
 import { effortLabel } from '../model/effort-label.ts';
 
-export function modelCommand({ manager, config, logger }: CommandDeps): CategorizedCommand {
+export function modelCommand({ manager, config, logger }: CommandDeps): SlashCommand {
   return {
     name: 'model',
-    category: 'agent',
     // 管理类指令：私聊可用，但仅限绑定用户（与 /preset 同构）
     scope: 'all',
     authorized: ownerOnlyAuth(config, logger),
-    description: '查看或切换当前会话的模型（用法: /model [provider/model]）',
+    description: '查看或切换模型',
+    usage: [
+      '### 📖 /model 用法',
+      '',
+      '`/model` 查看当前模型',
+      '`/model <provider/model>` 切换模型',
+    ].join('\n'),
     handler: async (cmdCtx) => {
       const { scope, peerId } = getScopePeer(cmdCtx);
       const args = (cmdCtx.command?.raw ?? '').trim();

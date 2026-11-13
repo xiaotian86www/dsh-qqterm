@@ -5,7 +5,7 @@
  * 事件，并固定该标题，后续不再被自动标题覆盖。宿主的标题服务只接受存活的
  * session，所以当前会话还没打开时只如实拒绝，不在改名里偷偷拉起会话。
  */
-import type { CommandDeps, CategorizedCommand } from './types.ts';
+import type { CommandDeps, SlashCommand } from './types.ts';
 
 /** 回复里展示标题的上限（宿主标题上限 80 字节，这里只防一行过长） */
 const TITLE_MAX = 40;
@@ -25,17 +25,16 @@ function displayTitle(raw: string | undefined): string {
 /** 当前没有可改名的会话时的统一提示 */
 const NO_SESSION = '⚠️ 当前没有会话';
 
-export function renameCommand({ manager }: CommandDeps): CategorizedCommand {
+export function renameCommand({ manager }: CommandDeps): SlashCommand {
   return {
     name: 'rename',
-    category: 'agent',
     scope: 'all',
-    description: '修改当前会话名',
+    description: '重命名会话',
     usage: [
-      '/rename <新标题>',
+      '### 📖 /rename 用法',
       '',
-      '给当前会话改一个名字，改名后标题固定，不再被自动标题覆盖。',
-      '改别的会话用 `/sessions rename <id> <新标题>`。',
+      '`/rename <标题>` 重命名当前会话',
+      '改别的会话用 `/sessions rename <id> <标题>`',
     ].join('\n'),
     handler: (cmdCtx) => {
       const raw = (cmdCtx.command?.raw ?? '').trim();

@@ -70,12 +70,10 @@ beforeEach(() => {
 });
 
 describe('/reasoning 命令声明', () => {
-  it('是 agent 类通用命令，带 think 别名', () => {
+  it('带 think 别名，不限作用域', () => {
     const command = reasoningCommand({ manager: makeManager(), config, logger });
     expect(command.name).toEqual(['reasoning', 'think']);
-    expect(command.category).toBe('agent');
     expect(command.scope).toBe('all');
-    expect(command.panelDesc).toBe('切换思考强度');
     expect(command.authorized).toBeTypeOf('function');
   });
 });

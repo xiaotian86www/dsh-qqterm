@@ -8,15 +8,17 @@
  * 目标正在等 `ask_user_question` 时，文本必须走答案通道，不能当新 prompt
  * 排在问题后面——否则永远答不上。空文本进入「下一条消息作为回答」模式。
  */
-import type { CommandDeps, CategorizedCommand } from './types.ts';
+import type { CommandDeps, SlashCommand } from './types.ts';
 import { getScopePeer, shortSessionId } from '../shared/index.ts';
 import { sessionTargetLabel, sessionTitleOf } from '../transport/session-source.ts';
 import { resolveSessionTarget } from './sessions.ts';
 import type { SessionRecord, WorkspaceGroup, WorkspaceSession } from '../session/index.ts';
 
 const USAGE = [
-  '/to <会话> <文本> 发消息；目标在等答案时作为回答',
-  '会话用 8 位短 id；目标要先用 /sessions resume 或 /to 获取',
+  '### 📖 /to 用法',
+  '',
+  '`/to <会话> <文本>` 向会话发消息',
+  '目标在等答案时，文本作为回答；目标须已获取',
 ].join('\n');
 
 /** 把分组列表摊平成可解析的会话清单 */
@@ -38,12 +40,11 @@ function displayId(id: string): string {
   return `#${shortSessionId(id)}`;
 }
 
-export function toCommand({ manager, logger }: CommandDeps): CategorizedCommand {
+export function toCommand({ manager, logger }: CommandDeps): SlashCommand {
   return {
     name: 'to',
-    category: 'agent',
     scope: 'c2c',
-    description: '向指定会话发消息，或回答它的提问',
+    description: '向会话发消息',
     usage: USAGE,
     handler: async (cmdCtx) => {
       const raw = (cmdCtx.command?.raw ?? '').trim();
@@ -54,7 +55,7 @@ export function toCommand({ manager, logger }: CommandDeps): CategorizedCommand 
       const targetArg = match?.[1] ?? '';
       const text = (match?.[2] ?? '').trim();
       if (targetArg === '') {
-        return `⚠️ 缺少会话\n${USAGE}`;
+        return '⚠️ 缺少会话 · 用法: /help to';
       }
 
       let target: WorkspaceSession | undefined;

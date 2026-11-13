@@ -49,12 +49,11 @@ async function run(manager: ManagerStub, raw = ''): Promise<string> {
 }
 
 describe('/rename 命令声明', () => {
-  it('是 agent 类通用命令，不限作用域', () => {
+  it('不限作用域', () => {
     const command = renameCommand({ manager: makeManager() as unknown as SessionManager, config, logger });
     expect(command.name).toBe('rename');
-    expect(command.category).toBe('agent');
     expect(command.scope).toBe('all');
-    expect(command.description).toContain('会话名');
+    expect(command.description).toContain('会话');
   });
 
   it('注册进命令列表', () => {

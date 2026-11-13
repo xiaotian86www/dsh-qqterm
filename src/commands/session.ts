@@ -4,10 +4,8 @@
  * - /new：清空当前会话（下一条消息新建），可顺带指定工作区
  * - /reset（别名 /clear）：停掉当前会话，再在原工作区重新开始
  * - /compact：原地压缩会话历史（保留 sessionId，摘要替换旧历史）
- *
- * 两者都对应底层 dsh agent 能力，分类为 agent（通用能力）。
  */
-import type { CommandDeps, CategorizedCommand } from './types.ts';
+import type { CommandDeps, SlashCommand } from './types.ts';
 import type { ChangeWorkspaceOutcome } from '../session/index.ts';
 import { getScopePeer } from '../shared/index.ts';
 
@@ -25,19 +23,17 @@ function num(n: number): string {
  * 参数先解析再动会话：路径写错不该把当前会话弄丢。换工作区等于换 agent 能读写
  * 的目录，所以带参数时只允许唯一绑定用户；不带参数的 `/new` 不受限制。
  */
-export function newCommand({ manager, config }: CommandDeps): CategorizedCommand {
+export function newCommand({ manager, config }: CommandDeps): SlashCommand {
   return {
     name: 'new',
-    category: 'agent',
     scope: 'all',
-    description: '开始新会话（清空上下文，可指定工作区）',
+    description: '新建会话',
     usage: [
-      '/new',
-      '/new <工作区|路径>',
+      '### 📖 /new 用法',
       '',
-      '不带参数：在当前工作区开新会话（上下文清空）。',
-      '带参数：在指定工作区开新会话。',
-      '工作区认标题、目录名（大小写不敏感，支持唯一前缀）或绝对路径。',
+      '`/new` 在当前工作区新建会话',
+      '`/new <工作区>` 在指定工作区新建会话',
+      '工作区认标题、目录名或绝对路径',
     ].join('\n'),
     handler: async (cmdCtx) => {
       const { scope, peerId } = getScopePeer(cmdCtx);
@@ -100,19 +96,16 @@ function describeChangeFailure(outcome: ChangeWorkspaceOutcome): string {
  * 已获取会话。其它已获取会话不受影响（不带 all 时）。不支持工作区参数，
  * 换工作区用 `/new <工作区|路径>`。
  */
-export function resetCommand({ manager }: CommandDeps): CategorizedCommand {
+export function resetCommand({ manager }: CommandDeps): SlashCommand {
   return {
     name: ['clear', 'reset'],
-    category: 'agent',
     scope: 'all',
-    description: '停止当前会话并开启新会话，all 停全部',
+    description: '停止并新建会话',
     usage: [
-      '/clear',
-      '/clear all',
+      '### 📖 /clear 用法',
       '',
-      '停止当前会话，再在原工作区开启新会话。',
-      '带 all：停掉所有已获取会话，再开启新会话。',
-      '要换工作区用 `/new <工作区|路径>`。',
+      '`/clear` 停止当前会话并新建',
+      '`/clear all` 停止全部会话并新建',
     ].join('\n'),
     handler: async (cmdCtx) => {
       const arg = (cmdCtx.command?.raw ?? '').trim();
@@ -136,12 +129,11 @@ export function resetCommand({ manager }: CommandDeps): CategorizedCommand {
 }
 
 /** /compact — 原地压缩会话历史 */
-export function compactCommand({ manager }: CommandDeps): CategorizedCommand {
+export function compactCommand({ manager }: CommandDeps): SlashCommand {
   return {
     name: 'compact',
-    category: 'agent',
     scope: 'all',
-    description: '压缩会话历史（摘要替换旧记录，保留上下文）',
+    description: '压缩会话历史',
     handler: async (cmdCtx) => {
       const { scope, peerId } = getScopePeer(cmdCtx);
       const msg = cmdCtx.message;

@@ -7,7 +7,7 @@
  * 数据来源（session 事件）：
  *   assistant/message.data.usage.inputTokens/outputTokens/cacheReadTokens/cacheWriteTokens
  */
-import type { CommandDeps, CategorizedCommand } from './types.ts';
+import type { CommandDeps, SlashCommand } from './types.ts';
 import { getScopePeer, sendMarkdownChunked } from '../shared/index.ts';
 
 /** 千分位（不用本地化，避免不同环境分隔符不一致） */
@@ -15,12 +15,11 @@ function num(n: number): string {
   return n.toLocaleString('en-US');
 }
 
-export function costCommand({ manager, config }: CommandDeps): CategorizedCommand {
+export function costCommand({ manager, config }: CommandDeps): SlashCommand {
   return {
     name: 'cost',
-    category: 'agent',
     scope: 'all',
-    description: '查看当前会话的 token 消耗',
+    description: '查看 token 消耗',
     handler: async (cmdCtx) => {
       const { scope, peerId } = getScopePeer(cmdCtx);
 

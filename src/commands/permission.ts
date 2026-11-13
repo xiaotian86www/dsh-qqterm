@@ -7,7 +7,7 @@
  * 这是唯一能把沙箱关掉的指令（`auto` / `danger-full-access` 都不启用沙箱），
  * 因此和其他管理命令一样只允许唯一绑定用户执行（见 auth.ts 的 ownerOnlyAuth）。
  */
-import type { CommandDeps, CategorizedCommand } from './types.ts';
+import type { CommandDeps, SlashCommand } from './types.ts';
 import { ownerOnlyAuth } from './auth.ts';
 import { getScopePeer, sendMarkdownChunked } from '../shared/index.ts';
 import type { PermissionPresetEntry } from '../session/index.ts';
@@ -32,17 +32,18 @@ export function presetLabel(id: string, entry?: PermissionPresetEntry): string {
   return label === id ? id : `${label} (${id})`;
 }
 
-export function permissionCommand({ manager, config, logger }: CommandDeps): CategorizedCommand {
+export function permissionCommand({ manager, config, logger }: CommandDeps): SlashCommand {
   return {
     name: 'permission',
-    category: 'agent',
     // 管理类指令：只允许唯一绑定用户
     scope: 'all',
     authorized: ownerOnlyAuth(config, logger),
     description: '查看或切换权限预设',
     usage: [
-      '/permission：查看当前权限与可选项',
-      '/permission <预设>：切换（立即生效）',
+      '### 📖 /permission 用法',
+      '',
+      '`/permission` 查看当前权限',
+      '`/permission <预设>` 切换权限预设',
     ].join('\n'),
     handler: async (cmdCtx) => {
       const { scope, peerId } = getScopePeer(cmdCtx);

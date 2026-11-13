@@ -2,7 +2,7 @@
  * 指令面板同步：元素构造（宽度/截断/场景筛选）与创建/更新语义
  */
 import { describe, it, expect, vi } from 'vitest';
-import type { CategorizedCommand } from '../commands/types.ts';
+import type { SlashCommand } from '../commands/types.ts';
 import {
   PANEL_DESC_MAX,
   PANEL_MAX_ITEMS,
@@ -20,8 +20,8 @@ function cmd(
   name: string | string[],
   description?: string,
   scope: 'c2c' | 'all' = 'all',
-): CategorizedCommand {
-  return { name, description, scope, category: 'qqbot', handler: () => 'ok' } as CategorizedCommand;
+): SlashCommand {
+  return { name, description, scope, handler: () => 'ok' } as SlashCommand;
 }
 interface Call {
   method: 'get' | 'post' | 'put';
@@ -93,11 +93,6 @@ describe('buildPanelItems（按私聊可见性取命令）', () => {
   it('name 超宽截断到上限内', () => {
     const items = buildPanelItems([cmd('very-long-command-name')]);
     expect(displayWidth(items[0]!.name)).toBeLessThanOrEqual(PANEL_NAME_MAX);
-  });
-
-  it('panelDesc 优先于 description（长说明不留半截）', () => {
-    const status = { ...cmd('status', '查看当前会话状态'), panelDesc: '查看会话状态' };
-    expect(buildPanelItems([status])[0]!.desc).toBe('查看会话状态');
   });
 });
 

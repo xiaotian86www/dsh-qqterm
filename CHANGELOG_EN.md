@@ -17,6 +17,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Changed
 
+- **`/help` shows per-command usage**: `/help <command>` prints that command's usage page, and clicking any command in the list fills that form (look before you act); usage pages are now uniformly shaped as a title plus one signature per line; missing arguments and unknown subcommands reply with a one-line conclusion pointing at `/help <command>` instead of inlining the whole page.
 - **`/ls` lists files too**: directory rows still go one level deeper, while file rows now fill `/get` so a file found while browsing can be fetched directly.
 - **`/bot-help` renamed to `/help`**: back to the prefixless form, and the unknown-command hint points at `/help`; the command panel and help listing pick it up automatically.
 - **File sending no longer restricts directories**: `/get` and `present` deliverables can send files from any path, as long as they exist and are regular files; `sendFile.extraRoots` is removed with the allowlist. The plugin serves only the single bound `access.owner`, so files can only go back to that user's private chat — the allowlist blocked no outside access, it only kept the QQ side from reaching files outside the workspace.

@@ -105,7 +105,6 @@ describe('/plugins 命令声明', () => {
   it('是插件特有命令，私聊可用', () => {
     const h = harness();
     expect(h.command.name).toBe('plugins');
-    expect(h.command.category).toBe('qqbot');
     expect(h.command.scope).toBe('all');
   });
 
@@ -263,6 +262,6 @@ describe('/plugins 用法', () => {
   it('不认识的子命令给出用法', async () => {
     const h = harness();
     const result = await h.command.handler(makeCtx('remove dsh-x', h.bot));
-    expect(result).toBe('⚠️ 不支持的子命令: `remove`\n用法: /plugins [页码|list|install|update|reload]');
+    expect(result).toBe('⚠️ 不支持的子命令: `remove` · 用法: /help plugins');
   });
 });

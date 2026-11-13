@@ -98,7 +98,7 @@ describe('/get', () => {
   it('缺少参数时给用法', async () => {
     const text = await run(makeManager(), makeBot(), '');
     expect(text).toContain('⚠️ 缺少文件路径');
-    expect(text).toContain('/get <路径>');
+    expect(text).toContain('/help get');
   });
 
   it('工作区外的绝对路径也照常发送', async () => {

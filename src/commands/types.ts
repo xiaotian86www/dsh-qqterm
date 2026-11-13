@@ -3,7 +3,7 @@
  *
  * 每个命令工厂函数接收 CommandDeps，由 commands/index.ts 统一注入。
  */
-import type { QQBot, SlashCommand } from '@tencent-connect/qqbot-nodejs';
+import type { QQBot } from '@tencent-connect/qqbot-nodejs';
 import type { SessionManager } from '../session/index.ts';
 import type { QQTermConfig } from '../config.ts';
 import type { Reloader } from '../reload/index.ts';
@@ -22,12 +22,5 @@ export interface CommandDeps {
   installer?: PluginInstaller;
 }
 
-/** 命令分类：agent = 底层 agent 通用能力，qqbot = 插件特有 */
-export type CommandCategory = 'agent' | 'qqbot';
-
-/** 带分类的斜杠命令（category 供 help 分组展示，SDK 忽略未知字段） */
-export interface CategorizedCommand extends SlashCommand {
-  category: CommandCategory;
-  /** 指令面板里的一句话说明（缺省用 description；面板只放一行，超长会截断） */
-  panelDesc?: string;
-}
+/** 斜杠命令（SDK 类型，统一从本模块转出，命令文件不用直接依赖宿主包） */
+export type { SlashCommand } from '@tencent-connect/qqbot-nodejs';

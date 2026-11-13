@@ -6,21 +6,19 @@
  * 补发，见 src/plugins/index.ts。`reload` 是原来的 /bot-reload，并入同一条命令。
  */
 import type { QQBot, SlashCommandHandlerContext } from '@tencent-connect/qqbot-nodejs';
-import type { CategorizedCommand, CommandDeps } from './types.ts';
+import type { SlashCommand, CommandDeps } from './types.ts';
 import { errorText, sendMarkdownChunked } from '../shared/index.ts';
 import { renderPluginList } from '../plugins/format.ts';
 import type { PluginInstaller } from '../plugins/index.ts';
 import { ownerOnlyAuth } from './auth.ts';
 
 const USAGE = [
-  '/plugins',
-  '/plugins list [页码]',
-  '/plugins install <包名> [--allow-builds=<包名,...>]',
-  '/plugins update <包名> [版本]',
-  '/plugins reload',
+  '### 📖 /plugins 用法',
   '',
-  '不带参数列出已安装的插件；install / update 走 registry。',
-  'reload 应用磁盘上的插件变更；本地快照仍走 `pnpm dev:reload` + `/plugins reload`。',
+  '`/plugins [页码]` 列出已安装插件',
+  '`/plugins install <包名> [--allow-builds=<包名,…>]` 安装插件',
+  '`/plugins update <包名> [版本]` 更新插件',
+  '`/plugins reload` 应用磁盘变更',
 ].join('\n');
 
 /** 解析 `--allow-builds=a,b`：只在用户看到「构建脚本被拦下」之后才会带 */
@@ -36,14 +34,12 @@ function parseApproved(args: readonly string[]): string[] | undefined {
 }
 
 /** /plugins — 插件安装 / 更新 / 列表 / 热重载 */
-export function pluginsCommand({ config, logger, installer, reloader }: CommandDeps): CategorizedCommand {
+export function pluginsCommand({ config, logger, installer, reloader }: CommandDeps): SlashCommand {
   return {
     name: 'plugins',
-    category: 'qqbot',
     scope: 'all',
     authorized: ownerOnlyAuth(config, logger),
-    description: '列出、安装、更新插件，或热重载',
-    panelDesc: '插件管理',
+    description: '管理插件',
     usage: USAGE,
     handler: async (cmdCtx) => {
       const extras = cmdCtx as unknown as {
@@ -69,7 +65,7 @@ export function pluginsCommand({ config, logger, installer, reloader }: CommandD
           if (installer === undefined) return '⚠️ 当前 profile 没有插件管理能力';
 
           const target = words[1];
-          if (target === undefined) return `⚠️ 缺少包名\n用法: ${USAGE.split('\n')[2] ?? ''}`;
+          if (target === undefined) return '⚠️ 缺少包名 · 用法: /help plugins';
 
           if (sub === 'update') {
             const info = await installer.find(target);
@@ -116,7 +112,7 @@ export function pluginsCommand({ config, logger, installer, reloader }: CommandD
           return { kind: 'noop' as const };
         }
 
-        return `⚠️ 不支持的子命令: \`${sub}\`\n用法: /plugins [页码|list|install|update|reload]`;
+        return `⚠️ 不支持的子命令: \`${sub}\` · 用法: /help plugins`;
       } catch (err) {
         return `❌ 插件操作启动失败: ${errorText(err)}`;
       }

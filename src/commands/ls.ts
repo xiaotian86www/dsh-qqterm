@@ -17,7 +17,7 @@
  * 与 `/new <工作区>` 同一权限面：列目录等于让人看见 agent 能碰的文件系统，只允许
  * 唯一绑定用户（`access.owner`）。
  */
-import type { CommandDeps, CategorizedCommand } from './types.ts';
+import type { CommandDeps, SlashCommand } from './types.ts';
 import type { ChatScope } from '../types.ts';
 import { getScopePeer, sendMarkdownChunked } from '../shared/index.ts';
 import { sessionAdminAuth } from './sessions.ts';
@@ -29,9 +29,10 @@ import { basename, isAbsolute, join, resolve } from 'node:path';
 const MAX_ENTRIES = 40;
 
 const USAGE = [
-  '**目录**',
-  '`/ls` 看当前工作区的子目录',
-  '`/ls <路径>` 看指定目录（相对当前工作区、绝对路径、`~` 都行）',
+  '### 📖 /ls 用法',
+  '',
+  '`/ls [路径]` 列出子目录',
+  '不写路径看当前工作区；路径可用绝对路径或 `~`',
 ].join('\n');
 
 /** 列目录的结果 */
@@ -40,14 +41,13 @@ type Listing =
   | { ok: false; reason: 'missing' | 'not-directory' | 'denied' };
 
 /** /ls — 列出目录里的子目录 */
-export function lsCommand({ manager, config, logger }: CommandDeps): CategorizedCommand {
+export function lsCommand({ manager, config, logger }: CommandDeps): SlashCommand {
   return {
     name: 'ls',
-    category: 'agent',
     // 列目录 = 暴露文件系统结构：与 /new <工作区> 同一权限面
     scope: 'c2c',
     authorized: sessionAdminAuth(config, logger),
-    description: '列出子目录（点条目进下一层）',
+    description: '列出子目录',
     usage: USAGE,
     handler: async (cmdCtx) => {
       const { scope, peerId } = getScopePeer(cmdCtx);
