@@ -52,8 +52,6 @@ export interface QQTermConfig {
   appSecret: string;
   /** 单条消息最大长度（QQ 限制约 5000 字符） */
   textChunkLimit: number;
-  /** 是否启用流式输出 */
-  streaming: boolean;
   /** 并发队列最大长度 */
   maxQueue: number;
   /** 待答问题超时(ms)，超时自动拒绝并提示（ask_user_question） */
@@ -85,7 +83,6 @@ export const ConfigSchema: Schema<QQTermConfig> = Schema.object({
   appId: Schema.string().default('').description('QQ 机器人 AppID'),
   appSecret: Schema.string().default('').description('QQ 机器人 AppSecret'),
   textChunkLimit: Schema.number().default(4500).description('单条消息最大字符数'),
-  streaming: Schema.boolean().default(true).description('是否启用流式输出'),
   maxQueue: Schema.number().default(20).description('并发队列最大长度'),
   askTimeoutMs: Schema.number().default(5 * 60 * 1000).description('待答问题超时(ms)，超时自动拒绝并提示，0=不超时'),
   retryOffer: Schema.object({

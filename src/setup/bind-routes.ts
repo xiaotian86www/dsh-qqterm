@@ -89,13 +89,12 @@ export interface BindRoutesOptions {
 
 /** 可经 UI 编辑的配置键（白名单：只收用户必要的字段，其余走 patch/env） */
 const EDITABLE_CONFIG_KEYS = new Set([
-  'streaming', 'showToolResults',
+  'showToolResults',
   'access',
 ]);
 
 /** 白名单键的子 Schema（服务端校验：客户端校验仅为体验，安全边界在宿主） */
 const EDITABLE_CONFIG_SCHEMAS: Record<string, (value: unknown) => unknown> = {
-  streaming: (v) => booleanSchema(v, 'streaming'),
   showToolResults: (v) => booleanSchema(v, 'showToolResults'),
   access: (v) => AccessControlSchema(v as never),
 };

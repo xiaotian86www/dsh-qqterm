@@ -35,7 +35,7 @@ QQ User → QQ WebSocket → dsh-qqterm → ctx.agents → dsh agent loop → LL
                                        (assistant reply → QQ sendMarkdown)
 ```
 
-The plugin is a pure Cordis plugin: the host loads `lib/index.js`, the browser loads `lib/client.js` for the settings section and sidebar entry, and the host loop is never modified.
+The plugin is a pure Cordis plugin: the host loads `lib/index.js`, the browser loads `lib/client.js` for the settings section, and the host loop is never modified.
 
 ## Installation
 
@@ -98,7 +98,6 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqterm/cordis.dev.yml
 | `appId` | string | **required** | QQ Bot AppID (or via `QQBOT_APPID` env var) |
 | `appSecret` | string | **required** | QQ Bot AppSecret (or via `QQBOT_SECRET` env var) |
 | `textChunkLimit` | number | `4500` | Max chars per message |
-| `streaming` | boolean | `true` | Enable streaming output |
 | `maxQueue` | number | `20` | Max concurrent queue length |
 | `askTimeoutMs` | number | `300000` | Question timeout (ms), default 5 min (ask_user_question), 0 = no timeout |
 | `showToolResults` | boolean | `false` | Show tool-call results, both success and failure |
@@ -191,7 +190,7 @@ The menu is bot-wide configuration that every user sees, and changes only show a
 | `/cost` | View token usage of the current session |
 | `/status` | View session status: session name and short id / workspace / model / reasoning effort / context / tokens |
 | `/stop` | Abort the current generation; `/stop all` aborts every acquired session that is generating |
-| `/help` | View all commands |
+| `/help` | View all commands; `/help <command>` shows that command's arguments and usage |
 | `/plugins` | Plugin management: no arguments lists installed plugins; `install <name>` / `update <name> [version]` work against the registry; `reload` applies on-disk plugin changes (bound user only) |
 
 > A misspelled command (like `/modle` or `/sesions`) is not forwarded to the model as a prompt: the bot replies "no such command" and, when the intent is clear enough, offers the correct one as a clickable command. Only "slash + ASCII command name" counts as a command, so text like `/usr/local/bin` or `/今天` still goes to the model; the full-width `／` is equivalent to `/`, so it works straight from a Chinese IME.
@@ -205,8 +204,8 @@ The menu is bot-wide configuration that every user sees, and changes only show a
 - `/plugins install <name>` takes effect immediately: the host reconciles the profile, so no `/plugins reload` is needed.
 - `/plugins update <name> [version]` picks the newest compatible version when none is given; a failed upgrade restores the previous version.
 - When a dependency ships build scripts, pnpm refuses to run them by default; the result offers a "continue" button, and only that click grants build permission for that package in this profile.
-- `/plugins reload` applies on-disk plugin changes (the old `/bot-reload`): only modules that really changed are swapped, and changes that need a restart are reported as such.
-- Local tgz snapshots (`pnpm dev:reload`) still use `/plugins reload` after swapping the package; they are not part of install / update.
+- `/plugins reload` applies on-disk plugin changes: only modules that actually changed are swapped, and changes that need a restart are reported as such.
+- Local tgz snapshots (`pnpm dev:reload`) use `/plugins reload` after swapping the package; they are not part of install / update.
 
 ## Workspaces
 
@@ -232,7 +231,7 @@ A workspace *is* the session's `cwd`. It is written into the session header when
 
 ### Session management (`/sessions`)
 
-`/sessions` answers "which sessions does QQ currently hold?" from the runtime acquired set. The all-sessions view still comes from the same host source as the Web sidebar (`sessionQuery` / `sessionPersistence`).
+`/sessions` answers "which sessions does QQ currently hold?" from the runtime acquired set. The all-sessions view comes from the same host source as the Web sidebar (`sessionQuery` / `sessionPersistence`).
 
 | Usage | Description |
 |------|------|
@@ -280,7 +279,7 @@ src/
 │   ├── qr-svg.ts               # QR SVG rendering (host side)
 │   └── persist.ts              # Credentials written to cordis.patch.yml
 ├── client/                     # Browser half (dsh.client Web Bundle)
-│   ├── index.ts                # Settings/sidebar entry registration
+│   ├── index.ts                # Settings entry registration
 │   ├── bind-page.ts            # In-app binding page (QR + status polling)
 │   └── config-panel.ts         # Settings panel (editable config)
 ├── gateway/                    # Gateway assembly
@@ -290,8 +289,6 @@ src/
 │   ├── inbound.ts              # QQ inbound message → agent.followup()
 │   ├── outbound.ts             # session/event → QQ sendMarkdown
 │   ├── outbound-images.ts      # Assistant image blocks → QQ images
-│   ├── outbound-buffer.ts      # Streaming buffer
-│   ├── streaming-writer.ts     # Streaming writer
 │   ├── reply-store.ts          # Passive reply ids (msgid/eventid + usage, msgid persisted)
 │   ├── reply-bot.ts            # Bot decorator: every send resolves the reply id
 │   ├── tool-presenter.ts       # Tool-call presentation

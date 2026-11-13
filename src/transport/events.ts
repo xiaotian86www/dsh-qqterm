@@ -21,12 +21,6 @@ export interface TurnEndReason {
   code?: string;
 }
 
-/** assistant/chunk 事件（仅保留 text-delta） */
-export interface ChunkEvent {
-  type: 'assistant/chunk';
-  text: string;
-}
-
 /**
  * assistant/message 的内容块（只保留出站用得到的字段）
  *
@@ -114,7 +108,6 @@ export interface DeliverablesPresentedEvent {
 
 /** 出站事件联合类型 */
 export type OutboundEvent =
-  | ChunkEvent
   | MessageEvent
   | ToolCallEvent
   | ToolResultEvent
@@ -140,12 +133,6 @@ function parseRetryFailure(raw: unknown): { code: string; message: string } | un
  */
 export function parseEvent(raw: RawSessionEvent): OutboundEvent | undefined {
   switch (raw.type) {
-    case 'assistant/chunk': {
-      const chunk = (raw.data as { chunk?: { type?: string; text?: string } }).chunk;
-      if (chunk === undefined || chunk.type !== 'text-delta' || !chunk.text) return undefined;
-      return { type: 'assistant/chunk', text: chunk.text };
-    }
-
     case 'assistant/message': {
       const message = (raw.data as { message?: { content?: MessageContentBlock[] } }).message;
       if (message === undefined || !Array.isArray(message.content)) return undefined;
@@ -223,42 +210,4 @@ export function extractTurnError(reason: TurnEndReason): { code: string; message
     code: detail?.code ?? reason.code ?? 'UNKNOWN',
     message: detail?.message ?? reason.message ?? 'unknown error',
   };
-}
-
-// ── agent/assistant-stream 实时流式帧（宿主 v2+） ──
-
-/**
- * 归一化后的流式增量（`agent/assistant-stream` 瞬态帧，chunk 不进 session log）。
- */
-export type StreamDelta =
-  | { kind: 'attempt-start'; attemptId: string }
-  | { kind: 'text-delta'; attemptId: string; text: string };
-
-/**
- * 解析 `agent/assistant-stream` 的 payload（对齐 @deepseek-ai/dsh-agent 的
- * AssistantStreamFrame 最小契约，避免硬依赖）。
- *
- * 只归一化两类帧：start（新 attempt）与 chunk 的 text-delta（文本增量）。
- * reasoning-delta / tool-call-delta 不进用户消息；end 帧不处理——收尾由 durable
- * `assistant/message` / `turn/end` 事件负责。未知形态返回 undefined。
- */
-export function parseStreamFrame(raw: unknown): { agentId: string; delta: StreamDelta } | undefined {
-  if (raw === null || typeof raw !== 'object') return undefined;
-  const agentId = (raw as { agent?: { id?: unknown } }).agent?.id;
-  if (typeof agentId !== 'string' || !agentId) return undefined;
-
-  const frame = (raw as { frame?: unknown }).frame;
-  if (frame === null || typeof frame !== 'object') return undefined;
-  const { type, attemptId } = frame as { type?: unknown; attemptId?: unknown };
-  if (typeof attemptId !== 'string' || !attemptId) return undefined;
-
-  if (type === 'start') {
-    return { agentId, delta: { kind: 'attempt-start', attemptId } };
-  }
-  if (type === 'chunk') {
-    const chunk = (frame as { chunk?: { type?: unknown; text?: unknown } | null }).chunk;
-    if (chunk?.type !== 'text-delta' || typeof chunk.text !== 'string' || !chunk.text) return undefined;
-    return { agentId, delta: { kind: 'text-delta', attemptId, text: chunk.text } };
-  }
-  return undefined;
 }

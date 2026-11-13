@@ -36,7 +36,7 @@ const SHARED_PATCH = [
   '    enabled: false',
   '- id: qqterm',
   '  config:',
-  '    streaming: false',
+  '    debug: false',
   '    appId: old-app # 旧凭据',
   '    appSecret: old-secret',
   '- id: llm-deepseek',
@@ -57,7 +57,7 @@ describe('persistCredentialsToProfile', () => {
     expect(after).toContain('ui-settings');
     expect(after).toContain('llm-deepseek');
     expect(after).toContain('# 旧凭据');
-    expect(after).toContain('streaming: false');
+    expect(after).toContain('debug: false');
     expect(after).not.toContain('old-app');
     expect(after).toContain('appId: test-app');
 
@@ -69,7 +69,7 @@ describe('persistCredentialsToProfile', () => {
       '- id: qqterm',
       '  config:',
       '    appId: old-app',
-      '    streaming: false',
+      '    debug: false',
       '    access:',
       '      c2cMode: open',
       '      c2cAllow:',
@@ -80,7 +80,7 @@ describe('persistCredentialsToProfile', () => {
 
     const after = readFileSync(patchPath, 'utf8');
     expect(after).toContain('owner: qr-user');
-    expect(after).toContain('streaming: false');
+    expect(after).toContain('debug: false');
     expect(after).not.toContain('old-owner');
     expect(after).not.toContain('c2cMode');
     expect(after).not.toContain('c2cAllow');
@@ -170,7 +170,7 @@ describe('removeCredentialsFromProfile', () => {
     expect(removeCredentialsFromProfile(dir, log)).toBe(true);
 
     const after = readFileSync(patchPath, 'utf8');
-    expect(after).toContain('streaming: false');
+    expect(after).toContain('debug: false');
     expect(after).toContain('- insert:');
     expect(after).not.toContain('test-app');
     expect(after).not.toContain('old-app');
@@ -208,19 +208,19 @@ describe('updateProfileConfig', () => {
   });
 
   it('提交键与现值相同（幂等）：不产生写动作，mtime 不变', () => {
-    writeFileSync(patchPath, '- id: qqterm\n  config:\n    streaming: false\n', 'utf8');
+    writeFileSync(patchPath, '- id: qqterm\n  config:\n    debug: false\n', 'utf8');
     const past = new Date(Date.now() - 1000);
     utimesSync(patchPath, past, past);
 
-    expect(updateProfileConfig({ streaming: false }, dir, log)).toBe(true);
+    expect(updateProfileConfig({ debug: false }, dir, log)).toBe(true);
     expect(statSync(patchPath).mtimeMs).toBe(past.getTime());
   });
 
   it('条目不存在时追加，跳过凭据键', () => {
-    expect(updateProfileConfig({ appId: 'x', streaming: false }, dir, log)).toBe(true);
+    expect(updateProfileConfig({ appId: 'x', debug: false }, dir, log)).toBe(true);
     const after = readFileSync(patchPath, 'utf8');
     expect(after).toContain('- id: qqterm');
-    expect(after).toContain('streaming: false');
+    expect(after).toContain('debug: false');
     expect(after).not.toContain('appId: x');
   });
 });

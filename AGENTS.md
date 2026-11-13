@@ -36,7 +36,7 @@
 ### 3.1 宿主依赖
 
 - `@deepseek-ai/*` 一律 `peerDependencies`，禁止进 `dependencies`，禁止打进客户端 bundle。
-- 全硬依赖：用到的 `ctx` 服务都写进 `inject`，运行时不再探测、不写降级分支；服务缺失时插件 inactive，不能抛错阻塞宿主。
+- 全硬依赖：用到的 `ctx` 服务都写进 `inject`，运行时不探测、不写降级分支；服务缺失时插件 inactive，不能抛错阻塞宿主。
 - 不 import 宿主包私有深层路径，能力走 `ctx` 服务或公开导出。
 - 版本号运行时读 `package.json`（`src/shared/utils.ts`），不另建常量。
 
@@ -52,7 +52,7 @@
 
 - 入口 id 必须等于包名（tsdown 读 package.json）；改包名要同步 `cordis.patch.yml` 的 `name` 与 `PACKAGE_NAME`，否则报 “loaded without registering”。
 - 外部依赖只有 `react` / `react-dom`（`tsdown.client.config.ts` 的 `BASELINE_EXTERNALS`），其余内联；新增依赖先看体积。
-- 唯一槽位 `settings.section`：绑定 / 换凭据 / 解绑 / 配置编辑全在设置页一个栏目。不要再注册 `sidebar.right.pane.tab`、`main`、`sidebar.panellist` 或插件详情动作。宿主大版本升级后 Desktop 与 dsh web 两端重新验收；服务缺失时静默 inactive，不能白屏。
+- 唯一槽位 `settings.section`：绑定 / 换凭据 / 解绑 / 配置编辑全在设置页一个栏目。不要注册 `sidebar.right.pane.tab`、`main`、`sidebar.panellist` 或插件详情动作。宿主大版本升级后 Desktop 与 dsh web 两端重新验收；服务缺失时静默 inactive，不能白屏。
 
 ### 3.4 交互与消息
 
@@ -177,9 +177,8 @@ QQ 只有一个窗口，多个已获取会话的输出、提问、审批都回�
 
 - 首行：独占一行、后接空行，`` > `#短id` · 标题 ``；短 id 必须包行内代码（QQ 会把引用行里 `#` 开头的内容渲染成标题）；不带 emoji；标题取最新 `session/title`（`sessionTitleOf`），取不到写 `未命名会话`，压到 20 字内。
 - 尾部动作：正文后空一行、独占一行，`回复`（`/to #短id `）+ `恢复`（`/sessions resume #短id`）；长回复只在首片带首行、末片带链接（`chunkDecoratedSessionMessage`）。
-- 非当前会话的提问 / 审批用同一首行，正文不再塞 `[#id]`；提问在引导行给 `回答 · 恢复`，审批 / 重试有自己的键盘，不追加。
+- 非当前会话的提问 / 审批用同一首行，正文不塞 `[#id]`；提问在引导行给 `回答 · 恢复`，审批 / 重试有自己的键盘，不追加。
 - 不套首行：讲「当前这条消息」的路由警告只在句子里带 `#短id（标题）`（`sessionLabel`）。
-- 流式只作用于发起时是当前会话的消息（`shouldStream`）；生成中途切走，这一段仍缺署名，要署名完整就等这轮结束再切。
 
 ## 5. 构建 / 测试
 

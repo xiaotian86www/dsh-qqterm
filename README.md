@@ -98,7 +98,6 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqterm/cordis.dev.yml
 | `appId` | string | **必填** | QQ Bot AppID（或通过 `QQBOT_APPID` 环境变量） |
 | `appSecret` | string | **必填** | QQ Bot AppSecret（或通过 `QQBOT_SECRET` 环境变量） |
 | `textChunkLimit` | number | `4500` | 单条消息最大字符数 |
-| `streaming` | boolean | `true` | 是否启用流式输出 |
 | `maxQueue` | number | `20` | 并发队列最大长度 |
 | `askTimeoutMs` | number | `300000` | 待答问题超时(ms)，默认 5 分钟（ask_user_question），0=不超时 |
 | `showToolResults` | boolean | `false` | 是否展示工具调用结果（成功与失败都受此开关控制） |
@@ -149,7 +148,7 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqterm/cordis.dev.yml
 | `sendFile.sendPresentedFiles` | boolean | `true` | 是否把 present 声明的交付文件发送到当前会话 |
 | `sendFile.maxFiles` | number | `4` | 单轮最多投递的交付文件数 |
 
-交付文件与 `/get` 都只发给唯一绑定用户（`access.owner`），因此不再限制目录：`~/.dsh-qqterm/media`、当前会话工作目录、任意绝对路径都能发。助手消息里的图片由附件服务定位后直接发送。
+交付文件与 `/get` 都只发给唯一绑定用户（`access.owner`），因此不限制目录：`~/.dsh-qqterm/media`、当前会话工作目录、任意绝对路径都能发。助手消息里的图片由附件服务定位后直接发送。
 
 助手正文里的本地文件链接（`/`、`./`、`../`、盘符开头，或相对工作目录能命中的路径）在发送前改写成 `/get <绝对路径>` 命令链接：QQ 点不开本地路径，点这个链接由插件把文件发到聊天里。`/get <路径>` 也可以手动输入，路径不限。
 
@@ -179,7 +178,7 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqterm/cordis.dev.yml
 | `/clear`（别名 `/reset`） | 停止当前会话并在原工作区开启新会话；`/clear all` 停掉所有已获取会话 |
 | `/compact` | 压缩会话历史（摘要替换旧记录，保留上下文）；回复只报压缩条数与 token |
 | `/sessions`（别名 `/session`） | 会话管理：默认按工作区分组列出工作中会话（含状态与当前项），`all` 看全部会话 |
-| `/rename` | 修改当前会话名（标题固定，不再被自动标题覆盖） |
+| `/rename` | 修改当前会话名（标题固定，不被自动标题覆盖） |
 | `/to` | 向指定会话发消息，或在它提问时提交答案 |
 | `/ls` | 列出目录里的子目录与文件：点目录逐层进入，点文件直接发送（`/get`） |
 | `/get` | 把工作区里的文件发到当前聊天（图片 / 视频 / 语音按类型发送） |
@@ -204,8 +203,8 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqterm/cordis.dev.yml
 - `/plugins install <包名>` 装完即生效：宿主会 reconcile profile，不需要再发 `/plugins reload`。
 - `/plugins update <包名> [版本]` 不带版本时取 registry 上最新的兼容版本；装新版失败会自动装回旧版本。
 - 依赖带构建脚本时 pnpm 默认拒绝执行，结果里给「继续安装」按钮，点了才授予该包在本 profile 的构建权限。
-- `/plugins reload` 应用磁盘上已变更的插件文件（原来的 `/bot-reload`）：只换真的变过的插件，需要重启的改动会如实回报。
-- 本地 tgz 快照（`pnpm dev:reload`）仍是先换包再 `/plugins reload`，不在 install / update 里。
+- `/plugins reload` 应用磁盘上已变更的插件文件：只替换实际变更的插件，需要重启的改动会如实回报。
+- 本地 tgz 快照（`pnpm dev:reload`）先换包再 `/plugins reload`，不在 install / update 里。
 
 ## 工作区（workspace）
 
@@ -231,7 +230,7 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqterm/cordis.dev.yml
 
 ### 会话管理（`/sessions`）
 
-`/sessions` 默认回答“QQ 现在持有哪些会话”，数据来自运行期的已获取集合；全部视图仍与 Web 侧栏同一来源（宿主 `sessionQuery` / `sessionPersistence`）。
+`/sessions` 默认回答“QQ 现在持有哪些会话”，数据来自运行期的已获取集合；全部视图与 Web 侧栏同一来源（宿主 `sessionQuery` / `sessionPersistence`）。
 
 | 用法 | 说明 |
 |------|------|
@@ -240,7 +239,7 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqterm/cordis.dev.yml
 | `/sessions all` | 按工作区分组列出全部会话（组内先置顶），跨项目找会话用；已持有会话标 `📌`，不标当前项；组内只用短 id；每页 10 条 |
 | `/sessions all <页码>` | 全部会话视图的下一页；翻页后仍会重复页首会话所属的工作区标题；页脚格式相同 |
 | `/sessions resume <id>` | 把当前聊天切到该会话，历史接上继续聊（目标若已归档会顺带取消归档），工作区跟着切；目标用 8 位短 id |
-| `/sessions rename <id> <新标题>` | 修改会话名；标题会被固定，不再被自动标题覆盖。目标须已打开（先 `/sessions resume`） |
+| `/sessions rename <id> <新标题>` | 修改会话名；标题会被固定，不被自动标题覆盖。目标须已打开（先 `/sessions resume`） |
 | `/sessions archive [页码]` | 不带目标时列出所有工作区的归档候选（与 `/sessions all` 同源），按工作区分组，标题给 `X 个工作区 · Y 个会话`，候选不编号；只给页码时翻页，例如 `/sessions archive 2` |
 | `/sessions archive <id>[,<id>…]` | 归档会话：从本命令与 Web 侧栏隐藏，**磁盘日志保留**，可随时取消归档；多个目标用英文逗号分隔（一次最多 10 个） |
 | `/sessions archived [页码]` | 查看已归档会话；每行带短 id 与所属工作区，点一下把 `/sessions unarchive <id>` 填进输入框；底部的翻页与返回列表也是链接 |
@@ -254,15 +253,13 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqterm/cordis.dev.yml
 - **分页**：多页列表的页脚统一为 `上一页 · 第 1/2 页 · 下一页`，缺哪边省略哪边；页码不放在标题里，也不显示「还有 N 个」。
 - 状态词只在工作中会话列表里出现：`生成中`（agent 正在跑）、`空闲`（持有但待命）；当前指针指向但尚未获取的会话显示 `待恢复`。`/new` 之后没有当前指针，不会补这一行。其它视图只给已持有会话标 `📌`（表示 QQ 已持有），不标当前，也不显示状态。
 - 只允许**私聊**使用，且操作者必须是唯一绑定用户（`access.owner`）——会话标题、归档状态都涉及其他聊天的数据；未配置用户时命令直接不可用。
-- 归档走宿主 `workspaceRegistry.archiveSession`，只写 registry 的全局归档集，**不删任何文件**；本插件不提供物理删除，需要清理磁盘请到 Web 端或手动处理。
-- 归档走宿主 `workspaceRegistry.archiveSession`；`workspaceRegistry` 在插件 `inject` 里，profile 缺这个服务时插件整体不激活，不会出现「命令在、归档不可用」的半可用状态。
+- 归档走宿主 `workspaceRegistry.archiveSession`，只写 registry 的全局归档集，**不删任何文件**；本插件不提供物理删除，需要清理磁盘请到 Web 端或手动处理。`workspaceRegistry` 在插件 `inject` 里，profile 缺这个服务时插件整体不激活，不会出现「命令在、归档不可用」的半可用状态。
 - 归档前会释放该会话在本进程内的 agent；如果它就是当前会话，还会清掉聊天映射，下一条消息落到全新会话——归档会话会被宿主的 `agent/pre-step` 闸门拒绝，继续挂在它上面聊天会收不到回复。
 - **多个会话可以同时活着**：普通消息、`/sessions resume`、`/to` 实际拿到 agent 的会话都会加入「已获取集合」。所有已获取会话的输出、提问、审批都会发回 QQ；当前会话不加标记，其它会话的消息在正文前单独一行标 `#短id · 标题`，正文后空一行、单独一行给「回复」「恢复」两个链接。已获取集合只在运行期存在，重启后只有当前会话从 `model-prefs.json` 恢复。
 - **切走不释放**：`/sessions resume` 只改当前指针，旧会话继续在后台跑、输出继续回 QQ；`/new` 只清掉当前指针，旧会话同样继续跑。插件卸载时只 dispose 自己创建的 agent，Web/TUI 创建的只丢引用。
 - **问答按会话路由**：当前会话直接回文本；其它会话的按钮带 session id，点按钮就能答；没有选项按钮的问题在正文引导行给「回答」「恢复」两个链接。一条没走按钮或 `/to` 的纯文本不会误发给当前模型，会提示用按钮或 `/to`。
 - 持有列表按「当前 → 其它持有（获取时间倒序）」排，行里的时间取会话的最近人类消息时间（取不到时回退创建时间）；`/sessions all` 的工作区内顺序同样按这个时间倒序（与 Web 侧栏同一份 `updatedAt`），置顶会话仍在最前，工作区顺序不变。
 - 跨工作区恢复后，agent 会在**那个会话自己的目录**里干活；相对路径（含 `/get` 的相对写法）也以该目录为准。
-
 
 ## 核心模块
 
@@ -289,8 +286,6 @@ src/
 │   ├── inbound.ts              # QQ 入站消息 → agent.followup()
 │   ├── outbound.ts             # session/event → QQ sendMarkdown
 │   ├── outbound-images.ts      # 助手消息 image 块 → QQ 图片
-│   ├── outbound-buffer.ts      # 流式缓冲
-│   ├── streaming-writer.ts     # 流式写入
 │   ├── reply-store.ts          # 被动回复凭证（msgid/eventid + 用量，msgid 落盘）
 │   ├── reply-bot.ts            # bot 实例装饰：所有发送统一取被动凭证
 │   ├── tool-presenter.ts       # 工具调用展示

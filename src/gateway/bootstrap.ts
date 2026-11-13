@@ -11,11 +11,10 @@ import { SessionManager, type DshAgentRegistry } from '../session/index.ts';
 import { handleInbound, createOutboundHandler } from '../transport/index.ts';
 import type { SessionLike } from '../transport/outbound.ts';
 import type { RawSessionEvent } from '../transport/events.ts';
-import { parseStreamFrame } from '../transport/events.ts';
 import { ReplyStore } from '../transport/reply-store.ts';
 import { createReplyAwareBot } from '../transport/reply-bot.ts';
 import type { ToolsRegistryLike } from '../transport/tool-presenter.ts';
-import type { QQBotSender } from '../transport/outbound-buffer.ts';
+import type { QQBotSender } from '../transport/outbound.ts';
 import { QuestionChannel } from '../features/question-channel.ts';
 import { ApprovalChannel, type ApprovalChannelContext } from '../features/approval-channel.ts';
 import { RetryChannel } from '../features/retry-channel.ts';
@@ -113,11 +112,9 @@ export async function bootstrapGateway(
   // tools 服务（工具结果结构化展示）
   const toolsRegistry = (ctx as unknown as { tools?: ToolsRegistryLike }).tools;
 
-  // 发送适配器：bot 已被 createReplyAwareBot 接管被动凭证，这里只做形状适配
-  // （QQBotSender.openStream 的参数形态与 SDK 不同）。
+  // 发送适配器：bot 已被 createReplyAwareBot 接管被动凭证，这里只做形状适配。
   const sender: QQBotSender = {
     sendMarkdown: (target, content, opts) => bot.sendMarkdown(target, content, opts),
-    openStream: (target) => bot.openStream({ target }),
   };
 
   // ── 附件发送适配器（交付物投递使用） ──
@@ -165,16 +162,6 @@ export async function bootstrapGateway(
     }
     outbound.routeSessionEvent(session, event);
   }) as (...args: unknown[]) => void, { global: true });
-
-  // ── 出站流式：agent/assistant-stream → 流式帧路由 ──
-  // 实时流式走瞬态 agent/assistant-stream（chunk 不进 session log）。
-  // 该事件按 agent 作用域派发，根作用域监听器不带 global 会被过滤（同
-  // approval/request），帧到达后自行按 agent.id 路由，非 QQ 会话在 router 内忽略。
-  (ctx as unknown as { on(event: string, handler: (...args: unknown[]) => void, options?: { global?: boolean }): void })
-    .on('agent/assistant-stream', (payload: unknown) => {
-      const parsed = parseStreamFrame(payload);
-      if (parsed !== undefined) outbound.routeStreamFrame(parsed.agentId, parsed.delta);
-    }, { global: true });
 
   // ── 问答通道（ask_user_question → QQ 文本 + 按钮） ──
   const questionChannel = new QuestionChannel(manager, sender, config, logger);

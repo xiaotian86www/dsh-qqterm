@@ -1,4 +1,4 @@
-﻿/**
+/**
  * QQ Bot 凭据与配置持久化 — 写入 dsh profile 的 cordis.patch.yml
  *
  * 该文件是宿主的组合覆盖层，存在多个写者（宿主设置流程、本插件、用户手工编辑）。
@@ -184,7 +184,7 @@ function applyEdit(doc: Document.Parsed, edit: (ctx: EditContext) => EditResult)
   const attached = existing !== undefined;
   const appendEntry = (): void => {
     const seq = doc.contents as YAMLSeq;
-    // 空文件重建的文档是流式 `[]`，追加时重置为块式输出（与手写 patch 形态一致）
+    // 空文件重建的文档是行内 `[]`，追加时重置为块式输出（与手写 patch 形态一致）
     seq.flow = false;
     const entry = new YAMLMap();
     entry.set('id', ENTRY_ID);

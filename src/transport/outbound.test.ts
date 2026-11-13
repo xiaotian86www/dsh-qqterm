@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createOutboundHandler } from './outbound.ts';
-import type { QQBotSender, StreamSessionLike } from './outbound-buffer.ts';
+import type { QQBotSender } from './outbound.ts';
 import type { SessionManager, SessionRecord } from '../session/index.ts';
 import type { QQTermConfig } from '../config.ts';
 import type { Logger, ReplyTarget } from '../types.ts';
@@ -12,14 +12,9 @@ function createLogger(): Logger {
   return { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 }
 
-function createSession(): StreamSessionLike {
-  return { update: vi.fn().mockResolvedValue(undefined), complete: vi.fn().mockResolvedValue(undefined) };
-}
-
-function createBot(session: StreamSessionLike | undefined): QQBotSender {
+function createBot(): QQBotSender {
   return {
     sendMarkdown: vi.fn().mockResolvedValue(undefined),
-    openStream: vi.fn(() => session),
   };
 }
 
@@ -43,7 +38,6 @@ function createRecord(
 
 function createConfig(overrides?: Partial<QQTermConfig>): QQTermConfig {
   return {
-    streaming: true,
     textChunkLimit: 4500,
     showToolResults: false,
     ...overrides,
@@ -57,15 +51,12 @@ function setup(opts?: {
   deliverer?: { deliver: ReturnType<typeof vi.fn> };
   current?: boolean;
   retryChannel?: { offer: ReturnType<typeof vi.fn> };
-  /** 发送层能不能拿到流式所需的被动凭证 */
-  hasCredential?: boolean;
   /** 图片转发器（不传则不转发 image 块） */
   images?: { send: ReturnType<typeof vi.fn> };
   /** 会话工作目录（本地文件链接按它解析相对路径） */
   dir?: string;
 }) {
-  const session = createSession();
-  const bot = createBot((opts?.hasCredential ?? true) ? session : undefined);
+  const bot = createBot();
   const record = 'record' in (opts ?? {}) ? opts!.record : createRecord(c2cTarget);
   const manager = {
     findBySessionId: vi.fn((id: string) => (id === 'sess-qq' ? record : undefined)),
@@ -77,136 +68,8 @@ function setup(opts?: {
     manager, bot, opts?.config ?? createConfig(), createLogger(), undefined, opts?.deliverer,
     opts?.images as never,
   );
-  return { outbound, bot, session, record };
+  return { outbound, bot, record };
 }
-
-const delta = (attemptId: string, text: string) => ({ kind: 'text-delta' as const, attemptId, text });
-const start = (attemptId: string) => ({ kind: 'attempt-start' as const, attemptId });
-
-describe('OutboundRouter.routeStreamFrame', () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  it('流式帧路由到会话 buffer：openStream + update', async () => {
-    const { outbound, bot, session } = setup();
-
-    outbound.routeStreamFrame('sess-qq', start('a1'));
-    outbound.routeStreamFrame('sess-qq', delta('a1', 'hello'));
-    await vi.advanceTimersByTimeAsync(200);
-
-    expect(bot.openStream).toHaveBeenCalledTimes(1);
-    expect(session.update).toHaveBeenCalledWith('hello');
-  });
-
-  it('attempt 切换 reset：同一条流式消息被新内容全量重写', async () => {
-    const { outbound, bot, session } = setup();
-
-    outbound.routeStreamFrame('sess-qq', start('a1'));
-    outbound.routeStreamFrame('sess-qq', delta('a1', 'partial'));
-    await vi.advanceTimersByTimeAsync(200);
-    expect(session.update).toHaveBeenCalledWith('partial');
-
-    outbound.routeStreamFrame('sess-qq', start('a2'));
-    outbound.routeStreamFrame('sess-qq', delta('a2', 'full'));
-    await vi.advanceTimersByTimeAsync(200);
-
-    expect(bot.openStream).toHaveBeenCalledTimes(1); // 流式会话复用
-    expect(session.update).toHaveBeenNthCalledWith(2, 'full'); // 全量替换
-  });
-
-  it('agent replacement（attemptId 重叠）：start 帧无条件重置', async () => {
-    const { outbound, bot, session } = setup();
-
-    outbound.routeStreamFrame('sess-qq', start('sess-qq:1'));
-    outbound.routeStreamFrame('sess-qq', delta('sess-qq:1', 'stale'));
-    await vi.advanceTimersByTimeAsync(200);
-    expect(session.update).toHaveBeenCalledWith('stale');
-
-    // agent replacement 后 attempt 计数重启，attemptId 与旧 agent 相同
-    outbound.routeStreamFrame('sess-qq', start('sess-qq:1'));
-    outbound.routeStreamFrame('sess-qq', delta('sess-qq:1', 'fresh'));
-    await vi.advanceTimersByTimeAsync(200);
-
-    expect(bot.openStream).toHaveBeenCalledTimes(1);
-    expect(session.update).toHaveBeenNthCalledWith(2, 'fresh'); // 全量替换，无残留
-  });
-
-  it('迟到帧（旧 attemptId）被丢弃', async () => {
-    const { outbound, session } = setup();
-
-    outbound.routeStreamFrame('sess-qq', start('a1'));
-    outbound.routeStreamFrame('sess-qq', delta('a1', 'x'));
-    outbound.routeStreamFrame('sess-qq', start('a2'));
-    outbound.routeStreamFrame('sess-qq', delta('a1', 'late')); // a1 的迟到帧
-    await vi.advanceTimersByTimeAsync(200);
-
-    expect(session.update).not.toHaveBeenCalledWith(expect.stringContaining('late'));
-  });
-
-  it('非 QQ 会话（无 record）忽略流式帧', async () => {
-    const { outbound, bot } = setup({ record: undefined });
-
-    outbound.routeStreamFrame('sess-web', start('a1'));
-    outbound.routeStreamFrame('sess-web', delta('a1', 'hello'));
-    await vi.advanceTimersByTimeAsync(200);
-
-    expect(bot.openStream).not.toHaveBeenCalled();
-    expect(bot.sendMarkdown).not.toHaveBeenCalled();
-  });
-
-  it('发送层拿不到被动凭证时不流式：帧累积后由 assistant/message 静态发送', async () => {
-    const { outbound, bot } = setup({ hasCredential: false });
-
-    outbound.routeStreamFrame('sess-qq', start('a1'));
-    outbound.routeStreamFrame('sess-qq', delta('a1', 'static reply'));
-    await vi.advanceTimersByTimeAsync(200);
-
-    outbound.routeSessionEvent({ header: { id: 'sess-qq' } }, {
-      type: 'assistant/message',
-      data: { message: { content: [{ type: 'text', text: 'static reply' }] } },
-    });
-    await vi.advanceTimersByTimeAsync(0);
-
-    // openStream 只尝试一次（返回 undefined），随后降级静态
-    expect(bot.openStream).toHaveBeenCalledTimes(1);
-    expect(bot.sendMarkdown).toHaveBeenCalledWith({ scope: 'c2c', targetId: 'user1' }, 'static reply');
-  });
-
-  it('assistant/message 到达时收尾流式：complete 且不重复静态发送', async () => {
-    const { outbound, bot, session } = setup();
-
-    outbound.routeStreamFrame('sess-qq', start('a1'));
-    outbound.routeStreamFrame('sess-qq', delta('a1', 'hello'));
-    await vi.advanceTimersByTimeAsync(200);
-
-    outbound.routeSessionEvent({ header: { id: 'sess-qq' } }, {
-      type: 'assistant/message',
-      data: { message: { content: [{ type: 'text', text: 'hello' }] } },
-    });
-    await vi.advanceTimersByTimeAsync(0);
-
-    expect(session.complete).toHaveBeenCalledTimes(1);
-    expect(bot.sendMarkdown).not.toHaveBeenCalled();
-  });
-
-  it('旧通道回归：durable assistant/chunk 事件仍进 buffer', async () => {
-    const { outbound, bot, session } = setup();
-
-    outbound.routeSessionEvent({ header: { id: 'sess-qq' } }, {
-      type: 'assistant/chunk',
-      data: { chunk: { type: 'text-delta', text: 'legacy' } },
-    });
-    await vi.advanceTimersByTimeAsync(200);
-
-    expect(bot.openStream).toHaveBeenCalledTimes(1);
-    expect(session.update).toHaveBeenCalledWith('legacy');
-  });
-});
 
 describe('OutboundRouter: 多会话标记', () => {
   const sourceOf = (id: string, title = '未命名会话'): string => `> \`#${id}\` · ${title}`;
@@ -221,28 +84,6 @@ describe('OutboundRouter: 多会话标记', () => {
       type: 'assistant/message',
       data: { message: { content: [{ type: 'text', text: 'hello' }] } },
     });
-    await Promise.resolve();
-
-    expect(bot.openStream).not.toHaveBeenCalled();
-    expect(bot.sendMarkdown).toHaveBeenCalledWith(
-      c2cTarget,
-      `${sourceOf('sess-qq')}\n\nhello\n\n${footerOf('sess-qq')}`,
-    );
-  });
-
-  it('非当前会话的流式帧先累积，assistant/message 时统一标注后再发', async () => {
-    const { outbound, bot } = setup({ current: false });
-
-    outbound.routeStreamFrame('sess-qq', start('a1'));
-    outbound.routeStreamFrame('sess-qq', delta('a1', 'hello'));
-    await Promise.resolve();
-    expect(bot.sendMarkdown).not.toHaveBeenCalled();
-
-    outbound.routeSessionEvent({ header: { id: 'sess-qq' } }, {
-      type: 'assistant/message',
-      data: { message: { content: [{ type: 'text', text: 'hello' }] } },
-    });
-    await Promise.resolve();
     await Promise.resolve();
 
     expect(bot.sendMarkdown).toHaveBeenCalledWith(
@@ -411,7 +252,6 @@ describe('OutboundRouter: deliverables/presented', () => {
     const textTask = new Promise<void>((resolve) => { resolveText = resolve; });
     const bot: QQBotSender = {
       sendMarkdown: vi.fn(() => textTask),
-      openStream: vi.fn(() => createSession()),
     };
     const record = createRecord(c2cTarget);
     const manager = {
@@ -606,7 +446,7 @@ describe('OutboundRouter assistant/message 图片', () => {
 
   it('文本与图片按内容块顺序交替发送', async () => {
     const images = { send: vi.fn().mockResolvedValue(undefined) };
-    const { outbound, bot } = setup({ images, config: createConfig({ streaming: false }) });
+    const { outbound, bot } = setup({ images, config: createConfig() });
     const { session, event } = imageMessage([
       { type: 'text', text: '先看图' },
       { type: 'image', attachment: { attachmentId: 'a1', mediaType: 'image/png' } },
@@ -621,27 +461,6 @@ describe('OutboundRouter assistant/message 图片', () => {
     expect(images.send).toHaveBeenCalledTimes(1);
     expect(images.send.mock.invocationCallOrder[0]).toBeGreaterThan(markdown.invocationCallOrder[0]!);
     expect(images.send.mock.invocationCallOrder[0]).toBeLessThan(markdown.invocationCallOrder[1]!);
-  });
-
-  it('流式消息中间插图：流截到图前，图后文本另发一条', async () => {
-    const images = { send: vi.fn().mockResolvedValue(undefined) };
-    const { outbound, bot, session: stream } = setup({ images });
-    outbound.routeStreamFrame('sess-qq', start('a1'));
-    outbound.routeStreamFrame('sess-qq', delta('a1', '前半'));
-    const { session, event } = imageMessage([
-      { type: 'text', text: '前半' },
-      { type: 'image', attachment: { attachmentId: 'a1', mediaType: 'image/png' } },
-      { type: 'text', text: '后半' },
-    ]);
-
-    outbound.routeSessionEvent(session, event);
-    for (let i = 0; i < 30; i++) await Promise.resolve();
-
-    const update = (stream.update as ReturnType<typeof vi.fn>).mock;
-    expect(update.calls.at(-1)?.[0]).toBe('前半');
-    expect(stream.complete).toHaveBeenCalled();
-    expect(images.send).toHaveBeenCalledTimes(1);
-    expect(bot.sendMarkdown).toHaveBeenCalledWith(c2cTarget, '后半');
   });
 
   it('未注入图片转发器时忽略 image 块', async () => {
@@ -687,7 +506,7 @@ describe('OutboundRouter 本地文件链接', () => {
   it('正文里的 markdown 图片换成图片消息，文本里不留 ![]()', async () => {
     writeFileSync(join(dir, 'path.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
     const images = { send: vi.fn(), sendPaths: vi.fn().mockResolvedValue(undefined) };
-    const { outbound, bot } = setup({ dir, images, config: createConfig({ streaming: false }) });
+    const { outbound, bot } = setup({ dir, images, config: createConfig() });
 
     outbound.routeSessionEvent({ header: { id: 'sess-qq' } }, {
       type: 'assistant/message',

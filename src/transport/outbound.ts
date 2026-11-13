@@ -1,18 +1,18 @@
 /**
  * 出站处理器 — dsh session/event → QQ 消息发送
  *
- * 采用路由器模式：OutboundRouter 持有会话级状态（文本缓冲、工具调用记录），
+ * 采用路由器模式：OutboundRouter 持有会话级状态（工具调用记录、交付文件），
  * 事件解析归一化在 events.ts，路由按事件类型分发到私有方法。
  */
+import type { InlineKeyboard } from '@tencent-connect/qqbot-nodejs';
 import type { SessionManager, SessionRecord } from '../session/index.ts';
 import type { QQTermConfig } from '../config.ts';
-import type { Logger } from '../types.ts';
+import type { Logger, ReplyTarget } from '../types.ts';
 import { chunkMarkdownText } from './chunker.ts';
 import {
   chunkDecoratedSessionMessage,
   sessionTitleOf,
 } from './session-source.ts';
-import { OutboundBuffer, type QQBotSender } from './outbound-buffer.ts';
 import { formatToolResult, type ToolsRegistryLike, type ToolResultData } from './tool-presenter.ts';
 import type { DeliverablesDelivererLike } from './deliverables.ts';
 import {
@@ -32,7 +32,6 @@ import {
 import {
   parseEvent,
   extractTurnError,
-  type ChunkEvent,
   type MessageEvent,
   type ToolCallEvent,
   type ToolResultEvent,
@@ -41,24 +40,21 @@ import {
   type PresentedFileRef,
   type RawSessionEvent,
   type RetryEvent,
-  type StreamDelta,
 } from './events.ts';
 
-export type { QQBotSender } from './outbound-buffer.ts';
 export type { ToolsRegistryLike } from './tool-presenter.ts';
-export { parseStreamFrame } from './events.ts';
+
+/** QQ Bot 发送接口：只发静态 markdown（被动凭证由 reply-bot 补齐） */
+export interface QQBotSender {
+  sendMarkdown(target: ReplyTarget, content: string, opts?: { keyboard?: InlineKeyboard }): Promise<unknown>;
+}
 
 /** 出站处理器签名（注册到 ctx.on('session/event')） */
 export type OutboundHandler = (session: SessionLike, event: RawSessionEvent) => void;
 
-/** 出站事件入口集合：durable 事件 + 实时流式帧 */
+/** 出站事件入口（注册到 ctx.on('session/event')） */
 export interface OutboundHandlers {
-  /** durable session 事件入口（注册到 ctx.on('session/event')） */
   routeSessionEvent(session: SessionLike, event: RawSessionEvent): void;
-  /**
-   * 实时流式帧入口（注册到 ctx.on('agent/assistant-stream', ..., { global: true })）。
-   */
-  routeStreamFrame(agentId: string, delta: StreamDelta): void;
 }
 
 /** dsh Session 简化类型 */
@@ -79,10 +75,7 @@ const SILENT_TURN_ERROR_CODES = new Set(['STREAM_CLOSED']);
  * 出站路由器：持有会话级状态，按事件类型分发到处理器
  */
 class OutboundRouter {
-  private readonly buffers = new Map<string, OutboundBuffer>();
   private readonly toolCalls = new Map<string, ToolCallRecord>();
-  /** 每会话当前流式 attemptId：LLM 重试会发布新 attempt，用于 reset 与迟到帧过滤 */
-  private readonly streamAttempts = new Map<string, string>();
   /** 每会话本轮已声明的交付文件（deliverables/presented，轮末清空） */
   private readonly presentedFiles = new Map<string, PresentedFileRef[]>();
   /** 每会话已见过的 present callId（轮内去重，防事件重放导致重复投递） */
@@ -144,11 +137,8 @@ class OutboundRouter {
     if (record === undefined) return;
 
     switch (event.type) {
-      case 'assistant/chunk':
-        this.onChunk(session.header.id, record, event);
-        break;
       case 'assistant/message':
-        this.onMessage(session.header.id, record, event);
+        this.onMessage(record, event);
         break;
       case 'tool/call':
         this.onToolCall(event);
@@ -165,116 +155,17 @@ class OutboundRouter {
     }
   }
 
-  /** durable assistant/chunk 事件的流式增量（历史格式兼容保留，当前宿主不再生产该事件） */
-  private onChunk(sessionId: string, record: SessionRecord, event: ChunkEvent): void {
-    this.appendChunk(sessionId, record, event.text);
-  }
-
-  /**
-   * 实时流式帧入口（瞬态 agent/assistant-stream 事件）。
-   *
-   * attempt 语义：start 帧即新内容起点，无条件重置 buffer——清空旧 attempt 的
-   * 累积文本但保留流式会话（QQ 流式 update 是全量替换，用户看到同一条消息被
-   * 新内容重写）。不用 attemptId 对比判断"新 attempt"：agent replacement 后
-   * attempt 计数重启、attemptId 可能与旧 agent 重叠（官方按 frame revision 的
-   * gap 检测处理同一问题）。迟到帧（attemptId 不匹配）仍直接丢弃，防止旧
-   * attempt 的尾巴混进新内容。
-   */
-  public routeStreamFrame(agentId: string, delta: StreamDelta): void {
-    if (delta.kind === 'attempt-start') {
-      this.streamAttempts.set(agentId, delta.attemptId);
-      this.buffers.get(agentId)?.reset();
-      return;
-    }
-
-    // text-delta：首帧未见 start 时自愈记录，迟到帧丢弃
-    const current = this.streamAttempts.get(agentId);
-    if (current === undefined) {
-      this.streamAttempts.set(agentId, delta.attemptId);
-    } else if (current !== delta.attemptId) {
-      return;
-    }
-
-    const record = this.manager.findBySessionId(agentId);
-    if (record === undefined) return;
-    this.appendChunk(agentId, record, delta.text);
-  }
-
-  /** 获取或创建会话 buffer 并追加增量 */
-  private appendChunk(sessionId: string, record: SessionRecord, text: string): void {
-    let buffer = this.buffers.get(sessionId);
-    if (buffer === undefined) {
-      // 相对路径链接按这个会话的工作目录解析
-      const cwd = this.manager.directoryForAgent(record.agent);
-      // 流式只给 current；非当前会话走静态消息，来源头 / 回复链接在 sendNow 里加
-      buffer = new OutboundBuffer(
-        record,
-        this.bot,
-        this.config.textChunkLimit,
-        this.logger,
-        this.shouldStream(record),
-        (full) => rewriteLocalFileLinks(full, cwd),
-      );
-      this.buffers.set(sessionId, buffer);
-    }
-    buffer.append(text);
-  }
-
-  /** 是否启用流式：配置开启 + 当前会话（有没有被动凭证由 openStream 决定） */
-  private shouldStream(record: SessionRecord): boolean {
-    return this.config.streaming && this.manager.isCurrentSession(record.sessionId);
-  }
-
   /**
    * 完整 assistant 消息：按内容块顺序发送，图片留在它出现的位置。
-   *
-   * - 纯文本：沿用原路径（流式 flush / 静态 sendNow）；
-   * - 有图片：切成「文本段 / 图片组」依次入队，文本段各自成消息；
-   * - 流式消息是全量替换的单条消息，插图时先把流式内容截到第一张图之前收尾，
-   *   再补发图片与后续文本，保证用户看到的顺序与内容块一致。
+   * 文本段各自成消息，图片组交给图片转发器。
    */
-  private onMessage(sessionId: string, record: SessionRecord, event: MessageEvent): void {
+  private onMessage(record: SessionRecord, event: MessageEvent): void {
     // 正文里的 ![alt](本地图片) 是模型直接写的 markdown，QQ 不渲染，换成真图片消息
     const cwd = this.manager.directoryForAgent(record.agent);
     const segments = segmentMessageContent(event.content).flatMap((segment) =>
       segment.kind === 'text' ? splitMarkdownImages(segment.text, cwd) : [segment],
     );
-    const hasImages = segments.some((segment) => segment.kind !== 'text');
-    const buffer = this.buffers.get(sessionId);
-
-    if (buffer !== undefined && buffer.text.trim()) {
-      this.buffers.delete(sessionId);
-      if (!hasImages) {
-        const text = buffer.text;
-        if (buffer.isStreaming) {
-          this.trackText(sessionId, this.enqueue(sessionId, () => buffer.flush()));
-        } else {
-          // 非当前会话：buffer 只负责累积，发送交给 sendNow 统一加来源头 / 回复链接
-          buffer.cancel();
-          this.trackText(sessionId, this.enqueue(sessionId, () => this.sendNow(record, text, 'sendMarkdown')));
-        }
-        return;
-      }
-
-      const firstImage = segments.findIndex((segment) => segment.kind !== 'text');
-      const head = segments
-        .slice(0, firstImage)
-        .map((segment) => (segment.kind === 'text' ? segment.text : ''))
-        .join('\n')
-        .trim();
-      if (buffer.isStreaming && head !== '') {
-        this.trackText(sessionId, this.enqueue(sessionId, () => buffer.flushUpTo(head)));
-        this.queueSegments(sessionId, record, segments.slice(firstImage));
-        return;
-      }
-
-      buffer.cancel();
-      this.queueSegments(sessionId, record, segments);
-      return;
-    }
-
-    this.buffers.delete(sessionId);
-    this.queueSegments(sessionId, record, segments);
+    this.queueSegments(record.sessionId, record, segments);
   }
 
   /** 按顺序把片段排进发送链：文本段各发一条，图片组交给图片转发器 */
@@ -360,28 +251,10 @@ class OutboundRouter {
    * 外层轮次失败不撤销已完成的声明（宿主契约），故失败轮的文件仍投递。
    */
   private onTurnEnd(sessionId: string, record: SessionRecord, event: TurnEndEvent): void {
-    const buffer = this.buffers.get(sessionId);
-    // 文本 flush 可等待，保证回复先于交付文件到达用户
-    let flushTask: Promise<void> = Promise.resolve();
-    if (buffer !== undefined) {
-      const text = buffer.text;
-      if (text.trim()) {
-        if (buffer.isStreaming) {
-          flushTask = this.enqueue(sessionId, () => buffer.flush());
-        } else {
-          buffer.cancel();
-          flushTask = this.enqueue(sessionId, () => this.sendNow(record, text, 'sendMarkdown'));
-        }
-      } else {
-        buffer.cancel();
-      }
-      this.buffers.delete(sessionId);
-    }
-    this.streamAttempts.delete(sessionId);
     const files = this.presentedFiles.get(sessionId) ?? [];
     this.presentedFiles.delete(sessionId);
     this.presentedCalls.delete(sessionId);
-    // assistant/message 已在轮内先行发送的文本可能仍在途：与 turn/end 自身的 flush 一起等待
+    // assistant/message 已在轮内先行发送的文本可能仍在途：轮末等待其完成再投递文件
     const pending = this.pendingText.get(sessionId) ?? Promise.resolve();
     this.pendingText.delete(sessionId);
 
@@ -389,7 +262,7 @@ class OutboundRouter {
     const retries = this.retryCounts.get(sessionId)?.retry ?? 0;
     this.retryCounts.delete(sessionId);
     void this.enqueue(sessionId, async () => {
-      await Promise.all([flushTask, pending]);
+      await pending;
       if (failure !== undefined && !SILENT_TURN_ERROR_CODES.has(failure.code)) {
         await this.reportFailure(record, failure, retries);
       }
@@ -469,8 +342,7 @@ class OutboundRouter {
 /**
  * 创建出站事件处理器
  *
- * 返回 durable 事件与实时流式帧两个入口，分别注册到
- * ctx.on('session/event') 与 ctx.on('agent/assistant-stream', ..., { global: true })。
+ * 返回事件入口，注册到 ctx.on('session/event')。
  * toolsRegistry 用于工具结果的结构化展示；deliverer 用于轮末投递 present 声明的交付文件；
  * images 用于把 assistant/message 里的 image 块与正文引用的本地图片发成 QQ 图片。
  */
@@ -486,6 +358,5 @@ export function createOutboundHandler(
   const router = new OutboundRouter(manager, bot, config, logger, toolsRegistry, deliverer, images);
   return {
     routeSessionEvent: (session, event) => router.route(session, event),
-    routeStreamFrame: (agentId, delta) => router.routeStreamFrame(agentId, delta),
   };
 }

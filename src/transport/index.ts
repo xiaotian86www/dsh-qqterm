@@ -5,5 +5,5 @@
  */
 export { handleInbound } from './inbound.ts';
 export { createOutboundHandler } from './outbound.ts';
-export { OutboundBuffer, type QQBotSender } from './outbound-buffer.ts';
+export type { QQBotSender } from './outbound.ts';
 export { chunkMarkdownText } from './chunker.ts';

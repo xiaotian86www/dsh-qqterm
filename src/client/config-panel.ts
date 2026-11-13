@@ -24,7 +24,6 @@ interface AccessControlWire {
 
 /** GET 回显的生效配置（appSecret 已剔除） */
 type ConfigWire = {
-  streaming?: boolean;
   showToolResults?: boolean;
   access?: AccessControlWire;
 };
@@ -247,11 +246,6 @@ export function ConfigPanel(props: { bindPhase?: string } = {}): ReactElement {
     }),
 
     createElement('div', { className: 'qqterm-config-group-title' }, '基础设置'),
-    createElement(SwitchRow, {
-      label: '流式输出', checked: form.streaming ?? true,
-      help: '回复内容分段实时推送到聊天',
-      onChange: (v) => { patch('streaming', v); },
-    }),
     createElement(SwitchRow, {
       label: '显示工具调用结果', checked: form.showToolResults ?? false,
       help: '在聊天中展示工具调用结果，含失败',

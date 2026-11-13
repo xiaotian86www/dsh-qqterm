@@ -82,7 +82,7 @@ const DEFAULT_TTL_MS = 30 * 60 * 1000;
 const DEFAULT_LIMIT = 4;
 const DEFAULT_KEEP_PER_TARGET = 3;
 const DEFAULT_MAX_TARGETS = 200;
-/** 落盘合并窗口：最多每秒写一次，流式按片发送不会每片都全量读写 */
+/** 落盘合并窗口：最多每秒写一次，连续分片发送不会每片都全量读写 */
 const PERSIST_INTERVAL_MS = 1000;
 
 /** 默认落盘路径 */

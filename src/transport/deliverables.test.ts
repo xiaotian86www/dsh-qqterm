@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DeliverablesDeliverer } from './deliverables.ts';
 import type { MediaSenderLike } from '../media/send-media.ts';
-import type { QQBotSender } from './outbound-buffer.ts';
+import type { QQBotSender } from './outbound.ts';
 import type { SessionRecord } from '../session/index.ts';
 import type { QQTermConfig } from '../config.ts';
 import type { Logger } from '../types.ts';
@@ -12,7 +12,7 @@ import type { Logger } from '../types.ts';
 const logger: Logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 
 function createSender(): QQBotSender {
-  return { sendMarkdown: vi.fn().mockResolvedValue(undefined), openStream: vi.fn() };
+  return { sendMarkdown: vi.fn().mockResolvedValue(undefined) };
 }
 
 function createMediaBot(): MediaSenderLike {

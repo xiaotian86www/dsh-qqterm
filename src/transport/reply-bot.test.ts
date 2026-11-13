@@ -30,10 +30,6 @@ function makeBot(): { bot: QQBot; calls: Call[] } {
     sendVoice: record('sendVoice'),
     sendFile: record('sendFile'),
     sendMedia: record('sendMedia'),
-    openStream: (...args: unknown[]) => {
-      calls.push({ method: 'openStream', args });
-      return { update: async () => {}, complete: async () => {} };
-    },
   };
   return { bot: raw as unknown as QQBot, calls };
 }
@@ -145,25 +141,6 @@ describe('createReplyAwareBot', () => {
     expect(targets.slice(0, 4).every((t) => t.msgId === 'm1')).toBe(true);
     expect(targets[4]!.msgId).toBeUndefined();
     expect(targets[4]!.targetId).toBe('u1');
-  });
-
-  it('openStream 解析出 msgId 后再交给 SDK', async () => {
-    const { bot, calls } = makeBot();
-    const store = makeStore();
-    createReplyAwareBot(bot, store);
-    store.recordMessage('c2c', 'u1', 'm1');
-
-    bot.openStream({ target });
-    expect(calls[0]!.method).toBe('openStream');
-    expect((calls[0]!.args[0] as { target: ReplyTarget }).target.msgId).toBe('m1');
-  });
-
-  it('没有被动凭证时 openStream 返回 undefined，不交给 SDK', () => {
-    const { bot, calls } = makeBot();
-    createReplyAwareBot(bot, makeStore());
-
-    expect(bot.openStream({ target })).toBeUndefined();
-    expect(calls).toHaveLength(0);
   });
 
   it('发送失败原样抛给上层，不做自动重试', async () => {

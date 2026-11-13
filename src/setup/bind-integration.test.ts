@@ -132,9 +132,9 @@ describe('绑定链路 × 真实 persist 落盘（#53 回归）', () => {
 
       // 2. 配置保存（默认处理器 → updateProfileConfig 真写盘）
       const configRes = fakeRes();
-      await invoke(routes.get(BIND_CONFIG_PATH), fakeReq('POST', '{"streaming":false}'), configRes);
+      await invoke(routes.get(BIND_CONFIG_PATH), fakeReq('POST', '{"showToolResults":false}'), configRes);
       expect(configRes.statusCode).toBe(200);
-      expect(readFileSync(patchPath, 'utf8')).toContain('streaming: false');
+      expect(readFileSync(patchPath, 'utf8')).toContain('showToolResults: false');
       expect(readFileSync(patchPath, 'utf8')).toContain('appId: test-app');
       expectSharedPreserved(patchPath);
 
@@ -178,7 +178,6 @@ describe('绑定链路 × 真实 persist 落盘（#53 回归）', () => {
     const routes = registerRealRoutes(() => null);
     const res = fakeRes();
     await invoke(routes.get(BIND_CONFIG_PATH), fakeReq('POST', JSON.stringify({
-      streaming: false,
       showToolResults: true,
       access: { owner: 'u1' },
     })), res);
@@ -186,7 +185,7 @@ describe('绑定链路 × 真实 persist 落盘（#53 回归）', () => {
     expect(res.statusCode).toBe(200);
     const after = readFileSync(patchPath, 'utf8');
     for (const expected of [
-      'streaming: false', 'showToolResults: true',
+      'showToolResults: true',
       'owner: u1',
     ]) {
       expect(after).toContain(expected);
@@ -197,11 +196,11 @@ describe('绑定链路 × 真实 persist 落盘（#53 回归）', () => {
   it.each([
     ['非法 JSON body', 'not-json{'],
     ['非对象 body', '"string"'],
-    ['凭据字段', '{"appId":"hack","streaming":false}'],
+    ['凭据字段', '{"appId":"hack","showToolResults":false}'],
     ['只读 cwd 字段', '{"cwd":"/tmp"}'],
     ['未知字段', '{"timeoutMs":100}'],
     ['已移除的模型字段', '{"provider":"pi-ai","model":"deepseek-chat"}'],
-    ['类型错误（streaming 传字符串）', '{"streaming":"yes"}'],
+    ['类型错误（showToolResults 传字符串）', '{"showToolResults":"yes"}'],
   ])('配置保存拒绝：%s → 400 且文件不变', async (_name, body) => {
     dir = mkdtempSync(join(tmpdir(), 'qqterm-bind-rej-'));
     patchPath = join(dir, 'cordis.patch.yml');
@@ -222,7 +221,7 @@ describe('绑定链路 × 真实 persist 落盘（#53 回归）', () => {
     profileDirState.dir = undefined;
     const routes = registerRealRoutes(() => null);
     const res = fakeRes();
-    await invoke(routes.get(BIND_CONFIG_PATH), fakeReq('POST', '{"streaming":false}'), res);
+    await invoke(routes.get(BIND_CONFIG_PATH), fakeReq('POST', '{"showToolResults":false}'), res);
     expect(res.statusCode).toBe(500);
     dir = mkdtempSync(join(tmpdir(), 'qqterm-bind-nodir-')); // 供 afterEach 清理
   });
@@ -235,7 +234,7 @@ describe('绑定链路 × 真实 persist 落盘（#53 回归）', () => {
 
     const routes = registerRealRoutes(() => null);
     const first = fakeRes();
-    await invoke(routes.get(BIND_CONFIG_PATH), fakeReq('POST', '{"streaming":false}'), first);
+    await invoke(routes.get(BIND_CONFIG_PATH), fakeReq('POST', '{"showToolResults":false}'), first);
     expect(first.statusCode).toBe(200);
 
     // 拉开 mtime 后重放同值提交
@@ -244,7 +243,7 @@ describe('绑定链路 × 真实 persist 落盘（#53 回归）', () => {
     utimesSync(patchPath, past, past);
 
     const second = fakeRes();
-    await invoke(routes.get(BIND_CONFIG_PATH), fakeReq('POST', '{"streaming":false}'), second);
+    await invoke(routes.get(BIND_CONFIG_PATH), fakeReq('POST', '{"showToolResults":false}'), second);
     expect(second.statusCode).toBe(200);
     expect(statSync(patchPath).mtimeMs).toBe(past.getTime()); // 无变化 → 无写 → mtime 不动
   });

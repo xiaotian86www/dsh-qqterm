@@ -261,7 +261,7 @@ describe('bind-routes', () => {
       '  config:',
       '    appId: "102120114"',
       '    appSecret: "s3cr3t"',
-      '    streaming: false',
+      '    debug: false',
       '',
     ].join('\n'), 'utf8');
     profileDirState.dir = dir;
@@ -285,7 +285,7 @@ describe('bind-routes', () => {
       const content = readFileSync(patchPath, 'utf8');
       expect(content).not.toContain('appId');
       expect(content).not.toContain('appSecret');
-      expect(content).toContain('streaming: false');
+      expect(content).toContain('debug: false');
     } finally {
       profileDirState.dir = undefined;
       if (savedAppId === undefined) delete process.env.QQBOT_APPID;
@@ -303,7 +303,7 @@ describe('bind-routes', () => {
     writeFileSync(patchPath, [
       '- id: qqterm',
       '  config:',
-      '    streaming: false',
+      '    debug: false',
       '',
     ].join('\n'), 'utf8');
     profileDirState.dir = dir;
@@ -332,12 +332,12 @@ describe('bind-routes', () => {
 
   it('GET config：回显生效配置且剔除 appSecret', async () => {
     const { routes } = createHarness({
-      currentConfig: () => ({ appId: '102120114', appSecret: 'SECRET', streaming: true, cwd: '/tmp/w' }),
+      currentConfig: () => ({ appId: '102120114', appSecret: 'SECRET', debug: true, cwd: '/tmp/w' }),
     });
     const res = fakeRes();
     await invoke(routes.get(BIND_CONFIG_PATH), fakeReq('GET', { host: '127.0.0.1:3080' }), res);
     expect(res.statusCode).toBe(200);
-    expect(json(res)).toEqual({ config: { appId: '102120114', streaming: true, cwd: '/tmp/w' } });
+    expect(json(res)).toEqual({ config: { appId: '102120114', debug: true, cwd: '/tmp/w' } });
   });
 
   it('POST config：owner 合法值通过并触发合并写入', async () => {
@@ -346,7 +346,7 @@ describe('bind-routes', () => {
     await invoke(
       routes.get(BIND_CONFIG_PATH),
       fakeReq('POST', { host: '127.0.0.1:3080', 'content-type': 'application/json' },
-        '{"streaming":false,"access":{"owner":"u1"}}'),
+        '{"showToolResults":false,"access":{"owner":"u1"}}'),
       res,
     );
     expect(res.statusCode).toBe(200);
@@ -393,7 +393,7 @@ describe('bind-routes', () => {
     const res = fakeRes();
     await invoke(
       routes.get(BIND_CONFIG_PATH),
-      fakeReq('POST', { host: '127.0.0.1:3080' }, '{"streaming":"yes"}'),
+      fakeReq('POST', { host: '127.0.0.1:3080' }, '{"showToolResults":"yes"}'),
       res,
     );
     expect(res.statusCode).toBe(400);

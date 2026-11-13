@@ -40,7 +40,7 @@ export function stopCommand({ manager }: CommandDeps): SlashCommand {
       }
 
       // cancel 会让当前轮以 turn/end (kind=interrupted) 收尾，
-      // 出站侧据此 flush 已生成的文本并关闭流式会话。
+      // 出站侧据此收尾本轮并投递已生成内容。
       record.agent.cancel({ kind: 'user' });
       return '⛔ 已中止';
     },

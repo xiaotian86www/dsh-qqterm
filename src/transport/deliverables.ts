@@ -12,7 +12,7 @@ import type { Logger } from '../types.ts';
 import { resolveAgentCwd, sendMediaFile, type MediaSenderLike } from '../media/send-media.ts';
 import type { PresentedFileRef } from './events.ts';
 import { chunkMarkdownText } from './chunker.ts';
-import type { QQBotSender } from './outbound-buffer.ts';
+import type { QQBotSender } from './outbound.ts';
 
 /** 交付物投递器（outbound 路由只依赖此接口，便于测试注入） */
 export interface DeliverablesDelivererLike {
