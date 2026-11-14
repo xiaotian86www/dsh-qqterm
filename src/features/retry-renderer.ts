@@ -99,7 +99,7 @@ export function formatRetryOffer(failure: TurnFailureInfo, retries: number, with
  * button_data 编码 `{"t":"retry","s":<会话id>,"d":<resend|discard>}`：`s` 让多会话
  * 场景下的按钮找回自己的会话，不依赖 current。
  */
-export function buildRetryKeyboard(sessionId?: string): InlineKeyboard {
+export function buildRetryKeyboard(sessionId: string): InlineKeyboard {
   const rows: KeyboardRows = [
     {
       buttons: [
@@ -112,7 +112,7 @@ export function buildRetryKeyboard(sessionId?: string): InlineKeyboard {
             click_limit: 1,
             data: encodeButtonData({
               t: 'retry',
-              ...(sessionId !== undefined ? { s: sessionId } : {}),
+              s: sessionId,
               d: 'resend',
             }),
           },
@@ -126,7 +126,7 @@ export function buildRetryKeyboard(sessionId?: string): InlineKeyboard {
             click_limit: 1,
             data: encodeButtonData({
               t: 'retry',
-              ...(sessionId !== undefined ? { s: sessionId } : {}),
+              s: sessionId,
               d: 'discard',
             }),
           },

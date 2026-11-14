@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createHostAdapter, _resetAdapterCache } from './adapter.ts';
+import { createHostAdapter } from './adapter.ts';
 
 /** 最小 ctx：服务直接挂在 ctx 上（宿主已通过 inject 保证存在） */
 function makeCtx(services: Record<string, unknown> = {}) {
@@ -8,7 +8,6 @@ function makeCtx(services: Record<string, unknown> = {}) {
 
 describe('host adapter', () => {
   beforeEach(() => {
-    _resetAdapterCache();
     vi.unstubAllGlobals();
   });
 
@@ -16,11 +15,6 @@ describe('host adapter', () => {
     const adapter = createHostAdapter(makeCtx());
     const events = [{ type: 'a', seq: 0 }];
     expect(adapter.sessionEvents({ snapshotEvents: () => events })).toBe(events);
-  });
-
-  it('buildForkSeed：模块不可解析时返回 undefined（不抛）', async () => {
-    const adapter = createHostAdapter(makeCtx());
-    expect(await adapter.buildForkSeed([{ seq: 0 }], 0)).toBeUndefined();
   });
 
   it('sessionHeader：取 stat().header（agentPreset 在 header 顶层）', async () => {
@@ -312,37 +306,6 @@ describe('attachSessionToWorkspace', () => {
     expect(logger.warn).not.toHaveBeenCalled();
   });
 
-  it('旧的硬编码标题 QQBot 就地迁移成目录名', async () => {
-    const ws = {
-      path: 'D:\\thirdparty\\dsh-qqterm',
-      title: 'QQBot',
-      attachSession: vi.fn().mockResolvedValue(undefined),
-      setTitle: vi.fn().mockResolvedValue(undefined),
-    };
-    const registry = { create: vi.fn().mockResolvedValue(ws) };
-    const adapter = createHostAdapter(makeCtx({ workspaceRegistry: registry }));
-
-    await adapter.attachSessionToWorkspace('sess-1', 'D:\\thirdparty\\dsh-qqterm');
-
-    expect(ws.setTitle).toHaveBeenCalledWith('dsh-qqterm');
-    expect(ws.attachSession).toHaveBeenCalledWith('sess-1');
-  });
-
-  it('用户自己改过的工作区标题不动', async () => {
-    const ws = {
-      path: 'D:\\thirdparty\\dsh-qqterm',
-      title: '我的项目',
-      attachSession: vi.fn().mockResolvedValue(undefined),
-      setTitle: vi.fn().mockResolvedValue(undefined),
-    };
-    const registry = { create: vi.fn().mockResolvedValue(ws) };
-    const adapter = createHostAdapter(makeCtx({ workspaceRegistry: registry }));
-
-    await adapter.attachSessionToWorkspace('sess-1', 'D:\\thirdparty\\dsh-qqterm');
-
-    expect(ws.setTitle).not.toHaveBeenCalled();
-  });
-
   it('registry 无 create() 时 warn 并跳过', async () => {
     const logger = makeLogger();
     const adapter = createHostAdapter(makeCtx({ workspaceRegistry: {} }), logger);
@@ -385,10 +348,6 @@ describe('workingDirectory（已写进 inject）', () => {
   function ctxWith(working: unknown) {
     return makeCtx({ workingDirectory: working });
   }
-
-  beforeEach(() => {
-    _resetAdapterCache();
-  });
 
   it('defaultWorkspacePath 回退到 workingDirectory.defaultDirectory', () => {
     const adapter = createHostAdapter(ctxWith({ defaultDirectory: 'D:\\ws' }));

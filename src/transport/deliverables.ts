@@ -5,11 +5,11 @@
  * （不复制内容），读取发生在投递时刻；外层轮次失败不撤销已完成的声明。
  * 每个文件独立投递，失败降级为文字提示，不阻断其余文件。
  */
-import { basename, isAbsolute, resolve } from 'node:path';
+import { basename } from 'node:path';
 import type { QQTermConfig } from '../config.ts';
 import type { SessionRecord } from '../session/index.ts';
 import type { Logger } from '../types.ts';
-import { resolveAgentCwd, sendMediaFile, type MediaSenderLike } from '../media/send-media.ts';
+import { sendMediaFile, type MediaSenderLike } from '../media/send-media.ts';
 import type { PresentedFileRef } from './events.ts';
 import { chunkMarkdownText } from './chunker.ts';
 import type { QQBotSender } from './outbound.ts';
@@ -24,7 +24,6 @@ export class DeliverablesDeliverer implements DeliverablesDelivererLike {
   private readonly mediaBot: MediaSenderLike;
   private readonly config: QQTermConfig;
   private readonly logger: Logger;
-  private readonly dirOf?: (record: SessionRecord) => string | undefined;
   /**
    * 非当前会话的文字提示装饰（来源头 + 尾部动作）；文件本身无法带标记。
    */
@@ -35,34 +34,28 @@ export class DeliverablesDeliverer implements DeliverablesDelivererLike {
     mediaBot: MediaSenderLike,
     config: QQTermConfig,
     logger: Logger,
-    dirOf?: (record: SessionRecord) => string | undefined,
     decorateOf?: (record: SessionRecord, text: string) => string,
   ) {
     this.sender = sender;
     this.mediaBot = mediaBot;
     this.config = config;
     this.logger = logger;
-    this.dirOf = dirOf;
     this.decorateOf = decorateOf;
   }
 
   /** 轮末投递一批声明文件：逐个发送，未送达的聚合为一条文字提示 */
   public async deliver(record: SessionRecord, files: PresentedFileRef[]): Promise<void> {
     const limit = Math.max(1, this.config.sendFile.maxFiles);
-    // 会话目录优先（工作区跟着会话走）；拿不到才退回插件兜底目录
-    const cwd = this.dirOf?.(record) ?? resolveAgentCwd(undefined);
     const missed: string[] = [];
     let sent = 0;
 
     for (const [index, file] of files.entries()) {
-      // 新声明记录绝对路径；历史相对路径按 agent 工作目录（workspace）兜底解析
-      const absPath = isAbsolute(file.path) ? file.path : resolve(cwd, file.path);
-      const display = basename(absPath);
+      const display = basename(file.path);
       if (index >= limit) {
         missed.push(`${display}（超出单轮投递上限，未发送）`);
         continue;
       }
-      const result = await sendMediaFile(this.mediaBot, record.replyTarget, absPath);
+      const result = await sendMediaFile(this.mediaBot, record.replyTarget, file.path);
       if (result.outcome === 'sent') {
         sent++;
         this.logger.info(

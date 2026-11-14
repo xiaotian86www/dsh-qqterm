@@ -45,7 +45,7 @@ describe('DeliverablesDeliverer', () => {
 
     const mediaBot = createMediaBot();
     const sender = createSender();
-    const deliverer = new DeliverablesDeliverer(sender, mediaBot, createConfig(), logger, () => dir);
+    const deliverer = new DeliverablesDeliverer(sender, mediaBot, createConfig(), logger);
 
     await deliverer.deliver(createRecord(), [{ path: png }, { path: md, description: '文档' }]);
 
@@ -61,7 +61,7 @@ describe('DeliverablesDeliverer', () => {
 
     const mediaBot = createMediaBot();
     const sender = createSender();
-    const deliverer = new DeliverablesDeliverer(sender, mediaBot, createConfig(), logger, () => dir);
+    const deliverer = new DeliverablesDeliverer(sender, mediaBot, createConfig(), logger);
 
     await deliverer.deliver(createRecord(), [{ path: ok }, { path: join(dir, 'gone.txt') }]);
 
@@ -79,7 +79,7 @@ describe('DeliverablesDeliverer', () => {
 
     const mediaBot = createMediaBot();
     const sender = createSender();
-    const deliverer = new DeliverablesDeliverer(sender, mediaBot, createConfig(), logger, () => dir);
+    const deliverer = new DeliverablesDeliverer(sender, mediaBot, createConfig(), logger);
 
     await deliverer.deliver(createRecord(), [{ path: outside }]);
 
@@ -98,7 +98,7 @@ describe('DeliverablesDeliverer', () => {
     const sender = createSender();
     const config = createConfig();
     (config as { sendFile: { maxFiles: number } }).sendFile.maxFiles = 2;
-    const deliverer = new DeliverablesDeliverer(sender, mediaBot, config, logger, () => dir);
+    const deliverer = new DeliverablesDeliverer(sender, mediaBot, config, logger);
 
     await deliverer.deliver(createRecord(), files);
 
@@ -117,7 +117,6 @@ describe('DeliverablesDeliverer', () => {
       mediaBot,
       createConfig(),
       logger,
-      () => dir,
       (_record, text) => `HEAD\n\n${text}`,
     );
 

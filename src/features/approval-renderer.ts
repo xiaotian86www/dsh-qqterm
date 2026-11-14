@@ -56,12 +56,12 @@ export function buildApprovalText(
  * 无 allow-always，因此只提供两个按钮。
  * nonce 与 pending 匹配，旧卡片/其它会话卡片点击不 settle（#94-3）。
  */
-export function buildApprovalKeyboard(nonce?: string, sessionId?: string): InlineKeyboard {
+export function buildApprovalKeyboard(nonce: string, sessionId: string): InlineKeyboard {
   const payload = (decision: 'allow' | 'deny'): string => encodeButtonData({
     t: 'approval',
-    ...(sessionId !== undefined ? { s: sessionId } : {}),
+    s: sessionId,
     d: decision,
-    ...(nonce !== undefined ? { n: nonce } : {}),
+    n: nonce,
   });
   const allow = {
     id: 'approval-allow',

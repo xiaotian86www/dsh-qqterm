@@ -3,7 +3,6 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  collectImageBlocks,
   OutboundImages,
   segmentMessageContent,
   splitMarkdownImages,
@@ -21,21 +20,7 @@ function createRecord(): SessionRecord {
 
 const ref = { attachmentId: 'a1', mediaType: 'image/png' };
 
-describe('collectImageBlocks', () => {
-  it('只取 image 块并去掉重复引用', () => {
-    const blocks = [
-      { type: 'text', text: 'hi' },
-      { type: 'image', attachment: { attachmentId: 'a1', mediaType: 'image/png', width: 10, height: 20 } },
-      { type: 'image', attachment: { attachmentId: 'a1', mediaType: 'image/png' } },
-      { type: 'image', attachment: { attachmentId: 'a2', mediaType: 'image/jpeg', name: 'x.jpg' } },
-    ];
-
-    expect(collectImageBlocks(blocks)).toEqual([
-      { attachmentId: 'a1', mediaType: 'image/png', width: 10, height: 20 },
-      { attachmentId: 'a2', mediaType: 'image/jpeg', name: 'x.jpg' },
-    ]);
-  });
-
+describe('segmentMessageContent', () => {
   it('跳过 offloaded 与引用不完整的块', () => {
     const blocks = [
       { type: 'image', offloaded: true, attachment: { attachmentId: 'a1', mediaType: 'image/png' } },
@@ -44,11 +29,9 @@ describe('collectImageBlocks', () => {
       { type: 'image', attachment: { attachmentId: '', mediaType: 'image/png' } },
     ];
 
-    expect(collectImageBlocks(blocks)).toEqual([]);
+    expect(segmentMessageContent(blocks)).toEqual([]);
   });
-});
 
-describe('segmentMessageContent', () => {
   it('按内容块顺序保留图片位置，相邻图片归一组', () => {
     const blocks = [
       { type: 'text', text: '第一段' },

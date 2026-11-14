@@ -23,7 +23,7 @@ import { SettingsReader } from './settings-reader.ts';
 
 /** ctx.llm 服务的最小接口（listProviders 同步，listModels / resolveModelInfo 异步） */
 interface LlmServiceLike {
-  listProviders(): Array<{ id: string; name: string }> | string[];
+  listProviders(): readonly { id: string; name: string }[];
   listModels(providerId: string): Promise<readonly { id: string; name?: string }[]>;
   /**
    * 精确模型元数据（catalog 只是 advisory）。
@@ -184,7 +184,7 @@ export class ModelResolver {
     const providers = llm.listProviders();
     const entries: ModelEntry[] = [];
     for (const provider of providers) {
-      const providerId = typeof provider === 'string' ? provider : provider.id;
+      const providerId = provider.id;
       try {
         const models = await llm.listModels(providerId);
         for (const model of models) {
@@ -210,7 +210,7 @@ export class ModelResolver {
   async hasModel(provider: string, model: string): Promise<boolean> {
     const llm = this.llm;
     const providers = llm.listProviders();
-    const known = providers.some((entry) => (typeof entry === 'string' ? entry : entry.id) === provider);
+    const known = providers.some((entry) => entry.id === provider);
     if (!known) return false;
     const models = await llm.listModels(provider);
     return models.some((entry) => entry.id === model);
@@ -220,11 +220,7 @@ export class ModelResolver {
    * 列出可用 provider 名称
    */
   listProviders(): string[] {
-    const providers = this.llm.listProviders();
-    const first = providers[0];
-    if (first === undefined) return [];
-    if (typeof first === 'string') return providers as string[];
-    return (providers as Array<{ id: string; name: string }>).map((p) => p.id);
+    return this.llm.listProviders().map((provider) => provider.id);
   }
 
   // ── 私有方法 ──

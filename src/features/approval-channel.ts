@@ -45,9 +45,8 @@ export interface ApprovalRequest {
 // ── 依赖接口（结构化，便于单测） ──
 
 export interface ApprovalSessionRecordLike {
-  sessionKey: string;
-  /** 宿主的 session id；缺省时退回 sessionKey（单测/旧记录兼容） */
-  sessionId?: string;
+  /** 宿主会话 id，按钮 data 与 pending 的键 */
+  sessionId: string;
   /** 该会话属于哪个 QQ 用户（按钮点击者校验用） */
   peerId?: string;
   scope: ChatScope;
@@ -95,11 +94,6 @@ interface PendingApproval {
 }
 
 const COMMAND_CLIP = 500;
-
-/** 记录所属的会话 id（优先宿主 sessionId，旧记录退回 chatKey） */
-function sessionIdOf(record: ApprovalSessionRecordLike): string {
-  return record.sessionId ?? record.sessionKey;
-}
 
 /**
  * 从 session log 按 callId 找回被 gate 的命令（审批请求本身不重复携带 arguments）。
@@ -192,15 +186,9 @@ export class ApprovalChannel {
     const button = decodeButtonData(data);
     if (!button || button.t !== 'approval') return false;
 
-    // 新按钮带 sessionId；旧卡片没有 s 时退回 current，兼容升级前发出的卡片
     const sessionId = button.s;
-    let entry: PendingApproval | undefined;
-    if (sessionId !== undefined) {
-      entry = this.pending.get(sessionId);
-    } else {
-      const record = this.manager.getSessionRecord('c2c', peerId);
-      entry = record ? this.pending.get(sessionIdOf(record)) : undefined;
-    }
+    if (!sessionId) return false;
+    const entry = this.pending.get(sessionId);
     if (!entry) return false;
 
     // 按钮属于哪个会话，就只能由那个会话的 QQ 用户点
@@ -208,7 +196,7 @@ export class ApprovalChannel {
 
     // nonce 必须匹配 pending：旧卡片/其它会话的卡片点击不 settle（#94-3）
     if (button.n !== entry.nonce) {
-      this.logger.warn(`qqterm: approval button nonce mismatch: sessionId=${sessionIdOf(entry.record)}`);
+      this.logger.warn(`qqterm: approval button nonce mismatch: sessionId=${entry.record.sessionId}`);
       return false;
     }
 
@@ -216,11 +204,11 @@ export class ApprovalChannel {
     const clicker = event.user_openid;
     const owner = this.config.access.owner.trim();
     if (owner === '' || clicker !== owner) {
-      this.logger.warn(`qqterm: approval button rejected (clicker not owner): user=${clicker ?? '(missing)'} sessionId=${sessionIdOf(entry.record)}`);
+      this.logger.warn(`qqterm: approval button rejected (clicker not owner): user=${clicker ?? '(missing)'} sessionId=${entry.record.sessionId}`);
       return false;
     }
 
-    this.pending.delete(sessionIdOf(entry.record));
+    this.pending.delete(entry.record.sessionId);
     this.removeAbort(entry);
     entry.resolve(button.d === 'allow' ? 'allowed-once' : 'rejected');
     return true;
@@ -232,7 +220,7 @@ export class ApprovalChannel {
     request: ApprovalRequest,
     delegate: () => Promise<ApprovalOutcome>,
   ): Promise<ApprovalOutcome> {
-    const sessionId = sessionIdOf(record);
+    const sessionId = record.sessionId;
     // 会话回收/取消可能在发送前发生：signal 已 abort 则直接失败
     if (request.signal?.aborted) return 'cancelled';
 

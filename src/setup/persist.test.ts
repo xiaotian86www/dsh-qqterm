@@ -64,16 +64,14 @@ describe('persistCredentialsToProfile', () => {
     expect(entryIds(after)).toEqual(['insert', 'ui-settings', 'qqterm', 'llm-deepseek']);
   });
 
-  it('userOpenid 覆盖为唯一 owner（旧扫码者与旧模式键不残留），保留其他配置', () => {
+  it('userOpenid 覆盖为唯一 owner，保留其他配置', () => {
     writeFileSync(patchPath, [
       '- id: qqterm',
       '  config:',
       '    appId: old-app',
       '    debug: false',
       '    access:',
-      '      c2cMode: open',
-      '      c2cAllow:',
-      '        - old-owner',
+      '      owner: old-owner',
     ].join('\n'), 'utf8');
 
     expect(persistCredentialsToProfile({ ...credentials, userOpenid: 'qr-user' }, dir, log)).toBe(true);
@@ -82,8 +80,6 @@ describe('persistCredentialsToProfile', () => {
     expect(after).toContain('owner: qr-user');
     expect(after).toContain('debug: false');
     expect(after).not.toContain('old-owner');
-    expect(after).not.toContain('c2cMode');
-    expect(after).not.toContain('c2cAllow');
   });
 
   it('userOpenid 相同时幂等（不重复）', () => {
@@ -91,14 +87,13 @@ describe('persistCredentialsToProfile', () => {
       '- id: qqterm',
       '  config:',
       '    access:',
-      '      c2cAllow: [qr-user]',
+      '      owner: qr-user',
     ].join('\n'), 'utf8');
 
     expect(persistCredentialsToProfile({ ...credentials, userOpenid: 'qr-user' }, dir, log)).toBe(true);
 
     const after = readFileSync(patchPath, 'utf8');
     expect((after.match(/qr-user/g) ?? []).length).toBe(1);
-    expect(after).not.toContain('c2cAllow');
   });
 
   it('无 access 配置时新建（仅扫码者）', () => {
@@ -106,8 +101,6 @@ describe('persistCredentialsToProfile', () => {
 
     const after = readFileSync(patchPath, 'utf8');
     expect(after).toContain('owner: qr-user');
-    expect(after).not.toContain('c2cMode');
-    expect(after).not.toContain('c2cAllow');
   });
 
   it('文件不存在时安全重建（新条目）', () => {

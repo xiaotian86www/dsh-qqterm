@@ -129,13 +129,11 @@ export async function bootstrapGateway(
   );
 
   // 交付物投递：present 声明的文件在轮末发送到当前会话（outbound 路由触发）
-  // 相对路径以「该会话当前的工作目录」为基准：工作区跟着会话走，不能再读固定配置。
   const deliverablesDeliverer = new DeliverablesDeliverer(
     sender,
     mediaSender,
     config,
     logger,
-    (record) => manager.directoryForAgent(record.agent),
     // 非当前会话：来源头 + 尾部链接行（回复 / 恢复），与普通消息同一套装饰
     (record, text) => (manager.isCurrentSession(record.sessionId)
       ? text
@@ -193,20 +191,14 @@ export async function bootstrapGateway(
   });
 
   // 掉线可观测：willReconnect=false 表示不会再重连（随后 bot.start() 的 Promise 会失败）。
-  // disconnected 事件为 SDK 1.0.5+ 新增：旧版 handlers 表缺该键，bot.on 会抛
-  // TypeError（profiles 增量安装可能残留旧版 SDK）——降级为跳过监听而非崩溃
-  try {
-    bot.on('disconnected', (event: GatewayDisconnect) => {
-      const detail = `code=${event.code}${event.reason ? ` reason=${event.reason}` : ''}`;
-      if (event.willReconnect) {
-        logger.warn(`Bot disconnected (${detail}), reconnecting...`);
-      } else {
-        logger.error(`Bot disconnected permanently (${detail}), giving up`);
-      }
-    });
-  } catch (err) {
-    logger.warn(`qqbot-nodejs SDK 不支持 disconnected 事件（请升级 @tencent-connect/qqbot-nodejs 至 1.0.5+）: ${err instanceof Error ? err.message : String(err)}`);
-  }
+  bot.on('disconnected', (event: GatewayDisconnect) => {
+    const detail = `code=${event.code}${event.reason ? ` reason=${event.reason}` : ''}`;
+    if (event.willReconnect) {
+      logger.warn(`Bot disconnected (${detail}), reconnecting...`);
+    } else {
+      logger.error(`Bot disconnected permanently (${detail}), giving up`);
+    }
+  });
 
   onGatewayConnected(bot, (event) => {
     console.log(`[qqterm] Bot ${event}! appId=${config.appId}`);

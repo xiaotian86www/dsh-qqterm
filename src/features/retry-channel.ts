@@ -18,9 +18,7 @@ import { decodeButtonData } from './button-utils.ts';
 // ── 依赖接口（结构化，便于单测） ──
 
 export interface RetrySessionRecordLike {
-  sessionKey: string;
-  /** 宿主的 session id；缺省时退回 sessionKey（旧记录 / 单测兼容） */
-  sessionId?: string;
+  sessionId: string;
   /** 该会话属于哪个 QQ 用户（按钮点击者校验用） */
   peerId?: string;
   scope: ChatScope;
@@ -49,11 +47,6 @@ export interface RetryChannelConfigLike {
 interface PendingRetry {
   record: RetrySessionRecordLike;
   timer?: ReturnType<typeof setTimeout>;
-}
-
-/** 记录所属的会话 id（优先宿主 sessionId） */
-function sessionIdOf(record: RetrySessionRecordLike): string {
-  return record.sessionId ?? record.sessionKey;
 }
 
 export class RetryChannel {
@@ -96,7 +89,7 @@ export class RetryChannel {
     const prompt = record.lastPrompt;
     if (prompt === undefined || prompt.trim() === '') return false;
 
-    const sessionId = sessionIdOf(record);
+    const sessionId = record.sessionId;
     // 上一张卡还挂着：直接作废，避免两张卡都能点
     this.cancelPending(sessionId);
 

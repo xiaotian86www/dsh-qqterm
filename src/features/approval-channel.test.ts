@@ -37,7 +37,7 @@ function makeConfig(owner = 'peer-qq'): ApprovalChannelConfigLike {
 }
 
 function makeRecord(key: string, scope: ChatScope = 'c2c'): ApprovalSessionRecordLike {
-  return { sessionKey: key, scope, replyTarget: { scope, targetId: 'x' } };
+  return { sessionId: key, scope, replyTarget: { scope, targetId: 'x' } };
 }
 
 function createManager(opts?: {
@@ -120,17 +120,17 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 
 describe('buildApprovalKeyboard', () => {
   it('builds two mutually-exclusive buttons with type-tagged data', () => {
-    const kb = buildApprovalKeyboard();
+    const kb = buildApprovalKeyboard('nonce-1', 'sess-qq');
     const buttons = kb.content.rows[0]?.buttons ?? [];
     expect(buttons).toHaveLength(2);
 
     const allow = buttons[0]!;
     expect(allow.action.type).toBe(1);
     expect(allow.action.click_limit).toBe(1);
-    expect(JSON.parse(allow.action.data)).toEqual({ t: 'approval', d: 'allow' });
+    expect(JSON.parse(allow.action.data)).toEqual({ t: 'approval', s: 'sess-qq', d: 'allow', n: 'nonce-1' });
 
     const deny = buttons[1]!;
-    expect(JSON.parse(deny.action.data)).toEqual({ t: 'approval', d: 'deny' });
+    expect(JSON.parse(deny.action.data)).toEqual({ t: 'approval', s: 'sess-qq', d: 'deny', n: 'nonce-1' });
   });
 });
 

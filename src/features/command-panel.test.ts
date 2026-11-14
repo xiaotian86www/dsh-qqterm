@@ -3,6 +3,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import type { SlashCommand } from '../commands/types.ts';
+import type { OpenApiLike } from '../types.ts';
 import {
   PANEL_DESC_MAX,
   PANEL_MAX_ITEMS,
@@ -13,7 +14,6 @@ import {
   displayWidth,
   formatPanelSummary,
   syncCommandPanels,
-  type PanelApiLike,
 } from './command-panel.ts';
 
 function cmd(
@@ -44,7 +44,7 @@ function makeApi(records: Array<{ panel_id: string; panel?: { remark?: string } 
       calls.push({ method: 'put', path, body });
       return { version: 2 };
     },
-  } as unknown as PanelApiLike;
+  } as unknown as OpenApiLike;
   return { api, calls };
 }
 
@@ -137,7 +137,7 @@ describe('syncCommandPanels（有则更新，无则创建）', () => {
         throw new Error('40030020 内容存在安全风险');
       },
       put: vi.fn(),
-    } as unknown as PanelApiLike;
+    } as unknown as OpenApiLike;
 
     await expect(syncCommandPanels(api, commands)).rejects.toThrow('40030020');
   });

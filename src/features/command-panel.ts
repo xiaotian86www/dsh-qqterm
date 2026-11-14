@@ -57,9 +57,6 @@ export interface PanelSyncResult {
   count: number;
 }
 
-/** 面板同步的 api 形状（与 OpenAPI 网关一致，单测注入假实现） */
-export type PanelApiLike = OpenApiLike;
-
 interface PanelRecord {
   panel_id: string;
   panel?: { remark?: string };

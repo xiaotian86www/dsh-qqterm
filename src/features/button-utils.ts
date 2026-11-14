@@ -25,7 +25,7 @@ export function buttonLabel(text: string | undefined): string {
 export interface QuestionButtonData {
   t: 'question';
   /** 归属会话：多会话时按它找回 pending，不再依赖 current */
-  s?: string;
+  s: string;
   q: string;
   i: number;
 }
@@ -34,16 +34,16 @@ export interface QuestionButtonData {
 export interface ApprovalButtonData {
   t: 'approval';
   /** 归属会话：多会话时按它找回 pending */
-  s?: string;
+  s: string;
   d: 'allow' | 'deny';
-  n?: string;
+  n: string;
 }
 
 /** 轮次失败后的重发询问：s=会话 id，d=决策（重发 / 放弃） */
 export interface RetryButtonData {
   t: 'retry';
   /** 归属会话：多会话时按它找回待重发的原文 */
-  s?: string;
+  s: string;
   d: 'resend' | 'discard';
 }
 

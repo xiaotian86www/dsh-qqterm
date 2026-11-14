@@ -49,9 +49,6 @@ export interface QQBotSender {
   sendMarkdown(target: ReplyTarget, content: string, opts?: { keyboard?: InlineKeyboard }): Promise<unknown>;
 }
 
-/** 出站处理器签名（注册到 ctx.on('session/event')） */
-export type OutboundHandler = (session: SessionLike, event: RawSessionEvent) => void;
-
 /** 出站事件入口（注册到 ctx.on('session/event')） */
 export interface OutboundHandlers {
   routeSessionEvent(session: SessionLike, event: RawSessionEvent): void;

@@ -56,18 +56,6 @@ function imageRefOf(block: MessageContentBlock): ImageAttachmentLike | undefined
   };
 }
 
-/** 从消息内容里挑出 image 块（去重、跳过已 offload 的块，非法引用直接忽略） */
-export function collectImageBlocks(content: readonly MessageContentBlock[]): ImageAttachmentLike[] {
-  const refs: ImageAttachmentLike[] = [];
-  for (const block of content) {
-    if (block.type !== 'image') continue;
-    const ref = imageRefOf(block);
-    if (ref === undefined) continue;
-    if (!refs.some((item) => item.attachmentId === ref.attachmentId)) refs.push(ref);
-  }
-  return refs;
-}
-
 /**
  * 按内容块顺序切成文本段与图片组（相邻图片归一组，同一附件只发一次）。
  *

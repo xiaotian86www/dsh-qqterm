@@ -67,9 +67,7 @@ export interface QuestionChannelContext {
 // ── 依赖接口（结构化，便于单测） ──
 
 export interface QuestionSessionRecordLike {
-  sessionKey: string;
-  /** 宿主的 session id；缺省时退回 sessionKey（单测/旧记录兼容） */
-  sessionId?: string;
+  sessionId: string;
   /** 该会话属于哪个 QQ 用户（按钮点击者校验用） */
   peerId?: string;
   scope: ChatScope;
@@ -110,11 +108,6 @@ class QuestionChannelError extends Error {
     this.code = code;
     this.name = 'QuestionChannelError';
   }
-}
-
-/** 记录所属的会话 id（优先宿主 sessionId，旧记录退回 chatKey） */
-function sessionIdOf(record: QuestionSessionRecordLike): string {
-  return record.sessionId ?? record.sessionKey;
 }
 
 /**
@@ -280,7 +273,7 @@ export class QuestionChannel {
     }
 
     const record = this.manager.getSessionRecord(scope, peerId);
-    const currentId = record ? sessionIdOf(record) : undefined;
+    const currentId = record?.sessionId;
     if (currentId) {
       const entry = this.pending.get(currentId);
       if (entry && text) {
@@ -314,20 +307,12 @@ export class QuestionChannel {
     const button = decodeButtonData(data);
     if (!button || button.t !== 'question') return false;
 
-    // 新按钮带 sessionId；旧卡片没有 s 时退回 current，兼容升级前发出的卡片
     const sessionId = button.s;
-    if (sessionId !== undefined) {
-      const entry = this.pending.get(sessionId);
-      if (!entry) return false;
-      if (entry.record.peerId !== undefined && entry.record.peerId !== peerId) return false;
-      return this.consumeButton(entry, sessionId, button.q, button.i);
-    }
-
-    const record = this.manager.getSessionRecord('c2c', peerId);
-    if (!record) return false;
-    const entry = this.pending.get(sessionIdOf(record));
+    if (!sessionId) return false;
+    const entry = this.pending.get(sessionId);
     if (!entry) return false;
-    return this.consumeButton(entry, sessionIdOf(record), button.q, button.i);
+    if (entry.record.peerId !== undefined && entry.record.peerId !== peerId) return false;
+    return this.consumeButton(entry, sessionId, button.q, button.i);
   }
 
   /** 校验按钮归属题并推进状态机 */
@@ -356,7 +341,7 @@ export class QuestionChannel {
 
   /** 会话内提示：非当前会话加来源行，用户才知道这条提示是哪条会话的事 */
   private noticeText(record: QuestionSessionRecordLike, body: string): string {
-    const sessionId = sessionIdOf(record);
+    const sessionId = record.sessionId;
     if (this.manager.isCurrentSession?.(sessionId) ?? true) return body;
     return `${sessionSourceHeader(sessionId, this.manager.sessionTitle?.(sessionId))}\n\n${body}`;
   }
@@ -385,7 +370,7 @@ export class QuestionChannel {
 
   /** 走 QQ 通道：发送首题 + 挂起 Promise，等待逐题作答 */
   private async askViaQQ(record: QuestionSessionRecordLike, request: UserQuestionRequest): Promise<UserQuestionResult> {
-    const sessionId = sessionIdOf(record);
+    const sessionId = record.sessionId;
     // 会话回收/取消可能在发送前发生：signal 已 abort 则直接失败，避免悬挂
     if (request.signal?.aborted) {
       throw new QuestionChannelError('ask_user_question was aborted before delivery', ASK_ABORTED);
@@ -452,7 +437,7 @@ export class QuestionChannel {
 
   /** 发送单个问题：优先带按钮，按钮发送失败降级纯文本 */
   private async sendQuestion(record: QuestionSessionRecordLike, question: UserQuestion): Promise<void> {
-    const sessionId = sessionIdOf(record);
+    const sessionId = record.sessionId;
     const isCurrent = this.manager.isCurrentSession?.(sessionId) ?? true;
     const context = { sessionId, isCurrent, title: this.manager.sessionTitle?.(sessionId) };
     // 非当前会话的兜底入口写在正文引用行里（回答 / 恢复），键盘只放选项按钮；

@@ -1,9 +1,7 @@
 /**
- * 宿主 API 适配层 — 收口所有版本漂移点，一次探测按需复用。
+ * 宿主 API 适配层 — 收口宿主服务的读取与降级。
  *
- * 宿主新旧版本 API 形态不同（本插件踩过的漂移：events → snapshotEvents、
- * presets.serviceFor 实例方法 → serviceForAgent 模块函数、./fork 子路径导出）。
- * 调用方只依赖本模块的稳定签名，不再直接假设宿主形态。
+ * 调用方只依赖本模块的稳定签名，不直接假设宿主形态。
  */
 import type { Context } from '@deepseek-ai/cordis';
 import { basename } from 'node:path';
@@ -19,8 +17,6 @@ export interface AdapterLogger {
 export interface HostAdapter {
   /** 会话事件读取（宿主 snapshotEvents） */
   sessionEvents(session: { snapshotEvents: () => readonly unknown[] }): readonly unknown[];
-  /** 官方 fork seed 构造；宿主无该导出时返回 undefined */
-  buildForkSeed(events: readonly unknown[], boundary: number): Promise<readonly unknown[] | undefined>;
   /** 会话 header 读取（取 agentPreset 等）；会话不存在、服务缺失或读取失败返回 undefined */
   sessionHeader(sessionId: string): Promise<SessionHeaderLike | undefined>;
   /**
@@ -185,8 +181,6 @@ export interface WorkspaceLike {
   /** 该工作区的会话记账（顺序即侧边栏顺序） */
   readonly sessionIds?: readonly string[];
   attachSession(sessionId: string): Promise<void>;
-  /** 改显示标题（旧版本可能没有） */
-  setTitle?(title: string): Promise<void>;
 }
 
 /** workspaceRegistry 服务最小契约（对齐 dsh-workspace WorkspaceRegistry） */
@@ -211,14 +205,6 @@ export interface WorkspaceRegistryLike {
  * 用户改过名就匹配不到，此时退回启动目录。
  */
 const DEFAULT_WORKSPACE_TITLE = 'default-workspace';
-
-/**
- * 历史版本硬编码过的工作区标题。
- *
- * 0.5.x 的插件在 create 时传了 `title: 'QQBot'`，导致侧边栏里这个项目一直叫
- * QQBot 而不是目录名；现在 create 不再传标题，遇到旧标题就地迁移成目录名。
- */
-const LEGACY_WORKSPACE_TITLE = 'QQBot';
 
 /**
  * 持久化服务的最小只读契约。
@@ -270,14 +256,11 @@ interface WorkingDirectoryLike {
 }
 
 /**
- * 把宿主的会话记录/快照统一成 {@link HostSessionInfo}。
- *
- * 两种形态：`sessionQuery.listSessions()` 返回 `{ header, live }`；
- * `sessionPersistence.list()` 返回 `{ header, revision }`（无 live）。
+ * 把 `sessionQuery.listSessions()` 的 `{ header, live }` 记录转成 {@link HostSessionInfo}。
  */
-function hostSessionFrom(record: unknown, liveFallback: boolean): HostSessionInfo | undefined {
+function hostSessionFrom(record: unknown): HostSessionInfo | undefined {
   const raw = record as { header?: unknown; live?: unknown } | null | undefined;
-  const header = (raw?.header ?? raw) as Record<string, unknown> | null | undefined;
+  const header = raw?.header as Record<string, unknown> | null | undefined;
   if (!header || typeof header !== 'object') return undefined;
 
   const id = header['id'];
@@ -288,7 +271,7 @@ function hostSessionFrom(record: unknown, liveFallback: boolean): HostSessionInf
     createdAt: typeof header['createdAt'] === 'number' ? header['createdAt'] : 0,
     updatedAt: typeof header['createdAt'] === 'number' ? header['createdAt'] : 0,
     isSeeded: header['isSeeded'] === true,
-    live: raw?.live === true || liveFallback,
+    live: raw?.live === true,
     blank: false,
     ...(typeof header['cwd'] === 'string' ? { cwd: header['cwd'] } : {}),
     ...(typeof header['parentSession'] === 'string' ? { parentSession: header['parentSession'] } : {}),
@@ -314,8 +297,8 @@ function collectTitles(results: readonly unknown[], sink: Map<string, string>): 
 /**
  * 读宿主会话摘要里的活跃时间与 blank 标记（Web 侧栏用的是同一份摘要）。
  *
- * 宿主没有 `list`（旧版本）或读取失败时返回空表：列表回退成按创建时间排，
- * blank 一律按 false 处理。
+ * sessionController 缺失（非 web 组合包）或读取失败时返回空表：
+ * 列表回退成按创建时间排，blank 一律按 false 处理。
  */
 async function sessionListMeta(
   controller: SessionControllerLike | undefined,
@@ -356,22 +339,6 @@ function optionalSessionController(ctx: Context): SessionControllerLike | undefi
  */
 function optionalWorkspaceRegistry(ctx: Context): WorkspaceRegistryLike | undefined {
   return optionalService<WorkspaceRegistryLike>(ctx, 'workspaceRegistry');
-}
-
-/** 模块级函数的动态 import 结果缓存（spec 变量路径绕开本地依赖类型检查） */
-const moduleCache = new Map<string, Record<string, unknown> | undefined>();
-
-async function importModule(spec: string, logger?: AdapterLogger): Promise<Record<string, unknown> | undefined> {
-  if (moduleCache.has(spec)) return moduleCache.get(spec);
-  let mod: Record<string, unknown> | undefined;
-  try {
-    mod = (await import(spec)) as Record<string, unknown>;
-  } catch {
-    mod = undefined;
-    logger?.warn(`host adapter: module not resolvable: ${spec}`);
-  }
-  moduleCache.set(spec, mod);
-  return mod;
 }
 
 export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAdapter {
@@ -437,7 +404,6 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
       try {
         // 不传 title：宿主按目录最后一段生成显示名（一般规律）
         const workspace = await registry.create(cwd);
-        await migrateLegacyTitle(workspace, cwd, logger);
         await workspace.attachSession(sessionId);
         logger?.debug?.(`host adapter: attached session ${sessionId} to workspace ${workspace.path ?? cwd}`);
       } catch (err) {
@@ -477,19 +443,6 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
       return typeof header?.cwd === 'string' && header.cwd !== '' ? header.cwd : undefined;
     },
 
-    async buildForkSeed(events, boundary) {
-      const mod = await importModule('@deepseek-ai/dsh-session/fork', logger);
-      const fn = mod?.buildForkSeed as
-        | ((events: readonly unknown[], boundary: number) => readonly unknown[])
-        | undefined;
-      if (typeof fn !== 'function') return undefined;
-      try {
-        return fn(events, boundary);
-      } catch {
-        return undefined;
-      }
-    },
-
     async listSessions() {
       try {
         const [records, meta] = await Promise.all([
@@ -497,7 +450,7 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
           sessionListMeta(controller, logger),
         ]);
         return records
-          .map((record) => hostSessionFrom(record, false))
+          .map((record) => hostSessionFrom(record))
           .filter((info): info is HostSessionInfo => info !== undefined)
           .map((info) => {
             const updatedAt = meta.recency.get(info.id);
@@ -578,30 +531,6 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
 }
 
 /**
- * 把旧版本硬编码的 `QQBot` 标题迁移成目录名。
- *
- * 只处理标题仍是我们当初写入的 `QQBot` 的记录：用户自己改过的标题（包括刻意
- * 改成别的名字）一律不动，避免覆盖人的意图。迁移只影响侧栏显示，失败仅 debug。
- */
-async function migrateLegacyTitle(
-  workspace: WorkspaceLike,
-  cwd: string,
-  logger?: AdapterLogger,
-): Promise<void> {
-  if (workspace.title !== LEGACY_WORKSPACE_TITLE) return;
-  if (typeof workspace.setTitle !== 'function') return;
-  const path = workspace.path ?? cwd;
-  const derived = basename(path);
-  if (derived === '' || derived === workspace.title) return;
-  try {
-    await workspace.setTitle(derived);
-    logger?.debug?.(`host adapter: 工作区标题已迁移 ${LEGACY_WORKSPACE_TITLE} → ${derived} (${path})`);
-  } catch (err) {
-    logger?.debug?.(`host adapter: 工作区标题迁移失败（不影响使用）: ${err instanceof Error ? err.message : String(err)}`);
-  }
-}
-
-/**
  * 把标题服务抛出的错误归一成改名结果。
  *
  * 类名判定（不用 instanceof）与归档一致：宿主可能装了同一个包的另一个副本。
@@ -644,9 +573,4 @@ function archiveFailure(
     return { ok: false, reason: 'busy', message: `会话仍在运行: ${message}` };
   }
   return { ok: false, reason: 'failed', message: `${verb === 'archive' ? '归档' : '取消归档'}失败: ${message}` };
-}
-
-/** 测试辅助：清空模块缓存 */
-export function _resetAdapterCache(): void {
-  moduleCache.clear();
 }

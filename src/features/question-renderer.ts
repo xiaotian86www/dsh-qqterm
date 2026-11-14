@@ -26,7 +26,7 @@ export interface QuestionRenderContext {
  * `q` 关联「当前正在问的题」：逐题推进时旧题按钮在新题发出后被点击，其 q
  * 不等于当前题 id，可被识别并忽略。
  */
-export function buildKeyboard(question: UserQuestion, sessionId?: string): InlineKeyboard | undefined {
+export function buildKeyboard(question: UserQuestion, sessionId: string): InlineKeyboard | undefined {
   const opts = question.options ?? [];
   const rows: InlineKeyboard['content']['rows'] = [];
   if (opts.length > 0 && !question.multiSelect) {
@@ -47,7 +47,7 @@ export function buildKeyboard(question: UserQuestion, sessionId?: string): Inlin
               click_limit: 1,
               data: encodeButtonData({
                 t: 'question',
-                ...(sessionId !== undefined ? { s: sessionId } : {}),
+                s: sessionId,
                 q: question.id,
                 i: idx,
               }),

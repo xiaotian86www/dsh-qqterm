@@ -29,10 +29,3 @@ export type BindStateWire =
   | { phase: 'saving' }
   | { phase: 'failed'; reason: string }
   | { phase: 'bound'; appId: string };
-
-/** manual / unbind 操作的统一响应 */
-export interface BindActionResponse {
-  ok: boolean;
-  message?: string;
-  error?: string;
-}

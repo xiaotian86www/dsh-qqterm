@@ -46,8 +46,6 @@ export interface SessionEventLike {
     };
     [key: string]: unknown;
   };
-  /** 兼容形状：部分事件/旧版本把 usage 放在顶层（扁平命名） */
-  usage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number };
   message?: {
     content?: Array<{ type: string; text?: string }>;
     [key: string]: unknown;

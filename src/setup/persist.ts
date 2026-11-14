@@ -208,11 +208,7 @@ function overwriteOwner(config: YAMLMap, openid: string): void {
     config.set('access', { owner: openid });
     return;
   }
-  const accessMap = access as YAMLMap;
-  // 清掉旧版本的模式/名单字段，避免同一份配置里两种写法并存
-  accessMap.delete('c2cMode');
-  accessMap.delete('c2cAllow');
-  accessMap.set('owner', openid);
+  (access as YAMLMap).set('owner', openid);
 }
 
 /** 校验 access.owner 恰为 openid（读回验证用） */

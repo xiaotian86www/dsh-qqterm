@@ -12,13 +12,10 @@ export interface RawSessionEvent {
   data: Record<string, unknown>;
 }
 
-/** turn/end 事件的 reason 结构（兼容 error/failure/顶层 message 三种形态） */
+/** turn/end 事件的 reason 结构 */
 export interface TurnEndReason {
   kind?: string;
   error?: { message?: string; code?: string };
-  failure?: { message?: string; code?: string };
-  message?: string;
-  code?: string;
 }
 
 /**
@@ -92,7 +89,7 @@ export interface RetryEvent {
 
 /** present 工具声明的一个交付文件 */
 export interface PresentedFileRef {
-  /** 绝对路径，或相对 Session 工作目录的路径（仅历史声明） */
+  /** 文件绝对路径 */
   path: string;
   /** 模型提供的可选说明 */
   description?: string;
@@ -197,17 +194,11 @@ export function parseEvent(raw: RawSessionEvent): OutboundEvent | undefined {
   }
 }
 
-/**
- * 从 turn/end reason 提取错误信息
- *
- * 兼容三种形态：error（新格式）、failure（旧格式）、顶层 message/code（最旧格式）。
- */
+/** 从 turn/end reason 提取错误信息 */
 export function extractTurnError(reason: TurnEndReason): { code: string; message: string } | undefined {
   if (reason.kind !== 'error') return undefined;
-
-  const detail = reason.error ?? reason.failure;
   return {
-    code: detail?.code ?? reason.code ?? 'UNKNOWN',
-    message: detail?.message ?? reason.message ?? 'unknown error',
+    code: reason.error?.code ?? 'UNKNOWN',
+    message: reason.error?.message ?? 'unknown error',
   };
 }

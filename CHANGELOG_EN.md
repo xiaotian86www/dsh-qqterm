@@ -4,7 +4,7 @@
 
 This file records product-level changes to QQ SuperTerm. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [0.0.1] - 2026-11-13
+## [0.0.1] - 2026-11-14
 
 ### Added
 
@@ -21,5 +21,6 @@ This file records product-level changes to QQ SuperTerm. The format follows [Kee
 
 ### Known limitations
 
+- Only host dsh 0.2.2-rc.1 is verified; after a major host upgrade the settings section and QR binding need re-verification.
 - Group chat is not supported.
 - When any service in `inject` is missing, the plugin stays inactive instead of degrading (`agentPresets` is optional: without it `/preset` is not registered at all and new sessions mount no preset; `webServer` is optional too: without it the in-app binding page is not registered and scanning uses the terminal only; `workspaceRegistry` is optional as well: without it `/sessions` still groups by directory, group headers show paths only, pins and archive actions are unavailable, archive subcommands are treated as unknown and `/new <name>` reports unsupported while its usage page, the `/status` workspace line and the reply show paths only (absolute paths still work); the activity time used to order `/sessions` is soft-read from the optional `sessionController.list()`, falling back to creation time; without hmr `/plugins reload` is treated as an unknown subcommand too).

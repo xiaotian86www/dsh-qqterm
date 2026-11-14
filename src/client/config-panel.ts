@@ -197,12 +197,6 @@ export function ConfigPanel(props: { bindPhase?: string } = {}): ReactElement {
     }
     if (Object.keys(changed).length === 0) return;
 
-    // 只提交 owner 一个字段：旧版本残留的群聊 / 模式字段就此不再被写回。
-    if (changed.access !== undefined) {
-      const a = changed.access as AccessControlWire;
-      changed.access = { owner: a.owner.trim() };
-    }
-
     setBusy(true);
     void fetch(BIND_CONFIG_PATH, {
       method: 'POST',

@@ -31,8 +31,8 @@ function createSender(sent: SentMessage[], opts?: { failKeyboard?: boolean }) {
 
 const sessionKey = (scope: ChatScope, peerId: string): string => `qqterm:app:${scope}:${peerId}`;
 
-function makeRecord(sessionKeyStr: string, scope: ChatScope = 'c2c'): QuestionSessionRecordLike {
-  return { sessionKey: sessionKeyStr, scope, replyTarget: { scope, targetId: 'x' } };
+function makeRecord(sessionId: string, scope: ChatScope = 'c2c'): QuestionSessionRecordLike {
+  return { sessionId, scope, replyTarget: { scope, targetId: 'x' } };
 }
 
 function createManager(opts?: {
@@ -43,7 +43,7 @@ function createManager(opts?: {
 }) {
   return {
     findBySessionId: opts?.findBySessionId ?? (() => undefined),
-    // 默认按 scope+peerId 派生 sessionKey 反查，与 startAsk 的 key 生成保持一致
+    // 默认按 scope+peerId 派生会话 id 反查，与 startAsk 的 key 生成保持一致
     getSessionRecord: opts?.getSessionRecord ?? ((scope: ChatScope, peerId: string) => makeRecord(sessionKey(scope, peerId), scope)),
     isCurrentSession: opts?.isCurrentSession ?? (() => true),
     sessionTitle: opts?.sessionTitle ?? (() => undefined),
@@ -135,7 +135,7 @@ describe('formatQuestion', () => {
 
 describe('buildKeyboard', () => {
   it('lays out two options in a single row of two buttons', () => {
-    const kb = buildKeyboard(q2());
+    const kb = buildKeyboard(q2(), 'sess-qq');
     expect(kb?.content.rows).toHaveLength(1);
     expect(kb?.content.rows[0]?.buttons).toHaveLength(2);
     const btn = kb?.content.rows[0]?.buttons[0];
@@ -147,21 +147,21 @@ describe('buildKeyboard', () => {
     expect(btn?.render_data.visited_label).toBe('✓ 已选');
     // button_data 同时编码 question.id 与选项下标，供 handleInteraction 校验归属题
     expect(btn?.id).toBe('q-q-opt-0');
-    expect(JSON.parse(btn!.action.data)).toEqual({ t: 'question', q: 'q', i: 0 });
+    expect(JSON.parse(btn!.action.data)).toEqual({ t: 'question', s: 'sess-qq', q: 'q', i: 0 });
   });
 
   it('wraps options across multiple rows', () => {
     const opts = [{ label: 'A' }, { label: 'B' }, { label: 'C' }, { label: 'D' }, { label: 'E' }];
-    const kb = buildKeyboard({ id: 'q', question: 't', options: opts });
+    const kb = buildKeyboard({ id: 'q', question: 't', options: opts }, 'sess-qq');
     expect(kb?.content.rows).toHaveLength(3); // 2+2+1
     expect(kb?.content.rows[0]?.buttons).toHaveLength(2);
     expect(kb?.content.rows[2]?.buttons).toHaveLength(1);
-    expect(JSON.parse(kb!.content.rows[2]!.buttons[0]!.action.data)).toEqual({ t: 'question', q: 'q', i: 4 });
+    expect(JSON.parse(kb!.content.rows[2]!.buttons[0]!.action.data)).toEqual({ t: 'question', s: 'sess-qq', q: 'q', i: 4 });
   });
 
   it('returns undefined for multi-select or no-options', () => {
-    expect(buildKeyboard({ ...q2(), multiSelect: true })).toBeUndefined();
-    expect(buildKeyboard({ id: 'q', question: 't' })).toBeUndefined();
+    expect(buildKeyboard({ ...q2(), multiSelect: true }, 'sess-qq')).toBeUndefined();
+    expect(buildKeyboard({ id: 'q', question: 't' }, 'sess-qq')).toBeUndefined();
   });
 
   it('非当前会话也只在键盘里放选项，不另加动作行', () => {
@@ -328,7 +328,7 @@ describe('QuestionChannel.handleInteraction', () => {
     const ch = new QuestionChannel(createManager(), createSender(sent), { askTimeoutMs: 60_000, access: { owner: 'U1' } }, createLogger());
     const p = startAsk(ch, 'c2c', 'U1', [q2()]);
     await sleep(20);
-    expect(ch.handleInteraction(makeEvent(JSON.stringify({ t: 'question', q: 'q', i: 1 }), { user: 'U1' }))).toBe(true);
+    expect(ch.handleInteraction(makeEvent(JSON.stringify({ t: 'question', s: sessionKey('c2c', 'U1'), q: 'q', i: 1 }), { user: 'U1' }))).toBe(true);
     expect(await p).toEqual({ answers: [{ id: 'q', selected: ['B'] }] });
   });
 
@@ -337,7 +337,7 @@ describe('QuestionChannel.handleInteraction', () => {
     const ch = new QuestionChannel(createManager(), createSender(sent), { askTimeoutMs: 60_000, access: { owner: 'U1' } }, createLogger());
     const p = startAsk(ch, 'c2c', 'U1', [q2()]);
     await sleep(20);
-    expect(ch.handleInteraction(makeEvent(JSON.stringify({ t: 'question', q: 'q', i: 0 }), {}))).toBe(false);
+    expect(ch.handleInteraction(makeEvent(JSON.stringify({ t: 'question', s: sessionKey('c2c', 'U1'), q: 'q', i: 0 }), {}))).toBe(false);
     ch.tryAnswer('c2c', 'U1', '1');
     await p;
   });
@@ -348,7 +348,7 @@ describe('QuestionChannel.handleInteraction', () => {
     const long = '这是一个非常非常长的选项标签超过十八个字符的限制了吧';
     const p = startAsk(ch, 'c2c', 'U1', [{ id: 'q', question: 't', options: [{ label: long }] }]);
     await sleep(20);
-    expect(ch.handleInteraction(makeEvent(JSON.stringify({ t: 'question', q: 'q', i: 0 }), { user: 'U1' }))).toBe(true);
+    expect(ch.handleInteraction(makeEvent(JSON.stringify({ t: 'question', s: sessionKey('c2c', 'U1'), q: 'q', i: 0 }), { user: 'U1' }))).toBe(true);
     expect(await p).toEqual({ answers: [{ id: 'q', selected: [long] }] });
   });
 
@@ -358,10 +358,10 @@ describe('QuestionChannel.handleInteraction', () => {
     const p = startAsk(ch, 'c2c', 'U2', [q2()]);
     await sleep(20);
     expect(ch.handleInteraction(makeEvent('not-json', { user: 'U2' }))).toBe(false);
-    expect(ch.handleInteraction(makeEvent(JSON.stringify({ t: 'question', q: 'q', i: 9 }), { user: 'U2' }))).toBe(false);
+    expect(ch.handleInteraction(makeEvent(JSON.stringify({ t: 'question', s: sessionKey('c2c', 'U2'), q: 'q', i: 9 }), { user: 'U2' }))).toBe(false);
     // 旧题按钮：q 不等于当前题 id，忽略
-    expect(ch.handleInteraction(makeEvent(JSON.stringify({ t: 'question', q: 'other', i: 0 }), { user: 'U2' }))).toBe(false);
-    expect(ch.handleInteraction(makeEvent(JSON.stringify({ t: 'question', q: 'q', i: 0 }), { user: 'nobody' }))).toBe(false);
+    expect(ch.handleInteraction(makeEvent(JSON.stringify({ t: 'question', s: sessionKey('c2c', 'U2'), q: 'other', i: 0 }), { user: 'U2' }))).toBe(false);
+    expect(ch.handleInteraction(makeEvent(JSON.stringify({ t: 'question', s: sessionKey('c2c', 'U2'), q: 'q', i: 0 }), { user: 'nobody' }))).toBe(false);
     expect(ch.handleInteraction(makeEvent(undefined, { user: 'U2' }))).toBe(false);
     ch.tryAnswer('c2c', 'U2', '1');
     await p;
@@ -375,20 +375,20 @@ describe('QuestionChannel.handleInteraction', () => {
     const p = startAsk(ch, 'c2c', 'U1', [q1, q2b]);
     await sleep(20);
     // 答第一题（按钮点击），推进到第二题
-    expect(ch.handleInteraction(makeEvent(JSON.stringify({ t: 'question', q: 'a', i: 0 }), { user: 'U1' }))).toBe(true);
+    expect(ch.handleInteraction(makeEvent(JSON.stringify({ t: 'question', s: sessionKey('c2c', 'U1'), q: 'a', i: 0 }), { user: 'U1' }))).toBe(true);
     await sleep(20);
     expect(sent).toHaveLength(2); // 第二题已发出
     // 旧题（q=a）按钮在新题发出后被点击 → 忽略，不消费当前题
-    expect(ch.handleInteraction(makeEvent(JSON.stringify({ t: 'question', q: 'a', i: 1 }), { user: 'U1' }))).toBe(false);
+    expect(ch.handleInteraction(makeEvent(JSON.stringify({ t: 'question', s: sessionKey('c2c', 'U1'), q: 'a', i: 1 }), { user: 'U1' }))).toBe(false);
     // 当前题（q=b）仍可正常作答
-    expect(ch.handleInteraction(makeEvent(JSON.stringify({ t: 'question', q: 'b', i: 1 }), { user: 'U1' }))).toBe(true);
+    expect(ch.handleInteraction(makeEvent(JSON.stringify({ t: 'question', s: sessionKey('c2c', 'U1'), q: 'b', i: 1 }), { user: 'U1' }))).toBe(true);
     expect(await p).toEqual({ answers: [{ id: 'a', selected: ['A1'] }, { id: 'b', selected: ['B2'] }] });
   });
 });
 
 describe('QuestionChannel: 多会话 routing', () => {
   function recordFor(sessionId: string, peerId: string): QuestionSessionRecordLike {
-    return { sessionKey: `qqterm:app:c2c:${peerId}`, sessionId, peerId, scope: 'c2c', replyTarget: { scope: 'c2c', targetId: peerId } };
+    return { sessionId, peerId, scope: 'c2c', replyTarget: { scope: 'c2c', targetId: peerId } };
   }
 
   it('answer(sessionId, text) 不依赖 current', async () => {
@@ -623,8 +623,7 @@ describe('QuestionChannel.install routing（user-questions/request waterfall）'
 describe('非当前会话的标记', () => {
   it('提问首行标来源（id + 标题），超时提示也带首行', async () => {
     const sent: SentMessage[] = [];
-    const record = makeRecord(sessionKey('c2c', 'U1'));
-    (record as { sessionId?: string }).sessionId = 'session-04de1556-9c1f-4d6a-9b0e-1f2a3b4c5d6e';
+    const record = makeRecord('session-04de1556-9c1f-4d6a-9b0e-1f2a3b4c5d6e');
     const ch = new QuestionChannel(
       createManager({
         findBySessionId: () => record,

@@ -32,15 +32,14 @@ const failure = { code: 'RATE_LIMIT', message: '429: {"type":"server_error"}' };
 const PROMPT = '上一条原始消息';
 
 function makeRecord(opts?: {
-  sessionKey?: string;
+  sessionId?: string;
   peerId?: string | null;
   lastPrompt?: string | null;
 }): RetrySessionRecordLike & { agent: { followup: ReturnType<typeof vi.fn> } } {
   const scope: ChatScope = 'c2c';
-  const sessionKey = opts?.sessionKey ?? 'qqterm:app:chat';
+  const sessionId = opts?.sessionId ?? 'qqterm:app:chat';
   const record: RetrySessionRecordLike & { agent: { followup: ReturnType<typeof vi.fn> } } = {
-    sessionKey,
-    sessionId: sessionKey,
+    sessionId,
     scope,
     replyTarget: { scope, targetId: 'x' },
     agent: { followup: vi.fn() },
@@ -139,7 +138,7 @@ describe('RetryChannel.offer', () => {
 
   it('非当前会话的卡片带来源行', async () => {
     const sent: SentMessage[] = [];
-    const record = makeRecord({ sessionKey: 'sess-a' });
+    const record = makeRecord({ sessionId: 'sess-a' });
     const { channel } = createChannel(record, sent, { current: false, title: '修登录' });
     await channel.offer(record, failure, 1);
     expect(sent[0]?.text.startsWith('> `#')).toBe(true);
@@ -150,7 +149,7 @@ describe('RetryChannel.offer', () => {
 describe('RetryChannel.handleInteraction', () => {
   it('点「重发」重发上一条原文', async () => {
     const sent: SentMessage[] = [];
-    const record = makeRecord({ sessionKey: 'sess-a' });
+    const record = makeRecord({ sessionId: 'sess-a' });
     const { channel } = createChannel(record, sent);
     await channel.offer(record, failure, 1);
 
@@ -163,7 +162,7 @@ describe('RetryChannel.handleInteraction', () => {
 
   it('点「放弃」只回执，不重发', async () => {
     const sent: SentMessage[] = [];
-    const record = makeRecord({ sessionKey: 'sess-a' });
+    const record = makeRecord({ sessionId: 'sess-a' });
     const { channel } = createChannel(record, sent);
     await channel.offer(record, failure, 1);
 
@@ -174,7 +173,7 @@ describe('RetryChannel.handleInteraction', () => {
 
   it('同一张卡只能点一次', async () => {
     const sent: SentMessage[] = [];
-    const record = makeRecord({ sessionKey: 'sess-a' });
+    const record = makeRecord({ sessionId: 'sess-a' });
     const { channel } = createChannel(record, sent);
     await channel.offer(record, failure, 1);
 
@@ -185,7 +184,7 @@ describe('RetryChannel.handleInteraction', () => {
 
   it('别人点不动这张卡', async () => {
     const sent: SentMessage[] = [];
-    const record = makeRecord({ sessionKey: 'sess-a', peerId: 'U1' });
+    const record = makeRecord({ sessionId: 'sess-a', peerId: 'U1' });
     const { channel } = createChannel(record, sent);
     await channel.offer(record, failure, 1);
 
@@ -195,7 +194,7 @@ describe('RetryChannel.handleInteraction', () => {
 
   it('非重发按钮 / 缺会话 id 一律忽略', async () => {
     const sent: SentMessage[] = [];
-    const record = makeRecord({ sessionKey: 'sess-a' });
+    const record = makeRecord({ sessionId: 'sess-a' });
     const { channel } = createChannel(record, sent);
     await channel.offer(record, failure, 1);
 
@@ -208,7 +207,7 @@ describe('RetryChannel.handleInteraction', () => {
 
   it('超时后按钮失效', async () => {
     const sent: SentMessage[] = [];
-    const record = makeRecord({ sessionKey: 'sess-a' });
+    const record = makeRecord({ sessionId: 'sess-a' });
     const { channel } = createChannel(record, sent, { timeoutMs: 5 });
     await channel.offer(record, failure, 1);
 
@@ -219,7 +218,7 @@ describe('RetryChannel.handleInteraction', () => {
 
   it('uninstall 清掉所有待确认状态', async () => {
     const sent: SentMessage[] = [];
-    const record = makeRecord({ sessionKey: 'sess-a' });
+    const record = makeRecord({ sessionId: 'sess-a' });
     const { channel } = createChannel(record, sent);
     await channel.offer(record, failure, 1);
 
