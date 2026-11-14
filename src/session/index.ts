@@ -25,6 +25,7 @@ export type {
   SessionRecord,
   SessionStatus,
   SessionContextUsage,
+  SessionTurnProgress,
   TokenUsageStats,
   WorkspaceSession,
   WorkspaceGroup,

@@ -37,6 +37,8 @@ export interface SessionUsageLike {
 export interface SessionEventLike {
   type: string;
   seq?: number;
+  /** Unix epoch 毫秒（进度展示用；旧日志可能没有） */
+  time?: number;
   /** 事件载荷（usage / message 等真实字段都在这里） */
   data?: {
     usage?: SessionUsageLike;
@@ -308,6 +310,34 @@ export interface SessionContextUsage {
   window?: number;
   provider?: string;
   model?: string;
+}
+
+/**
+ * 生成中的现场（/status 用）
+ *
+ * 全部从本轮事件推导：turn/start 给起点，step/start 给步骤，tool/call 与
+ * tool/result 配对判断工具是否仍在执行，llm/retry 表示模型请求正在退避重试。
+ */
+export interface SessionTurnProgress {
+  /** 本轮已持续毫秒 */
+  elapsedMs: number;
+  /** 当前步骤号（宿主从 1 开始） */
+  step?: number;
+  /** 正在等待：工具执行 / 模型响应 */
+  waiting: 'tool' | 'model';
+  /** 当前阶段开始的 Unix 毫秒时间戳 */
+  waitingSince: number;
+  /** 正在执行的工具名（waiting 为 tool 时） */
+  toolName?: string;
+  /** 模型请求的重试退避 */
+  retry?: {
+    /** 第几次重试（从 1 开始） */
+    attempt: number;
+    /** 宿主计划等待的毫秒数 */
+    delayMs: number;
+    /** 重试事件发生的时间 */
+    since: number;
+  };
 }
 
 /** 宿主 sessionId 类型再导出（批量标题查询用） */

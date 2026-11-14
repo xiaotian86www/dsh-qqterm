@@ -7,7 +7,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { SlashCommandHandlerContext } from '@tencent-connect/qqbot-nodejs';
 import { ConfigSchema, type QQTermConfig } from '../../src/config.ts';
-import type { SessionManager } from '../../src/session/index.ts';
+import type { SessionManager, SessionTurnProgress } from '../../src/session/index.ts';
 import type { Logger } from '../../src/types.ts';
 import { sessionStatusCommand } from '../../src/commands/session-status.ts';
 
@@ -40,6 +40,8 @@ interface StubOptions {
   preset?: string;
   /** 生效权限预设（没有会话时是部署默认值） */
   permission?: string;
+  /** 生成中的现场（默认没有进度事件） */
+  progress?: SessionTurnProgress;
 }
 
 function makeManager(options: StubOptions = {}) {
@@ -69,6 +71,7 @@ function makeManager(options: StubOptions = {}) {
     getSessionRecord: vi.fn(() => record),
     getTokenUsage: vi.fn(() => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, ...options.usage })),
     getContextUsage: vi.fn(() => options.context ?? {}),
+    getTurnProgress: vi.fn(() => options.progress),
     getEffortView: vi.fn(async () => options.effort ?? {
       options: [{ id: 'high', name: 'High' }],
       current: { id: 'high', name: 'High' },
@@ -196,6 +199,60 @@ describe('/status（有会话）', () => {
     const text = await run(makeManager({ workspace: { title: '', path: 'D:\\repo', missing: false } }));
     expect(text).toContain('**工作区**: `D:\\repo`');
     expect(text).not.toContain('repo ·');
+  });
+
+  it('生成中给出本轮耗时、步骤与正在执行的工具', async () => {
+    const text = await run(makeManager({
+      agentStatus: 'running',
+      progress: {
+        elapsedMs: 130_000,
+        step: 3,
+        waiting: 'tool',
+        waitingSince: Date.now() - 12_000,
+        toolName: 'read',
+      },
+    }));
+    expect(text).toContain('**本轮**: 2m10s · 第 3 步');
+    expect(text).toContain('**进度**: 正在 `read`');
+  });
+
+  it('等待模型响应时给重试退避', async () => {
+    const text = await run(makeManager({
+      agentStatus: 'running',
+      progress: {
+        elapsedMs: 45_000,
+        waiting: 'model',
+        waitingSince: Date.now() - 45_000,
+        retry: { attempt: 2, delayMs: 10_000, since: Date.now() },
+      },
+    }));
+    expect(text).toContain('**进度**: 等待模型响应');
+    expect(text).toContain('**重试**: 第 2 次 · ');
+    expect(text).toContain('后重发');
+  });
+
+  it('空闲时不展示本轮现场', async () => {
+    const text = await run(makeManager({
+      progress: { elapsedMs: 1000, step: 1, waiting: 'model', waitingSince: Date.now() },
+    }));
+    expect(text).not.toContain('**本轮**:');
+  });
+
+  it('生成中但没有进度事件时不添加空行', async () => {
+    const text = await run(makeManager({ agentStatus: 'running' }));
+    expect(text).not.toContain('**本轮**:');
+    expect(text).not.toContain('**进度**:');
+  });
+
+  it('生成中给可点击的 /stop 入口', async () => {
+    const text = await run(makeManager({ agentStatus: 'running' }));
+    expect(text).toContain('<qqbot-cmd-input text="/stop" show="⛔ 停止生成"/>');
+    expect(text.trimEnd().endsWith('/>')).toBe(true);
+  });
+
+  it('空闲与没有会话时不给 /stop 入口', async () => {
+    expect(await run(makeManager({ agentStatus: 'idle' }))).not.toContain('/stop');
+    expect(await run(makeManager({ active: false }))).not.toContain('/stop');
   });
 });
 

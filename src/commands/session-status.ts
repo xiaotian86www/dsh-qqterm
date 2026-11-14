@@ -9,7 +9,7 @@
  *   - `/status` 是会话相关的完整状态，想知道「这个会话现在什么样」看它。
  */
 import type { CommandDeps, SlashCommand } from './types.ts';
-import type { SessionContextUsage, SessionManager } from '../session/index.ts';
+import type { SessionContextUsage, SessionManager, SessionTurnProgress } from '../session/index.ts';
 import type { ChatScope } from '../types.ts';
 import { getScopePeer, sendMarkdownChunked } from '../shared/index.ts';
 import { sessionTargetLabel, sessionTitleOf } from '../transport/session-source.ts';
@@ -33,6 +33,40 @@ function renderContext(ctx: SessionContextUsage): string | undefined {
   return undefined;
 }
 
+/** 时长（轮次 / 阶段耗时）：60s 内给秒，1h 内给分秒，再长给时分 */
+function formatDuration(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  if (total < 60) return `${total}s`;
+  if (total < 3600) {
+    const minutes = Math.floor(total / 60);
+    const seconds = total % 60;
+    return seconds === 0 ? `${minutes}m` : `${minutes}m${seconds}s`;
+  }
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  return minutes === 0 ? `${hours}h` : `${hours}h${minutes}m`;
+}
+
+/** 生成中的现场：本轮多长、第几步、在等工具还是模型、是否在重试 */
+function renderProgress(progress: SessionTurnProgress): string[] {
+  const parts = [formatDuration(progress.elapsedMs)];
+  if (progress.step !== undefined) parts.push(`第 ${progress.step} 步`);
+  const lines = [`**本轮**: ${parts.join(' · ')}`];
+
+  const phase = progress.waiting === 'tool'
+    ? (progress.toolName ? `正在 \`${progress.toolName}\`` : '正在工具执行')
+    : '等待模型响应';
+  lines.push(`**进度**: ${phase} · ${formatDuration(Date.now() - progress.waitingSince)}`);
+
+  if (progress.retry) {
+    const remaining = progress.retry.since + progress.retry.delayMs - Date.now();
+    lines.push(
+      `**重试**: 第 ${progress.retry.attempt} 次 · ${remaining > 0 ? `${formatDuration(remaining)} 后重发` : '正在重发'}`,
+    );
+  }
+  return lines;
+}
+
 /** 渲染会话状态正文（handler 只负责兜错与发送） */
 async function renderStatus(
   manager: SessionManager,
@@ -45,14 +79,20 @@ async function renderStatus(
   const lines: string[] = ['### 📊 会话状态', ''];
 
   // 会话：标题 + 短 id + 是否正在生成（标题还没生成时只给 id）
+  const running = record?.agent.status === 'running';
   if (status.active && status.sessionId) {
-    const running = record?.agent.status === 'running';
     const title = record === undefined ? undefined : sessionTitleOf(record);
     lines.push(
       `**会话**: ${sessionTargetLabel(status.sessionId, title)} · ${running ? '生成中' : '空闲'}`,
     );
   } else {
     lines.push('**会话**: 未建立');
+  }
+
+  // 生成中才给现场：长时间没回复时，至少能看出卡在工具还是模型
+  if (running) {
+    const progress = manager.getTurnProgress(scope, peerId);
+    if (progress) lines.push(...renderProgress(progress));
   }
 
   // 工作区：会话落在哪个目录（读不到就跳过，不影响其它字段）
@@ -96,6 +136,11 @@ async function renderStatus(
     if (usage.input + usage.output > 0) {
       lines.push(`**Token**: 输入 ${num(usage.input)} · 输出 ${num(usage.output)}（累计）`);
     }
+  }
+
+  // 生成中给一个可点击的停止入口：QQ 不能编辑消息，停止要能直接点到
+  if (running) {
+    lines.push('', '<qqbot-cmd-input text="/stop" show="⛔ 停止生成"/>');
   }
 
   return lines.join('\n');

@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import type { Context } from '@deepseek-ai/cordis';
 import { ConfigSchema, type QQTermConfig } from '../../src/config.ts';
 import type { Logger, ReplyTarget } from '../../src/types.ts';
-import type { DshAgent, DshAgentHandle, DshAgentRegistry } from '../../src/session/types.ts';
+import type { DshAgent, DshAgentHandle, DshAgentRegistry, SessionEventLike } from '../../src/session/types.ts';
 
 const env = vi.hoisted(() => ({ home: '' }));
 
@@ -1164,5 +1164,79 @@ describe('restoreCurrentSession — 启动恢复上次会话', () => {
     const manager = createManagerWithCtx(registry, onDiskCtx('session-current'));
 
     expect(await manager.restoreCurrentSession()).toEqual({ kind: 'none' });
+  });
+});
+
+describe('getTurnProgress — 生成中的现场', () => {
+  /** 已获取会话的事件流由用例提供；resume 成功即进入 records */
+  function progressManager(events: SessionEventLike[]) {
+    new PrefsStore().setSessionId(KEY, 'session-live');
+    const { registry } = createRegistry(async ({ resumeSessionId }) => ({
+      agent: {
+        ...fakeAgent(resumeSessionId),
+        status: 'running',
+        session: { id: resumeSessionId, snapshotEvents: () => events },
+      } as DshAgent,
+      dispose: vi.fn(async () => {}),
+    }));
+    return createManager(registry);
+  }
+
+  it('工具还没返回：给出步骤、工具名与本轮耗时', async () => {
+    const startedAt = Date.now() - 65_000;
+    const events: SessionEventLike[] = [
+      { type: 'turn/start', time: startedAt },
+      { type: 'step/start', time: startedAt + 100, data: { turn: 1, step: 2 } },
+      { type: 'tool/call', time: Date.now() - 12_000, data: { turn: 1, step: 2, callId: 'c1', name: 'read' } },
+    ];
+    const manager = progressManager(events);
+    await manager.getOrCreate('c2c', PEER, PEER, REPLY);
+
+    const progress = manager.getTurnProgress('c2c', PEER);
+    expect(progress).toMatchObject({ step: 2, waiting: 'tool', toolName: 'read' });
+    expect(progress?.elapsedMs).toBeGreaterThanOrEqual(65_000);
+  });
+
+  it('工具返回后等待模型，并把重试退避带出来', async () => {
+    const startedAt = Date.now() - 30_000;
+    const resultAt = Date.now() - 8_000;
+    const events: SessionEventLike[] = [
+      { type: 'turn/start', time: startedAt },
+      { type: 'step/start', time: startedAt, data: { turn: 1, step: 1 } },
+      { type: 'tool/call', time: startedAt + 1000, data: { callId: 'c1', name: 'grep' } },
+      { type: 'tool/result', time: resultAt, data: { message: { callId: 'c1', isError: false } } },
+      { type: 'llm/retry', time: Date.now() - 1000, data: { retry: 2, delayMs: 5000 } },
+    ];
+    const manager = progressManager(events);
+    await manager.getOrCreate('c2c', PEER, PEER, REPLY);
+
+    const progress = manager.getTurnProgress('c2c', PEER);
+    expect(progress).toMatchObject({ step: 1, waiting: 'model', retry: { attempt: 2, delayMs: 5000 } });
+    expect(progress?.waitingSince).toBe(resultAt);
+    expect(progress?.toolName).toBeUndefined();
+  });
+
+  it('重试已开始后不再显示退避', async () => {
+    const startedAt = Date.now() - 20_000;
+    const events: SessionEventLike[] = [
+      { type: 'turn/start', time: startedAt },
+      { type: 'step/start', time: startedAt, data: { step: 1 } },
+      { type: 'llm/retry', time: startedAt + 1000, data: { retry: 1, delayMs: 2000 } },
+      { type: 'llm/retry-started', time: startedAt + 3000, data: { retry: 1 } },
+    ];
+    const manager = progressManager(events);
+    await manager.getOrCreate('c2c', PEER, PEER, REPLY);
+
+    expect(manager.getTurnProgress('c2c', PEER)?.retry).toBeUndefined();
+  });
+
+  it('本轮已结束或日志缺时间时返回 undefined', async () => {
+    const closed: SessionEventLike[] = [
+      { type: 'turn/start', time: Date.now() - 1000 },
+      { type: 'turn/end', time: Date.now(), data: { reason: 'completed' } },
+    ];
+    const manager = progressManager(closed);
+    await manager.getOrCreate('c2c', PEER, PEER, REPLY);
+    expect(manager.getTurnProgress('c2c', PEER)).toBeUndefined();
   });
 });
