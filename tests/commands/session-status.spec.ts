@@ -246,7 +246,7 @@ describe('/status（有会话）', () => {
 
   it('生成中给可点击的 /stop 入口', async () => {
     const text = await run(makeManager({ agentStatus: 'running' }));
-    expect(text).toContain('<qqbot-cmd-input text="/stop" show="⛔ 停止生成"/>');
+    expect(text).toContain('<qqbot-cmd-input text="/stop" show="停止生成"/>');
     expect(text.trimEnd().endsWith('/>')).toBe(true);
   });
 
