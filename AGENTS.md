@@ -29,6 +29,7 @@
 | `cordis.patch.yml` | bundle patch，插入 `qqterm` 条目（随包分发） |
 | `cordis.dev.yml` | `--patch` 调试 overlay |
 | `locale/*.json` | 插件 meta 文案；命令与消息文案内联在 `src/` |
+| `tests/` | vitest 用例，`tests/**/*.spec.ts` 镜像 `src/` 目录，不进 `lib/` |
 | `lib/` | 构建产物，**不要手改** |
 
 ## 3. 硬约束
@@ -171,9 +172,9 @@
 改文案或新增命令后必跑，三条零命中（或只剩 §4.1 例外）才算过：
 
 ```bash
-rg -n '[✓✔☑√×✗]' src --glob '!*.test.ts'          # 文字符号：只该命中 visited_label 与终端日志
-rg -n '：`|：\$\{' src --glob '!*.test.ts'          # 「标签：值」误用全角冒号
-rg -n '注意|务必|强烈建议|建议您|也可以|另外' src/commands src/features --glob '!*.test.ts'
+rg -n '[✓✔☑√×✗]' src                              # 文字符号：只该命中 visited_label 与终端日志
+rg -n '：`|：\$\{' src                              # 「标签：值」误用全角冒号
+rg -n '注意|务必|强烈建议|建议您|也可以|另外' src/commands src/features
 ```
 
 发现偏差当场改，不攒「待统一」清单。
@@ -199,7 +200,7 @@ QQ 只有一个窗口，多个已获取会话的输出、提问、审批都回�
 | `pnpm typecheck:client` | 客户端类型检查 |
 | `pnpm run lint` | ⚠️ 没有 eslint，不是门禁 |
 
-- 测试与源码同目录（`src/**/*.test.ts`，tsconfig 排除，不进 `lib/`）。
+- 测试放顶层 `tests/`，镜像 `src/` 的目录结构（`tests/commands/foo.spec.ts` 测 `src/commands/foo.ts`），文件名一律 `*.spec.ts`；由 `vitest.config.ts` 的 `include` 收集，`tsconfig.json` 的 `exclude` 排除，不进 `lib/`。
 - 测试不得访问真实 `~/.dsh`、真实凭据或外网；用 `mkdtempSync(tmpdir())` 建临时目录，必要时 mock `node:fs` / logger。
 - 构建后提交 `lib/` 的 js；提 PR 前至少 `pnpm build` + `pnpm test`，改客户端再加 `pnpm typecheck:client`。
 - 相对导入必须带 `.ts` 后缀（`rewriteRelativeImportExtensions` 负责改写）；不要改 `tsconfig*` 的 include / exclude 边界。
@@ -234,7 +235,7 @@ QQ 只有一个窗口，多个已获取会话的输出、提问、审批都回�
 ## 9. 提交前检查
 
 - [ ] `pnpm build` 通过，`lib/` 的 js 已更新并提交
-- [ ] `pnpm test` 全绿；新逻辑有对应 `*.test.ts`
+- [ ] `pnpm test` 全绿；新逻辑有对应 `tests/**/*.spec.ts`
 - [ ] 未新增 `@deepseek-ai/*` 运行期依赖；`inject` 与实际依赖一致
 - [ ] `apply()` 没有阻塞式 await；异步错误都有 catch
 - [ ] 客户端改动已 typecheck，并在 C2C 验证一次按钮回退
@@ -248,3 +249,4 @@ QQ 只有一个窗口，多个已获取会话的输出、提问、审批都回�
 - DSH 沙箱会话里直接 `pnpm build` 可能因 ACL 写不了 `lib/`、`src/`（EPERM）；用普通终端，或在会话内提权。与仓库无关。
 - 某些 pnpm 版本跑 `pnpm run build` 会先校验依赖并尝试重建 `node_modules`；可直接跑 `node_modules/.bin/tsc` + `node_modules/.bin/tsdown`。
 - 改包名后只重建、不清宿主模块缓存，客户端可能报 “loaded without registering”。
+- DSH 沙箱里 `pnpm test` 起不来：Vite 探测网络盘会 `exec("net use")`、worker 走 `child_process`，都被沙箱拦成 `EPERM`。绕法（仅沙箱内，不进仓库）：预加载脚本把 `node:child_process` 的 `exec` / `execFile` 替成失败回调，再跑 `node --import <preload> node_modules/vitest/vitest.mjs run --configLoader native --pool=vmThreads`。`symlinkSync` 相关用例（`tests/shared/utils.spec.ts`）在沙箱里必失败，属环境限制。
