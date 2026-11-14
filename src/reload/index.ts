@@ -4,6 +4,8 @@
  * 一次重载会 dispose 当前 fiber，因此这里有三条硬约束：
  *   1. `hmr` 只按可选服务探测（`ctx.get('hmr')`），不能进 inject：
  *      开发 profile 常把它关掉，headless 组合包也没有这个服务。
+ *      探测必须是「每次用时再取」：宿主并发加载各 entry，hmr 可能在本插件
+ *      apply 之后才注册；启动时取一次会把它永久判成不可用。
  *   2. 命令处理器跑在即将被销毁的 fiber 里，必须先写完状态、再回复，
  *      最后用脱离 fiber 的原生定时器调度重载。
  *   3. 重载失败不回滚（旧 fiber 已经没了），结果只能落盘，由新 fiber 读回。
@@ -106,9 +108,11 @@ async function reloadOnce(hmr: HmrLike): Promise<{ restartReason?: string }> {
 
 export function createReloader(ctx: Context, logger: Logger, options?: ReloaderOptions): Reloader {
   const services = ctx as unknown as { get?: (name: string) => unknown };
-  const hmr = services.get?.('hmr') as HmrLike | undefined;
-  // 提前抓 loader：本插件被换掉之后旧 ctx 就不可再访问，而 loader 属于宿主
-  const loader = services.get?.('loader') as LoaderLike | undefined;
+  /**
+   * 按需读服务：hmr 可能晚于本插件的 apply 才注册，启动时快照会误判成不可用。
+   * 本插件被换掉之后旧 ctx 不可再访问，所以 run() 入口处取一次并持有到调度结束。
+   */
+  const service = <T>(name: string): T | undefined => services.get?.(name) as T | undefined;
   const statePath = options?.statePath ?? reloadStatePath(resolveProfileDir(ctx));
 
   /**
@@ -145,10 +149,14 @@ export function createReloader(ctx: Context, logger: Logger, options?: ReloaderO
   };
 
   return {
-    available: hmr !== undefined,
+    get available(): boolean {
+      return service<HmrLike>('hmr') !== undefined;
+    },
 
     run(notice?: ReloadNotice, bot?: QQBot): void {
       const startedAt = Date.now();
+      const hmr = service<HmrLike>('hmr');
+      const loader = service<LoaderLike>('loader');
       const before = entryUids(loader);
       // 先只记「往哪回」：结论要等 reconcile 跑完才知道，写在这里的就是待补发记录
       writeReloadState(statePath, {

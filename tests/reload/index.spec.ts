@@ -76,6 +76,22 @@ describe('createReloader', () => {
     expect(readReloadState(path)?.phase).toBeUndefined();
   });
 
+  it('hmr 晚于 apply 注册时，available 随之变为 true 且能重载', async () => {
+    const path = statePath();
+    const services: Record<string, unknown> = {};
+    const reloader = createReloader(fakeContext(services), logger, { statePath: path });
+    expect(reloader.available).toBe(false);
+
+    const hmr = fakeHmr();
+    services.hmr = hmr;
+    expect(reloader.available).toBe(true);
+
+    reloader.run();
+    await vi.advanceTimersByTimeAsync(300);
+    expect(hmr.reconcileProfile).toHaveBeenCalledTimes(1);
+    expect(readReloadState(path)?.phase).toBe('done');
+  });
+
   it('run 先写待补发记录，延迟后再调 reconcileProfile 并落 done', async () => {
     const path = statePath();
     const hmr = fakeHmr();
