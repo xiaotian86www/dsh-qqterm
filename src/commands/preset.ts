@@ -59,6 +59,8 @@ export function presetCommand({ manager, config, logger }: CommandDeps): SlashCo
             return `⚠️ 未知 preset: ${args}`;
           case 'broken':
             return `❌ preset ${args} 加载失败: ${outcome.message ?? '未知错误'}`;
+          case 'unavailable':
+            return '⚠️ 当前部署无可用的 agent preset';
           default:
             return `❌ preset 切换失败: ${outcome.message ?? '未知错误'}`;
         }

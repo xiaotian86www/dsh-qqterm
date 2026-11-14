@@ -12,14 +12,17 @@ import { renderPluginList } from '../plugins/format.ts';
 import type { PluginInstaller } from '../plugins/index.ts';
 import { ownerOnlyAuth } from './auth.ts';
 
-const USAGE = [
-  '### 📖 /plugins 用法',
-  '',
-  '`/plugins [页码]` 列出已安装插件',
-  '`/plugins install <包名> [--allow-builds=<包名,…>]` 安装插件',
-  '`/plugins update <包名> [版本]` 更新插件',
-  '`/plugins reload` 应用磁盘变更',
-].join('\n');
+/** 用法页：没有 hmr 服务时 `reload` 整条不出现，免得用户看到一条注定回「不支持」的子命令 */
+function usageFor(reloadable: boolean): string {
+  return [
+    '### 📖 /plugins 用法',
+    '',
+    '`/plugins [页码]` 列出已安装插件',
+    '`/plugins install <包名> [--allow-builds=<包名,…>]` 安装插件',
+    '`/plugins update <包名> [版本]` 更新插件',
+    ...(reloadable ? ['`/plugins reload` 应用磁盘变更'] : []),
+  ].join('\n');
+}
 
 /** 解析 `--allow-builds=a,b`：只在用户看到「构建脚本被拦下」之后才会带 */
 function parseApproved(args: readonly string[]): string[] | undefined {
@@ -40,7 +43,10 @@ export function pluginsCommand({ config, logger, installer, reloader }: CommandD
     scope: 'all',
     authorized: ownerOnlyAuth(config, logger),
     description: '管理插件',
-    usage: USAGE,
+    // 部署里没有 hmr 时按未知子命令处理，用法页也不列这一行
+    get usage(): string {
+      return usageFor(reloader?.available === true);
+    },
     handler: async (cmdCtx) => {
       const extras = cmdCtx as unknown as {
         replyTarget?: { targetId?: string };
@@ -100,7 +106,9 @@ export function pluginsCommand({ config, logger, installer, reloader }: CommandD
         }
 
         if (sub === 'reload') {
-          if (reloader === undefined || !reloader.available) return '⚠️ 当前 profile 未启用热重载';
+          if (reloader === undefined || !reloader.available) {
+            return `⚠️ 不支持的子命令: \`${sub}\` · 用法: /help plugins`;
+          }
 
           // 上一轮的结论可能还没送到（新 fiber 的 ready 补发之前又收到这条命令）：
           // run() 会把状态改写成 running，那一轮「应用了什么」就再也读不到了。

@@ -4,8 +4,9 @@
  * apply() 检测到凭据缺失时调用 ensureCredentials：
  * 1. 创建 BindingService（单例接管，HMR 双 fiber 安全）
  * 2. Web 宿主（dsh web / Desktop）注册端内绑定页路由
- *    —— 经 ctx.inject(['webServer'], ...) 可选注入：服务未就绪时插件
- *       照常加载（CLI profile），就绪/替换时自动（重）注册路由
+ *    —— webServer 不在 inject：经 ctx.inject(['webServer'], ...) 订阅，
+ *       服务未就绪时插件照常加载（CLI / headless profile），
+ *       就绪/替换时自动（重）注册路由
  * 3. 按宿主形态挂呈现策略（终端 / 浏览器降级）
  * 4. 生命周期与 ctx fiber 绑定（dispose 时 abort 轮询、注销路由）
  *
@@ -15,7 +16,7 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type { Logger } from '../types.ts';
 import { BindingService } from './binding-service.ts';
-import { registerBindRoutes, type WebServerLike } from './bind-routes.ts';
+import { mountBindRoutes } from './bind-routes.ts';
 import { createBrowserPresenter, createTerminalPresenter, isDesktopHost } from './presenters.ts';
 import { persistCredentialsToProfile, type SetupCredentials } from './persist.ts';
 import { getProfileDir } from '../shared/index.ts';
@@ -85,23 +86,16 @@ export async function ensureCredentials(
     service.attach(createBrowserPresenter(logger));
   }
 
-  // 端内绑定页路由（webServer 已在 inject 中声明）
-  const webServer = (ctx as unknown as { webServer: WebServerLike }).webServer;
-  {
-    const disposeRoutes = registerBindRoutes(webServer, service, logger, {
-      ...(options.boundAppId === undefined ? {} : { boundAppId: options.boundAppId }),
-      // 未绑定流程中的手动提交：终止扫码轮询，走同一持久化路径
-      onManualCredentials: (credentials) => {
-        service.dispose();
-        return persistCredentials(credentials, logger);
-      },
-      currentConfig: () => options.config,
-    });
-    // 插件卸载时连带注销路由
-    (ctx as unknown as { effect(fn: () => () => void, name?: string): void }).effect(() => {
-      return disposeRoutes;
-    }, 'qqterm.bind-routes');
-  }
+  // 端内绑定页路由：webServer 可选（CLI / headless 没有），经 ctx.inject 订阅
+  mountBindRoutes(ctx, service, logger, {
+    ...(options.boundAppId === undefined ? {} : { boundAppId: options.boundAppId }),
+    // 未绑定流程中的手动提交：终止扫码轮询，走同一持久化路径
+    onManualCredentials: (credentials) => {
+      service.dispose();
+      return persistCredentials(credentials, logger);
+    },
+    currentConfig: () => options.config,
+  });
 
   return service.start();
 }
@@ -113,15 +107,11 @@ export async function ensureCredentials(
  * 保存后触发 HMR 重载、新 fiber 以新凭据重启网关。
  */
 export function registerBoundCredentialRoutes(ctx: Context, logger: Logger, appId: string, config: Record<string, unknown>): void {
-  const webServer = (ctx as unknown as { webServer: WebServerLike }).webServer;
-  const disposeRoutes = registerBindRoutes(webServer, null, logger, {
+  mountBindRoutes(ctx, null, logger, {
     boundAppId: () => appId,
     onManualCredentials: (credentials) => persistCredentials(credentials, logger),
     currentConfig: () => config,
   });
-  (ctx as unknown as { effect(fn: () => () => void, name?: string): void }).effect(() => {
-    return disposeRoutes;
-  }, 'qqterm.bind-routes');
 }
 
 /** 手动凭据持久化（失败时返回可展示的错误） */

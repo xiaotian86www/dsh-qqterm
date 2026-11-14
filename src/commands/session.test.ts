@@ -23,6 +23,7 @@ const config = ConfigSchema({
 function makeManager() {
   return {
     remove: vi.fn(async () => {}),
+    workspaceRegistryAvailable: vi.fn(() => true),
     resolveWorkspace: vi.fn(() => ({ ok: true as const, title: 'repo', path: 'D:\\repo', isNew: false })),
     changeChatWorkspace: vi.fn(async () => ({ ok: true as const, title: 'repo', path: 'D:\\repo', isNew: false })),
   };
@@ -150,6 +151,7 @@ describe('/new <工作区>', () => {
   it('目标解析失败时不动当前会话', async () => {
     const manager = {
       remove: vi.fn(async () => {}),
+      workspaceRegistryAvailable: vi.fn(() => true),
       resolveWorkspace: vi.fn(() => ({ ok: false as const, reason: 'missing' as const, path: 'D:\\nope' })),
       changeChatWorkspace: vi.fn(async () => ({ ok: true as const, title: 'x', path: 'x', isNew: false })),
     };
@@ -161,9 +163,25 @@ describe('/new <工作区>', () => {
     expect(text).toContain('目录不存在: `D:\\nope`');
   });
 
+  it('没有 registry 的部署不能按名字新建，提示用绝对路径', async () => {
+    const manager = {
+      remove: vi.fn(async () => {}),
+      workspaceRegistryAvailable: vi.fn(() => false),
+      resolveWorkspace: vi.fn(() => ({ ok: false as const, reason: 'unavailable' as const, arg: 'repo' })),
+      changeChatWorkspace: vi.fn(async () => ({ ok: true as const, title: 'x', path: 'x', isNew: false })),
+    };
+
+    const text = await run(manager, 'repo');
+
+    expect(text).toContain('只支持绝对路径');
+    expect(text).toContain('/new D:\\项目\\目录');
+    expect(manager.remove).not.toHaveBeenCalled();
+  });
+
   it('换目录在 remove 之后仍失败时如实报告（不回「已开启」）', async () => {
     const manager = {
       remove: vi.fn(async () => {}),
+      workspaceRegistryAvailable: vi.fn(() => true),
       resolveWorkspace: vi.fn(() => ({ ok: true as const, title: 'repo', path: 'D:\\repo', isNew: false })),
       changeChatWorkspace: vi.fn(async () => ({ ok: false as const, reason: 'missing' as const, path: 'D:\\repo' })),
     };
@@ -171,6 +189,33 @@ describe('/new <工作区>', () => {
     const text = await run(manager, 'repo');
     expect(text).toContain('目录不存在');
     expect(text).not.toContain('已开启新会话');
+  });
+
+  it('没有 registry 时用法页只列路径写法', () => {
+    const named = newCommand({ manager: makeManager() as unknown as SessionManager, config, logger });
+    expect(named.usage).toContain('`/new <工作区>`');
+    expect(named.usage).toContain('工作区认标题、目录名或绝对路径');
+
+    const pathOnly = newCommand({
+      manager: { ...makeManager(), workspaceRegistryAvailable: vi.fn(() => false) } as unknown as SessionManager,
+      config,
+      logger,
+    });
+    expect(pathOnly.usage).toContain('`/new <路径>`');
+    expect(pathOnly.usage).not.toContain('工作区认标题');
+  });
+
+  it('没有 registry 时回执只显示路径，不重复末段目录名', async () => {
+    const manager = {
+      remove: vi.fn(async () => {}),
+      workspaceRegistryAvailable: vi.fn(() => false),
+      resolveWorkspace: vi.fn(() => ({ ok: true as const, title: 'repo', path: 'D:\\repo', isNew: true })),
+      changeChatWorkspace: vi.fn(async () => ({ ok: true as const, title: 'repo', path: 'D:\\repo', isNew: true })),
+    };
+
+    const text = await run(manager, 'D:\\repo');
+
+    expect(text).toBe('✅ 已开启新会话\n工作区: D:\\repo');
   });
 
   it('非绑定用户不能改工作区，且不动会话', async () => {

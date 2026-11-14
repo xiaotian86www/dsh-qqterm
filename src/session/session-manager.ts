@@ -27,6 +27,7 @@ import { createHostAdapter, type HostAdapter, type HostSessionInfo } from '../ho
 import { mkdirSync, statSync } from 'node:fs';
 import { basename, isAbsolute, resolve } from 'node:path';
 import { resolveAgentCwd } from '../shared/dirs.ts';
+import { optionalService } from '../shared/index.ts';
 import { sessionTitleOf } from '../transport/session-source.ts';
 import type { ChatScope, Logger, ReplyTarget } from '../types.ts';
 import type { QQTermConfig } from '../config.ts';
@@ -69,6 +70,9 @@ import type {
   SendToOutcome,
   RetryPromptOutcome,
 } from './types.ts';
+
+/** 没有活跃会话时，部署默认选择用的串行化键 */
+const DEFAULT_SELECTION_KEY = '@default';
 
 /** agent preset 默认值所在的配置条目（与设置页写的是同一个 namespace） */
 const PRESET_SETTINGS_NS = 'agent-preset-registry';
@@ -145,16 +149,6 @@ interface SessionProjectionsLike {
   stateOf(session: unknown, key: string): SelectionState | undefined;
 }
 
-/** 宿主 sessionController 最小接口（只用到 selectModel） */
-interface SessionControllerLike {
-  selectModel(request: {
-    sessionId: string;
-    provider: string;
-    model: string;
-    reasoningEffort?: string;
-  }): Promise<{ selected: HostSelection }>;
-}
-
 /** 宿主命令登记簿最小接口（/compact 的判定与执行都走它） */
 interface CommandsRegistryLike {
   find(agent: unknown, name: string): unknown;
@@ -207,6 +201,13 @@ export class SessionManager {
    * 后写入 records 的覆盖前者且前者无人 dispose（泄漏）。
    */
   private inflight = new Map<string, Promise<SessionRecord>>();
+  /**
+   * 选择写入的串行化链：sessionId（或部署默认值键）→ 上一次写入的完成信号。
+   *
+   * `/model` 与 `/reasoning` 都是「读当前选择 → 拼新选择 → 写回」，并发进入会
+   * 用旧值覆盖对方。只串 QQ 渠道自己的写入；Web 端并发改同一个会话不在链上。
+   */
+  private readonly selectionChains = new Map<string, Promise<void>>();
   /**
    * 当前这个聊天的工作目录（内存态，唯一读写来源）。
    *
@@ -266,16 +267,22 @@ export class SessionManager {
       const record = this.records.get(agent.id);
       if (!record || record.agent !== agent) return;
       this.records.delete(agent.id);
+      this.selectionChains.delete(agent.id);
       this.cancelPendingFor(agent.id);
       this.logger.info(`acquired session disposed externally: sessionId=${agent.id}`);
     }, { global: true });
   }
 
   /**
-   * agentPresets 服务（已加入 inject，缺服务时插件不激活）
+   * agentPresets 服务（可选，不在 inject 里）
+   *
+   * 部署里可能没有 agent-preset-registry（base / headless / 自组 profile）。
+   * 必须走 `ctx.get('agentPresets')`：不在 inject 里时属性访问会直接抛
+   * `cannot get property "agentPresets" without inject`，可选链兜不住。
+   * 取不到时 /preset 整条不注册，新建 / 恢复的会话不挂 preset，走宿主默认组合。
    */
-  private getPresetsService(): AgentPresetsLike {
-    return (this.ctx as unknown as { agentPresets: AgentPresetsLike }).agentPresets;
+  private getPresetsService(): AgentPresetsLike | undefined {
+    return optionalService<AgentPresetsLike>(this.ctx, 'agentPresets');
   }
 
   /**
@@ -345,6 +352,13 @@ export class SessionManager {
   }
 
   /**
+   * 部署里有没有 agentPresets 服务（决定 /preset 是否注册：没有就整条命令不出现）
+   */
+  presetsAvailable(): boolean {
+    return this.getPresetsService() !== undefined;
+  }
+
+  /**
    * 列出所有可用 preset（/preset 命令用）
    */
   async listPresets(): Promise<PresetEntry[]> {
@@ -368,23 +382,26 @@ export class SessionManager {
   /**
    * 切换模型
    *
-   * 有活跃会话时走宿主 `sessionController.selectModel`（Web 端切模型同一条路径）：
-   * 选择记进这个会话的 `model/selection` 事件，下一轮生效；会话历史不重建、插件
-   * 不另存偏好。没有活跃会话时写部署默认值（`agentDefaultModel.saveSelection`），
-   * 之后新建的会话用它——与有会话时宿主顺手把选择存成默认是同一个效果。
+   * 有活跃会话时把选择写进这个会话的 `model/selection`（宿主 dsh-agent 的
+   * `agent.model.select`，与 Web 端切模型落的是同一条事件）：下一轮生效，会话
+   * 历史不重建、插件不另存偏好。没有活跃会话时写部署默认值
+   * （`agentDefaultModel.saveSelection`），之后新建的会话用它。
+   *
+   * 整段「读当前值 → 校验 → 写回」在 `serializeSelection` 里跑：QQ 侧并发的
+   * `/model` 与 `/reasoning` 不能互相覆盖。Web 端同时改同一个会话不在这里处理。
    */
   async setModelOverride(scope: ChatScope, peerId: string, route: ModelRoute): Promise<ModelSwitchOutcome> {
     const key = this.sessionKey();
-
     const record = this.getSessionRecord(scope, peerId);
-    const current = record ? this.routeOf(record) : this.modelResolver.resolveDefault();
-    if (current.provider === route.provider && current.model === route.model) {
-      this.logger.debug(`model switch skipped (already current): key=${key} → ${route.provider}/${route.model}`);
-      return { ...route, unchanged: true };
-    }
 
-    if (!record) {
-      // 没有活跃会话：按宿主的模型目录校验后再写部署默认值，拼错的路由不落盘
+    return this.serializeSelection(record?.sessionId ?? DEFAULT_SELECTION_KEY, async (): Promise<ModelSwitchOutcome> => {
+      const current = record ? this.routeOf(record) : this.modelResolver.resolveDefault();
+      if (current.provider === route.provider && current.model === route.model) {
+        this.logger.debug(`model switch skipped (already current): key=${key} → ${route.provider}/${route.model}`);
+        return { ...route, unchanged: true };
+      }
+
+      // 拼错的路由一律不落盘：没有会话时不写默认值，有会话时不写进会话日志
       let known: boolean;
       try {
         known = await this.modelResolver.hasModel(route.provider, route.model);
@@ -398,41 +415,42 @@ export class SessionManager {
         return { ...route, reason: 'unknown-model' };
       }
 
-      const keepEffort = await this.keepEffortFor(route, this.defaultSelection()?.reasoningEffort);
-      try {
-        await this.agentDefaultModel.saveSelection({
-          provider: route.provider,
-          model: route.model,
-          ...(keepEffort !== undefined ? { reasoningEffort: keepEffort } : {}),
-        });
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        this.logger.warn(`default model switch failed: key=${key} err=${message}`);
-        return { ...route, reason: 'failed', message };
+      if (!record) {
+        const keepEffort = await this.keepEffortFor(route, this.defaultSelection()?.reasoningEffort);
+        try {
+          await this.agentDefaultModel.saveSelection({
+            provider: route.provider,
+            model: route.model,
+            ...(keepEffort !== undefined ? { reasoningEffort: keepEffort } : {}),
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          this.logger.warn(`default model switch failed: key=${key} err=${message}`);
+          return { ...route, reason: 'failed', message };
+        }
+
+        this.logger.info(`default model set: key=${key} → ${route.provider}/${route.model}`);
+        return { ...route };
       }
 
-      this.logger.info(`default model set: key=${key} → ${route.provider}/${route.model}`);
-      return { ...route };
-    }
-
-    const keepEffort = await this.keepEffortFor(route, this.hostSelection(record.agent)?.reasoningEffort);
-    try {
-      await this.sessionController.selectModel({
-        sessionId: record.sessionId,
+      const keepEffort = await this.keepEffortFor(route, this.hostSelection(record.agent)?.reasoningEffort);
+      const selected: HostSelection = {
         provider: route.provider,
         model: route.model,
         ...(keepEffort !== undefined ? { reasoningEffort: keepEffort } : {}),
-      });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.logger.warn(`model switch failed: key=${key} err=${message}`);
-      return { ...route, reason: 'failed', message };
-    }
+      };
+      try {
+        record.agent.model.select(selected);
+        this.persistDefaultSelection(selected, key);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`model switch failed: key=${key} err=${message}`);
+        return { ...route, reason: 'failed', message };
+      }
 
-    // 宿主没装 model-selection projection 时 agent.model.current() 不会变，
-    // 但 selectModel 已把选择写进会话日志，下一轮请求仍按它走。
-    this.logger.info(`model switched: key=${key} → ${route.provider}/${route.model}`);
-    return { ...route };
+      this.logger.info(`model switched: key=${key} → ${route.provider}/${route.model}`);
+      return { ...route };
+    });
   }
 
   /**
@@ -478,8 +496,9 @@ export class SessionManager {
   /**
    * 切换思考强度
    *
-   * 走宿主 `sessionController.selectModel`：当前会话下一轮生效，默认值由宿主
-   * 自己保存（新会话沿用）。`effort` 为 undefined 表示恢复模型默认值。
+   * 写进当前会话的 `model/selection`（`agent.model.select`）：下一轮生效，
+   * `effort` 为 undefined 表示恢复模型默认值。没有活跃会话时写部署默认值。
+   * 与 `/model` 共用 `serializeSelection`，同一会话的选择写入不交错。
    */
   async selectEffort(
     scope: ChatScope,
@@ -488,62 +507,66 @@ export class SessionManager {
   ): Promise<EffortSwitchOutcome> {
     const key = this.sessionKey();
     const record = this.getSessionRecord(scope, peerId);
-    const selection = this.hostSelection(record?.agent);
-    const route = this.getEffectiveModel(scope, peerId)
-      ?? selection
-      ?? this.modelResolver.resolveDefault();
-    const reasoning = await this.modelResolver.reasoningInfo(route);
-    if (!reasoning) return { ok: false, reason: 'unsupported' };
 
-    const target = effort === undefined
-      ? undefined
-      : reasoning.efforts.find((option) => option.id === effort);
-    if (effort !== undefined && target === undefined) {
-      return { ok: false, reason: 'unknown-effort', options: reasoning.efforts };
-    }
+    return this.serializeSelection(record?.sessionId ?? DEFAULT_SELECTION_KEY, async (): Promise<EffortSwitchOutcome> => {
+      const selection = this.hostSelection(record?.agent);
+      const route = this.getEffectiveModel(scope, peerId)
+        ?? selection
+        ?? this.modelResolver.resolveDefault();
+      const reasoning = await this.modelResolver.reasoningInfo(route);
+      if (!reasoning) return { ok: false, reason: 'unsupported' };
 
-    const selectedEffort = this.selectedEffortOf(selection, route);
-    const current = selectedEffort === undefined
-      ? undefined
-      : reasoning.efforts.find((option) => option.id === selectedEffort);
-    // 未显式选择时「选中模型默认档位」不产生变化，不写宿主
-    const sameAsCurrent = target?.id === current?.id
-      || (target !== undefined && current === undefined && target.id === this.modelDefault(reasoning)?.id);
-    if (sameAsCurrent || (target === undefined && selectedEffort === undefined)) {
-      this.logger.debug(`reasoning effort skipped (already current): key=${key} → ${target?.id ?? 'model default'}`);
-      const shown = target ?? current;
-      return { ok: true, ...(shown ? { effort: shown.id } : {}), unchanged: true };
-    }
+      const target = effort === undefined
+        ? undefined
+        : reasoning.efforts.find((option) => option.id === effort);
+      if (effort !== undefined && target === undefined) {
+        return { ok: false, reason: 'unknown-effort', options: reasoning.efforts };
+      }
 
-    const applied = await this.applySelection(route, target?.id, record);
-    if (!applied.ok) return applied;
+      const selectedEffort = this.selectedEffortOf(selection, route);
+      const current = selectedEffort === undefined
+        ? undefined
+        : reasoning.efforts.find((option) => option.id === selectedEffort);
+      // 未显式选择时「选中模型默认档位」不产生变化，不写会话
+      const sameAsCurrent = target?.id === current?.id
+        || (target !== undefined && current === undefined && target.id === this.modelDefault(reasoning)?.id);
+      if (sameAsCurrent || (target === undefined && selectedEffort === undefined)) {
+        this.logger.debug(`reasoning effort skipped (already current): key=${key} → ${target?.id ?? 'model default'}`);
+        const shown = target ?? current;
+        return { ok: true, ...(shown ? { effort: shown.id } : {}), unchanged: true };
+      }
 
-    const display = applied.effort !== undefined
-      ? reasoning.efforts.find((option) => option.id === applied.effort) ?? this.modelDefault(reasoning)
-      : this.modelDefault(reasoning);
-    this.logger.info(`reasoning effort switched: key=${key} → ${display?.id ?? 'model default'}`);
-    return { ok: true, ...(display ? { effort: display.id } : {}) };
+      const applied = await this.applySelection(route, target?.id, record);
+      if (!applied.ok) return applied;
+
+      const display = applied.effort !== undefined
+        ? reasoning.efforts.find((option) => option.id === applied.effort) ?? this.modelDefault(reasoning)
+        : this.modelDefault(reasoning);
+      this.logger.info(`reasoning effort switched: key=${key} → ${display?.id ?? 'model default'}`);
+      return { ok: true, ...(display ? { effort: display.id } : {}) };
+    });
   }
 
   /**
-   * 把思考强度选择交给宿主。
+   * 把思考强度选择写进会话或部署默认值。
    *
-   * 有会话时走 `sessionController.selectModel`：选择记进当前会话，同时成为新的
-   * 部署默认值（与核心一致，不再写回旧默认）。没有会话时没有可写的会话，直接
-   * 写部署默认值 `agentDefaultModel.saveSelection`，之后新建的会话用它。
+   * 有会话时 `agent.model.select`：选择记进当前会话，同时按核心行为写成新的
+   * 部署默认值（新会话沿用）。没有会话时直接写 `agentDefaultModel.saveSelection`。
    */
   private async applySelection(
     route: ModelRoute,
     effort: string | undefined,
     record: SessionRecord | undefined,
   ): Promise<{ ok: true; effort?: string } | EffortSwitchOutcome> {
+    const selected: HostSelection = {
+      provider: route.provider,
+      model: route.model,
+      ...(effort !== undefined ? { reasoningEffort: effort } : {}),
+    };
+
     if (!record) {
       try {
-        await this.agentDefaultModel.saveSelection({
-          provider: route.provider,
-          model: route.model,
-          ...(effort !== undefined ? { reasoningEffort: effort } : {}),
-        });
+        await this.agentDefaultModel.saveSelection(selected);
         return { ok: true, ...(effort !== undefined ? { effort } : {}) };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -553,13 +576,9 @@ export class SessionManager {
     }
 
     try {
-      const { selected } = await this.sessionController.selectModel({
-        sessionId: record.sessionId,
-        provider: route.provider,
-        model: route.model,
-        ...(effort !== undefined ? { reasoningEffort: effort } : {}),
-      });
-      return { ok: true, ...(selected.reasoningEffort !== undefined ? { effort: selected.reasoningEffort } : {}) };
+      record.agent.model.select(selected);
+      this.persistDefaultSelection(selected, this.sessionKey());
+      return { ok: true, ...(effort !== undefined ? { effort } : {}) };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.warn(`reasoning effort switch failed: ${message}`);
@@ -670,8 +689,11 @@ export class SessionManager {
   async setPresetOverride(_scope: ChatScope, _peerId: string, presetId: string): Promise<PresetSwitchOutcome> {
     const key = this.sessionKey();
 
-    // 1. 校验 preset 存在 + 可加载（broken 拒绝）
+    // 部署里没有注册表（base / headless / 自组 profile）：没有可切换的 preset
     const presets = this.getPresetsService();
+    if (!presets) return { ok: false, reason: 'unavailable' };
+
+    // 1. 校验 preset 存在 + 可加载（broken 拒绝）
     let resolved: { id: string; broken?: string };
     try {
       resolved = await presets.resolve(presetId);
@@ -1114,9 +1136,29 @@ export class SessionManager {
     return `qqterm:${this.config.appId}:chat`;
   }
 
-  /** 宿主会话控制服务（inject 保证存在） */
-  private get sessionController(): SessionControllerLike {
-    return (this.ctx as unknown as { sessionController: SessionControllerLike }).sessionController;
+  /**
+   * 同一个会话的选择写入串行化。
+   *
+   * `/model` 与 `/reasoning` 都是「读当前选择 → 拼新选择 → 写回」，并发进入会
+   * 用旧值覆盖对方（例如 /reasoning 读到 A 模型后 /model 换成 B，再把 A 写回）。
+   * 没有活跃会话时用 DEFAULT_SELECTION_KEY 串部署默认值。只保护 QQ 渠道自己的
+   * 写入：Web 端同时改同一个会话时不在这条链上（两边都只是 append 一条选择事件）。
+   */
+  private serializeSelection<T>(sessionId: string, operation: () => Promise<T>): Promise<T> {
+    const previous = this.selectionChains.get(sessionId) ?? Promise.resolve();
+    const result = previous.then(operation);
+    this.selectionChains.set(sessionId, result.then(() => undefined, () => undefined));
+    return result;
+  }
+
+  /**
+   * 会话内改完选择后把部署默认一起写掉（宿主 controller 也是这么做的：新会话
+   * 沿用最近一次选择）。失败只记 warn，不影响本次切换。
+   */
+  private persistDefaultSelection(selection: HostSelection, key: string): void {
+    void this.agentDefaultModel.saveSelection(selection).catch((err) => {
+      this.logger.warn(`session model selection saved but default not: key=${key} err=${errorText(err)}`);
+    });
   }
 
   /** 宿主命令登记簿（inject 保证存在） */
@@ -1704,7 +1746,9 @@ export class SessionManager {
         ? undefined
         : workspaces.find((item) => samePath(item.path, directory));
       const workspacePath = workspace?.path ?? directory;
-      const workspaceTitle = workspace?.title ?? (directory === undefined ? undefined : basename(directory));
+      // 没有 registry 时只有路径：不拿目录名冒充工作区名，分组标题只显示路径
+      const workspaceTitle = workspace?.title
+        ?? (this.host.supportsWorkspaceRegistry() && directory !== undefined ? basename(directory) : undefined);
       return {
         id: record.sessionId,
         ...(titles.has(record.sessionId) ? { title: titles.get(record.sessionId) } : {}),
@@ -1739,7 +1783,19 @@ export class SessionManager {
     if (info) {
       return { title: info.title, path: info.path, missing: !isDirectory(info.path) };
     }
-    return { title: basename(workspace), path: workspace, missing: !isDirectory(workspace) };
+    // 没有 registry 时只有目录，不拿末段目录名冒充工作区名
+    const title = this.host.supportsWorkspaceRegistry() ? basename(workspace) : '';
+    return { title, path: workspace, missing: !isDirectory(workspace) };
+  }
+
+  /**
+   * 部署里是否有 workspaceRegistry（决定工作区名、置顶 / 归档）。
+   *
+   * 没有这个服务时列表仍按目录路径分组，但组标题只有路径；归档子命令按未知
+   * 子命令处理，也不能按名字新建会话。
+   */
+  workspaceRegistryAvailable(): boolean {
+    return this.host.supportsWorkspaceRegistry();
   }
 
   /** 宿主工作区清单（`/new <工作区>` 匹配用） */
@@ -1773,6 +1829,9 @@ export class SessionManager {
       const known = this.listWorkspaceInfos().find((item) => samePath(item.path, path));
       title = known?.title ?? basename(path);
       isNew = known === undefined;
+    } else if (!this.host.supportsWorkspaceRegistry()) {
+      // 没有 registry 就没有工作区名可匹配：只认绝对路径
+      return { ok: false, reason: 'unavailable', arg: target };
     } else {
       const picked = matchWorkspace(this.listWorkspaceInfos(), target);
       if ('error' in picked) return picked.error;
@@ -1847,6 +1906,28 @@ export class SessionManager {
         workspace,
       };
     };
+
+    // 没有 registry 时不按会话记账分组：按会话所在目录聚合，组标题只有路径
+    if (!this.host.supportsWorkspaceRegistry()) {
+      const groups: WorkspaceGroup[] = [];
+      const byPath = new Map<string, WorkspaceGroup>();
+      for (const session of sessions) {
+        const dir = (session.cwd ?? '').trim();
+        // Windows 大小写不敏感；其它平台保留原样，避免合并仅大小写不同的目录
+        const folded = process.platform === 'win32' ? dir.toLowerCase() : dir;
+        const key = dir === '' ? 'ungrouped' : `path:${folded}`;
+        let group = byPath.get(key);
+        if (group === undefined) {
+          group = dir === ''
+            ? { id: 'ungrouped', title: '未分组', path: '', missing: false, sessions: [] }
+            : { id: key, title: '', path: dir, missing: !isDirectory(dir), sessions: [] };
+          byPath.set(key, group);
+          groups.push(group);
+        }
+        group.sessions.push(asEntry(session, group.title));
+      }
+      return groups;
+    }
 
     const byId = new Map(sessions.map((session) => [session.id, session]));
     const pinOrder = [...pinned];

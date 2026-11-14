@@ -175,6 +175,15 @@ function createCtx(options: {
     }),
   };
   registryStub = options.withRegistry === false ? undefined : registry;
+  const sessionController = {
+    list: async () => ({
+      items: sessions.map((session) => ({
+        sessionId: session.id,
+        updatedAt: options.recency?.[session.id] ?? session.createdAt ?? 0,
+        blank: session.blank === true,
+      })),
+    }),
+  };
 
   return {
     ...hostServices(),
@@ -184,20 +193,10 @@ function createCtx(options: {
       readTitleSnapshots: async () => [],
     },
     workingDirectory: options.workingDirectory,
-    workspaceRegistry: registryStub ?? {
-      list: () => [],
-      create: async (path: string) => ({ path, title: basename(path), attachSession: async () => {} }),
-    },
+    // 没有 registry 的部署里这个属性根本不存在（Cordis 未注入）
+    ...(registryStub === undefined ? {} : { workspaceRegistry: registryStub }),
     sessionTitle: options.sessionTitle ?? { rename: () => ({ title: '' }) },
-    sessionController: {
-      list: async () => ({
-        items: sessions.map((session) => ({
-          sessionId: session.id,
-          updatedAt: options.recency?.[session.id] ?? session.createdAt ?? 0,
-          blank: session.blank === true,
-        })),
-      }),
-    },
+    sessionController,
     agentPresets: { serviceFor: () => undefined },
     permissionPresets: { names: [], optionOf: () => undefined },
     get: (name: string) => {
@@ -206,6 +205,7 @@ function createCtx(options: {
       if (name === 'workspaceRegistry') return registryStub;
       if (name === 'workingDirectory') return options.workingDirectory;
       if (name === 'sessionTitle') return options.sessionTitle;
+      if (name === 'sessionController') return sessionController;
       return undefined;
     },
     on: vi.fn(),
@@ -452,6 +452,46 @@ describe('listWorkspaceGroups', () => {
     expect(groups.find((group) => group.id === 'w1')?.sessions.map((session) => session.id))
       .toEqual(['session-live']);
   });
+
+  it('没有 workspaceRegistry 时按会话目录分组，组标题只有路径', async () => {
+    const other = join(env.home, 'other-ws');
+    mkdirSync(other, { recursive: true });
+    const ctx = createCtx({
+      withQuery: true,
+      withRegistry: false,
+      sessions: [
+        { id: 'session-a', cwd: WORKSPACE(), createdAt: 2 },
+        { id: 'session-b', cwd: other, createdAt: 1 },
+      ],
+    });
+    const { manager } = createManager(ctx);
+
+    const groups = await manager.listWorkspaceGroups('c2c', PEER);
+
+    expect(groups.map((group) => [group.path, group.title])).toEqual([
+      [WORKSPACE(), ''],
+      [other, ''],
+    ]);
+    expect(groups[0]?.sessions.map((session) => session.id)).toEqual(['session-a']);
+    expect(manager.workspaceRegistryAvailable()).toBe(false);
+  });
+});
+
+describe('resolveWorkspace', () => {
+  it('没有 workspaceRegistry 时按名字解析回 unavailable，绝对路径仍可用', async () => {
+    const ctx = createCtx({ withRegistry: false });
+    const { manager } = createManager(ctx);
+
+    expect(manager.resolveWorkspace('repo'))
+      .toEqual({ ok: false, reason: 'unavailable', arg: 'repo' });
+
+    const hit = manager.resolveWorkspace(WORKSPACE());
+    expect(hit.ok).toBe(true);
+    if (hit.ok) {
+      expect(hit.path).toBe(WORKSPACE());
+      expect(hit.title).toBe(basename(WORKSPACE()));
+    }
+  });
 });
 
 describe('listHeldSessions', () => {
@@ -523,6 +563,21 @@ describe('listHeldSessions', () => {
       held: true,
       live: true,
     });
+  });
+
+  it('没有 workspaceRegistry 时只给路径，不给工作区名', async () => {
+    const ctx = createCtx({
+      withQuery: true,
+      withRegistry: false,
+      sessions: [{ id: 'session-a', cwd: WORKSPACE(), createdAt: 1 }],
+    });
+    const { manager } = createManager(ctx);
+
+    await manager.switchSession('c2c', PEER, 'session-a', PEER, REPLY);
+    const [held] = await manager.listHeldSessions('c2c', PEER);
+
+    expect(held?.workspace).toBeUndefined();
+    expect(held?.workspacePath).toBe(WORKSPACE());
   });
 });
 

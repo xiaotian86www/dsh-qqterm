@@ -10,6 +10,7 @@ import { ConfigSchema, type QQTermConfig } from '../config.ts';
 import type { PresetEntry, SessionManager } from '../session/index.ts';
 import type { Logger } from '../types.ts';
 import { presetCommand } from './preset.ts';
+import { buildCommandList } from './index.ts';
 
 const state = vi.hoisted(() => ({ sent: [] as string[] }));
 
@@ -39,11 +40,14 @@ interface StubOptions {
   /** 切换结果是否为「已经是默认值」 */
   unchanged?: boolean;
   /** 切换失败原因 */
-  fail?: 'unknown-preset' | 'broken' | 'failed';
+  fail?: 'unknown-preset' | 'broken' | 'failed' | 'unavailable';
+  /** 部署里有没有 agentPresets 服务（决定命令是否注册） */
+  available?: boolean;
 }
 
 function makeManager(options: StubOptions = {}) {
   return {
+    presetsAvailable: vi.fn(() => options.available ?? true),
     listPresets: vi.fn(async () => options.presets ?? PRESETS),
     getEffectivePreset: vi.fn(() => options.effective),
     setPresetOverride: vi.fn(async (_scope: unknown, _peer: unknown, id: string) => (
@@ -138,5 +142,27 @@ describe('/preset（切换）', () => {
     const text = await run(makeManager({ fail: 'failed' }), 'beta');
 
     expect(text).toBe('❌ preset 切换失败: write failed');
+  });
+
+  it('部署里没有注册表时与查看同一句提示', async () => {
+    const text = await run(makeManager({ fail: 'unavailable' }), 'beta');
+
+    expect(text).toBe('⚠️ 当前部署无可用的 agent preset');
+  });
+});
+
+describe('/preset 注册', () => {
+  const namesOf = (available: boolean): string[] => buildCommandList({
+    manager: makeManager({ available }),
+    config,
+    logger,
+  }).flatMap((command) => (Array.isArray(command.name) ? command.name : [command.name]));
+
+  it('有 agentPresets 服务时注册', () => {
+    expect(namesOf(true)).toContain('preset');
+  });
+
+  it('没有 agentPresets 服务时整条命令不出现', () => {
+    expect(namesOf(false)).not.toContain('preset');
   });
 });

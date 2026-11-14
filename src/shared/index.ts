@@ -11,6 +11,7 @@ export {
   pluginVersion,
   shortSessionId,
   outsideHmrTransaction,
+  optionalService,
 } from './utils.ts';
 export { entryUids, changedEntries, entryReplaced, type LoaderLike } from './entries.ts';
 export { getScopePeer } from './scope.ts';

@@ -2,7 +2,7 @@
  * 思考强度命令：/reasoning — 查看或切换当前会话的思考强度
  *
  * 档位由宿主 adapter 提供（`ctx.llm.resolveModelInfo` 的 reasoning 段），
- * 读与写都交给宿主（sessionController / agentDefaultModel），插件不存偏好。
+ * 读与写都交给宿主（`agent.model.select` / `agentDefaultModel`），插件不存偏好。
  */
 import type { CommandDeps, SlashCommand } from './types.ts';
 import { ownerOnlyAuth } from './auth.ts';

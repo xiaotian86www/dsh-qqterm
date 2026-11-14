@@ -46,7 +46,8 @@ function entry(over: Partial<WorkspaceSession> = {}): WorkspaceSession {
 
 type ManagerStub = Partial<Record<
   'listWorkspaceSessions' | 'listHeldSessions' | 'listWorkspaceGroups'
-  | 'currentSessionId' | 'switchSession' | 'renameSession' | 'archiveSession' | 'unarchiveSession' | 'directoryForAgent',
+  | 'currentSessionId' | 'switchSession' | 'renameSession' | 'archiveSession' | 'unarchiveSession' | 'directoryForAgent'
+  | 'workspaceRegistryAvailable',
   unknown
 >>;
 
@@ -74,6 +75,8 @@ function makeManager(over: ManagerStub = {}) {
     archiveSession: vi.fn(async () => ({ ok: true })),
     unarchiveSession: vi.fn(async () => ({ ok: true })),
     directoryForAgent: vi.fn(() => undefined),
+    // 默认有 workspaceRegistry；没有的部署由用例显式传 false
+    workspaceRegistryAvailable: vi.fn(() => true),
     ...over,
   } as unknown as SessionManager;
 }
@@ -1158,5 +1161,64 @@ describe('其它入口', () => {
     expect(text).toContain('缺少目标');
     expect(text).toContain('<qqbot-cmd-input text="/sessions" show="选择会话"/>');
     expect(text.split('\n').length).toBe(1);
+  });
+});
+
+describe('没有 workspaceRegistry 的部署', () => {
+  function pathOnlyManager() {
+    return makeManager({
+      workspaceRegistryAvailable: vi.fn(() => false),
+      listHeldSessions: vi.fn(async () => [
+        // 没有 registry 时 manager 只给路径，不给工作区名
+        entry({ held: true, id: 'session-aaaa0001', title: '当前的', workspacePath: '/repo', running: true }),
+      ]),
+      listWorkspaceGroups: vi.fn(async () => [{
+        id: 'path:/repo',
+        title: '',
+        path: '/repo',
+        missing: false,
+        sessions: [entry({ id: 'session-aaaa0002', title: '冷会话' })],
+      }]),
+    });
+  }
+
+  it('/sessions 仍按目录分组，组标题只有路径、不给归档入口', async () => {
+    const text = await run(pathOnlyManager(), '');
+
+    expect(text).toContain('### 🗂 工作中会话（1 个工作区 · 1 个会话）');
+    expect(text).toContain('show="/repo"');
+    expect(text).toContain('#aaaa0001 · 当前的 · 生成中');
+    expect(text).not.toContain('**repo**');
+    expect(text).not.toContain('show="归档"');
+    expect(text).toContain('show="全部会话"');
+  });
+
+  it('/sessions all 仍按目录分组，组标题只有路径', async () => {
+    const text = await run(pathOnlyManager(), 'all');
+
+    expect(text).toContain('### 🗂 全部会话（1 个工作区 · 1 个会话）');
+    expect(text).toContain('show="/repo"');
+    expect(text).not.toContain('**repo**');
+  });
+
+  it('归档相关子命令按未知子命令处理，不调宿主归档', async () => {
+    const manager = pathOnlyManager();
+    for (const [raw, sub] of [
+      ['archive', 'archive'],
+      ['archived', 'archived'],
+      ['unarchive #aaaa0001', 'unarchive'],
+    ] as const) {
+      const text = await run(manager, raw);
+      expect(text).toContain(`未知子命令: ${sub}`);
+    }
+    expect(manager.archiveSession).not.toHaveBeenCalled();
+    expect(manager.unarchiveSession).not.toHaveBeenCalled();
+  });
+
+  it('用法页不列归档子命令', async () => {
+    const text = await run(pathOnlyManager(), 'help');
+    expect(text).toContain('/sessions resume <id>');
+    expect(text).not.toContain('/sessions archive');
+    expect(text).not.toContain('/sessions unarchive');
   });
 });

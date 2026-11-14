@@ -3,7 +3,7 @@ import { createHostAdapter, _resetAdapterCache } from './adapter.ts';
 
 /** 最小 ctx：服务直接挂在 ctx 上（宿主已通过 inject 保证存在） */
 function makeCtx(services: Record<string, unknown> = {}) {
-  return { ...services } as never;
+  return { get: (name: string) => services[name], ...services } as never;
 }
 
 describe('host adapter', () => {
@@ -58,10 +58,10 @@ describe('host adapter', () => {
     const adapter = createHostAdapter(makeCtx());
     expect(adapter.capabilities).toEqual(expect.arrayContaining([
       'sessionPersistence.stat',
-      'workspaceRegistry',
       'sessionQuery',
       'sessionTitle.rename',
     ]));
+    expect(adapter.capabilities).not.toContain('workspaceRegistry');
   });
 
   it('listSessions：合并 sessionController.list 的 updatedAt 与 blank（Web 侧栏同一份摘要）', async () => {
@@ -102,6 +102,19 @@ describe('host adapter', () => {
       sessionController: { list: async () => { throw new Error('EIO'); } },
     }));
     expect((await failing.listSessions())[0]).toMatchObject({ updatedAt: 100, blank: false });
+  });
+
+  it('listSessions：sessionController 未注入（属性访问即抛）时同样回退', async () => {
+    const ctx = makeCtx({
+      sessionQuery: { listSessions: async () => [{ header: { id: 'a', cwd: '/w', createdAt: 100 }, live: false }] },
+    }) as unknown as Record<string, unknown>;
+    Object.defineProperty(ctx, 'sessionController', {
+      get() { throw new Error('service not injected'); },
+      configurable: true,
+    });
+
+    const adapter = createHostAdapter(ctx as never);
+    expect((await adapter.listSessions())[0]).toMatchObject({ updatedAt: 100, blank: false });
   });
 });
 
@@ -172,6 +185,69 @@ describe('会话归档（workspaceRegistry）', () => {
     const adapter = createHostAdapter(makeCtx({ workspaceRegistry: registry }));
     expect(await adapter.unarchiveSession('session-x')).toEqual({ ok: true });
     expect(registry.unarchiveSession).toHaveBeenCalledWith('session-x');
+  });
+});
+
+describe('workspaceRegistry 可选', () => {
+  it('服务缺失：无分组能力、列表为空、归档回 unavailable、集合为空', async () => {
+    const adapter = createHostAdapter(makeCtx({
+      workingDirectory: { defaultDirectory: '/ws' },
+    }));
+
+    expect(adapter.supportsWorkspaceRegistry()).toBe(false);
+    expect(adapter.capabilities).not.toContain('workspaceRegistry');
+    expect(adapter.workspaceList()).toEqual([]);
+    expect(adapter.defaultWorkspacePath()).toBe('/ws');
+    expect(adapter.archivedSessionIds().size).toBe(0);
+    expect(adapter.pinnedSessionIds().size).toBe(0);
+    expect(await adapter.archiveSession('s1')).toMatchObject({ ok: false, reason: 'unavailable' });
+    expect(await adapter.unarchiveSession('s1')).toMatchObject({ ok: false, reason: 'unavailable' });
+    await expect(adapter.attachSessionToWorkspace('s1', '/proj')).resolves.toBeUndefined();
+  });
+
+  it('属性访问即抛（Cordis 未注入）时同样按缺失处理', async () => {
+    const ctx = makeCtx() as unknown as Record<string, unknown>;
+    Object.defineProperty(ctx, 'workspaceRegistry', {
+      get() { throw new Error('service not injected'); },
+      configurable: true,
+    });
+
+    const adapter = createHostAdapter(ctx as never);
+    expect(adapter.supportsWorkspaceRegistry()).toBe(false);
+    expect(adapter.workspaceList()).toEqual([]);
+    expect(await adapter.archiveSession('s1')).toMatchObject({ reason: 'unavailable' });
+  });
+
+  it('服务只能经 ctx.get 拿到（属性访问抛错）时仍按已提供处理', async () => {
+    const registry = { archivedSessionIds: ['s1'], pinnedSessionIds: ['s2'] };
+    const ctx = makeCtx() as unknown as Record<string, unknown>;
+    ctx.get = (name: string) => (name === 'workspaceRegistry' ? registry : undefined);
+    Object.defineProperty(ctx, 'workspaceRegistry', {
+      get() { throw new Error('cannot get property "workspaceRegistry" without inject'); },
+      configurable: true,
+    });
+
+    const adapter = createHostAdapter(ctx as never);
+    expect(adapter.supportsWorkspaceRegistry()).toBe(true);
+    expect(adapter.capabilities).toContain('workspaceRegistry');
+    expect([...adapter.archivedSessionIds()]).toEqual(['s1']);
+  });
+
+  it('sessionController 经 ctx.get 提供时用它的活跃时间', async () => {
+    const ctx = makeCtx({
+      sessionQuery: { listSessions: async () => [{ header: { id: 'a', cwd: '/w', createdAt: 100 }, live: false }] },
+      get: (name: string) =>
+        name === 'sessionController'
+          ? { list: async () => ({ items: [{ sessionId: 'a', updatedAt: 500, blank: true }] }) }
+          : undefined,
+    }) as unknown as Record<string, unknown>;
+    Object.defineProperty(ctx, 'sessionController', {
+      get() { throw new Error('cannot get property "sessionController" without inject'); },
+      configurable: true,
+    });
+
+    const adapter = createHostAdapter(ctx as never);
+    expect((await adapter.listSessions())[0]).toMatchObject({ updatedAt: 500, blank: true });
   });
 });
 
@@ -307,7 +383,7 @@ describe('attachSessionToWorkspace', () => {
 describe('workingDirectory（已写进 inject）', () => {
   /** ctx 的最小形态：只挂 adapter 会读的服务，其余保持 undefined */
   function ctxWith(working: unknown) {
-    return { workingDirectory: working } as never;
+    return makeCtx({ workingDirectory: working });
   }
 
   beforeEach(() => {

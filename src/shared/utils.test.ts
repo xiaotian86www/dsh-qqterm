@@ -10,7 +10,7 @@ import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, afterEach, vi } from 'vitest';
-import { getProfileDir, outsideHmrTransaction } from './utils.ts';
+import { getProfileDir, optionalService, outsideHmrTransaction } from './utils.ts';
 
 const tempDirs: string[] = [];
 
@@ -221,5 +221,25 @@ describe('outsideHmrTransaction', () => {
     };
 
     expect(outsideHmrTransaction(ctx, () => 'ok')).toBe('ok');
+  });
+});
+
+describe('optionalService', () => {
+  it('只认 ctx.get：属性访问会抛的 Cordis 形态照样拿得到', () => {
+    const service = { list: async () => [] };
+    const ctx = { get: (name: string) => (name === 'workspaceRegistry' ? service : undefined) };
+    Object.defineProperty(ctx, 'workspaceRegistry', {
+      get() {
+        throw new Error('cannot get property "workspaceRegistry" without inject');
+      },
+    });
+
+    expect(optionalService(ctx, 'workspaceRegistry')).toBe(service);
+  });
+
+  it('ctx.get 返回 undefined 就是缺失，不再回退属性读取', () => {
+    const ctx = { get: () => undefined, workspaceRegistry: { list: async () => [] } };
+
+    expect(optionalService(ctx, 'workspaceRegistry')).toBeUndefined();
   });
 });

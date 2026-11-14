@@ -38,7 +38,9 @@ export function buildCommandList(deps: CommandDeps): SlashCommand[] {
     reasoningCommand(deps),
     costCommand(deps),
     sessionStatusCommand(deps),
-    presetCommand(deps),
+    // 部署里没有 agentPresets 服务时整条命令不注册：用户输入 /preset 按未知指令处理，
+    // 不再额外解释「当前部署没有该能力」。
+    ...(deps.manager.presetsAvailable() ? [presetCommand(deps)] : []),
     permissionCommand(deps),
     stopCommand(deps),
     retryCommand(deps),

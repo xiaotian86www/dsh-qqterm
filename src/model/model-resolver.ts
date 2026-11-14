@@ -203,9 +203,9 @@ export class ModelResolver {
   /**
    * 目标模型是否在宿主的模型目录里
    *
-   * 与宿主 `sessionController.selectModel` 的校验同源（先看 provider 是否注册，
-   * 再在它的 listModels 里找 model）。没有活跃会话时用它代替宿主校验，避免把
-   * 拼错的模型写成部署默认值。目录读不出来时抛错，由调用方报「切换失败」。
+   * 与宿主切换模型前的校验同源（先看 provider 是否注册，再在它的 listModels
+   * 里找 model）。有会话和没会话都先过这一关，避免把拼错的模型写进会话或部署
+   * 默认值。目录读不出来时抛错，由调用方报「切换失败」。
    */
   async hasModel(provider: string, model: string): Promise<boolean> {
     const llm = this.llm;

@@ -17,6 +17,7 @@ import {
   BIND_REFRESH_PATH,
   BIND_STATE_PATH,
   BIND_UNBIND_PATH,
+  mountBindRoutes,
   registerBindRoutes,
   type BindRoutesOptions,
   type WebRoute,
@@ -432,5 +433,47 @@ describe('bind-routes', () => {
     const resNone = fakeRes();
     await invoke(routes.get(BIND_STATE_PATH), fakeReq('GET', { host: '127.0.0.1:3080' }), resNone);
     expect(resNone.statusCode).toBe(200);
+  });
+});
+
+describe('mountBindRoutes — webServer 可选', () => {
+  const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+
+  it('服务缺失：只订阅 inject，不注册路由也不抛错', () => {
+    const injected: string[][] = [];
+    const ctx = {
+      inject: (deps: string[], _callback: (scoped: unknown) => void) => { injected.push(deps); },
+    };
+
+    expect(() => { mountBindRoutes(ctx as never, null, logger); }).not.toThrow();
+    expect(injected).toEqual([['webServer']]);
+  });
+
+  it('服务到位：注册路由，作用域销毁时注销', () => {
+    const routes = new Map<string, WebRoute>();
+    const effects: (() => () => void)[] = [];
+    const webServer = {
+      register(route: WebRoute): () => void {
+        routes.set(route.path, route);
+        return () => { routes.delete(route.path); };
+      },
+    };
+    let run: ((scoped: unknown) => void) | undefined;
+    const ctx = {
+      inject: (_deps: string[], callback: (scoped: unknown) => void) => { run = callback; },
+    };
+
+    mountBindRoutes(ctx as never, null, logger);
+    expect(run).toBeTypeOf('function');
+    run?.({
+      webServer,
+      effect: (fn: () => () => void) => { effects.push(fn); },
+    } as never);
+
+    expect(routes.has(BIND_STATE_PATH)).toBe(true);
+    expect(effects).toHaveLength(1);
+    const dispose = effects[0]!();
+    dispose();
+    expect(routes.size).toBe(0);
   });
 });

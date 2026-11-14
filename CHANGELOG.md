@@ -22,4 +22,4 @@
 ### 已知限制
 
 - 不支持群聊。
-- 宿主缺少 `inject` 中任一服务时插件保持 inactive，不做能力降级。
+- 宿主缺少 `inject` 中任一服务时插件保持 inactive，不做能力降级（`agentPresets` 除外：它可选，缺失时 `/preset` 整条命令不出现、建会话不挂 preset；`webServer` 同样可选：缺失时不注册端内绑定页，扫码只走终端；`workspaceRegistry` 也可选：缺失时 `/sessions` 仍按目录分组、组标题只有路径、无置顶 / 归档，归档子命令按未知子命令处理、`/new <名字>` 回不支持、用法页与 `/status` 工作区行、成功回执只给路径（绝对路径照常）；`/sessions` 的最近活动时间另从可选的 `sessionController.list()` 软读，缺失时按创建时间排序；没有 hmr 时 `/plugins reload` 同样按未知子命令处理）。

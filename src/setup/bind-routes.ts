@@ -10,6 +10,7 @@
  * persist 路径（写入 profile patch → HMR 重载生效）。
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { Context } from '@deepseek-ai/cordis';
 import type { Logger } from '../types.ts';
 import type { BindingService } from './binding-service.ts';
 import {
@@ -163,6 +164,29 @@ export function registerBindRoutes(
   ];
   logger.info(`qqterm: 端内绑定页已就绪: ${BIND_STATE_PATH}`);
   return () => { for (const dispose of disposers) dispose(); };
+}
+
+/**
+ * 把绑定路由挂到 webServer 上（服务可选）。
+ *
+ * webServer 只有 web / Desktop 组合包提供，CLI / headless / SDK profile 没有。
+ * 用 ctx.inject 订阅：服务到位时注册，离开或替换时 Cordis 拆掉子 fiber 的
+ * effect 自动注销。没有该服务的部署照常扫码，只少端内页面这一条通道。
+ */
+export function mountBindRoutes(
+  ctx: Context,
+  service: BindingService | null,
+  logger: Logger,
+  options: BindRoutesOptions = {},
+): void {
+  type ScopedContext = Context & { webServer: WebServerLike };
+  (ctx as unknown as {
+    inject(deps: string[], callback: (scoped: ScopedContext) => void): void;
+  }).inject(['webServer'], (scoped) => {
+    const disposeRoutes = registerBindRoutes(scoped.webServer, service, logger, options);
+    (scoped as unknown as { effect(fn: () => () => void, name?: string): void })
+      .effect(() => disposeRoutes, 'qqterm.bind-routes');
+  });
 }
 
 /**

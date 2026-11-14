@@ -209,6 +209,16 @@ export function formatRelativeTime(ts?: number): string {
   return `${Math.floor(diff / 86_400_000)}d 前`;
 }
 
+/**
+ * 读可选服务（不在 `inject` 里的那些）
+ *
+ * 唯一入口是 `ctx.get(name)`：它不需要 inject，未提供时返回 `undefined`，也不会抛错。
+ * 属性访问不行——Cordis 代理在服务未注入时直接抛 `cannot get property "x" without inject`。
+ */
+export function optionalService<T>(ctxLike: unknown, name: string): T | undefined {
+  return (ctxLike as { get(serviceName: string): unknown }).get(name) as T | undefined;
+}
+
 /** 宿主 HMR 事务的 AsyncLocalStorage 形状（只用到判断与退出） */
 interface HmrExecuting {
   getStore?: () => unknown;

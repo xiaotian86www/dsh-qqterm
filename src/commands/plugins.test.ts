@@ -242,11 +242,11 @@ describe('/plugins reload', () => {
     expect(h.reloadRun).toHaveBeenCalledWith(undefined, h.bot);
   });
 
-  it('profile 未启用热重载时只提示，不补发也不调度', async () => {
+  it('profile 未启用热重载时按未知子命令处理，不补发也不调度', async () => {
     const h = harness({ reloadAvailable: false });
     const result = await h.command.handler(makeCtx('reload', h.bot));
 
-    expect(result).toBe('⚠️ 当前 profile 未启用热重载');
+    expect(result).toBe('⚠️ 不支持的子命令: `reload` · 用法: /help plugins');
     expect(h.reloadAnnounce).not.toHaveBeenCalled();
     expect(h.reloadRun).not.toHaveBeenCalled();
   });
@@ -263,5 +263,10 @@ describe('/plugins 用法', () => {
     const h = harness();
     const result = await h.command.handler(makeCtx('remove dsh-x', h.bot));
     expect(result).toBe('⚠️ 不支持的子命令: `remove` · 用法: /help plugins');
+  });
+
+  it('用法页只在有 hmr 时列 reload', () => {
+    expect(harness().command.usage).toContain('/plugins reload');
+    expect(harness({ reloadAvailable: false }).command.usage).not.toContain('/plugins reload');
   });
 });

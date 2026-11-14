@@ -7,6 +7,7 @@
  */
 import type { Context } from '@deepseek-ai/cordis';
 import { basename } from 'node:path';
+import { optionalService } from '../shared/utils.ts';
 
 /** 日志最小接口 */
 export interface AdapterLogger {
@@ -81,9 +82,17 @@ export interface HostAdapter {
   /**
    * 宿主的工作区列表（顺序即侧边栏顺序）。
    *
-   * 只读快照，registry 为空时返回空数组；`sessionIds` 是该工作区的会话记账。
+   * 只读快照；部署里没有 workspaceRegistry 时返回空数组。`sessionIds` 是该
+   * 工作区的会话记账。
    */
   workspaceList(): WorkspaceInfo[];
+  /**
+   * 部署里是否有 workspaceRegistry。
+   *
+   * 没有这个服务时列表仍按目录路径分组，但没有工作区名、没有置顶 / 归档，
+   * 归档子命令按未知子命令处理，也不能按名字新建会话。
+   */
+  supportsWorkspaceRegistry(): boolean;
   /**
    * 默认工作区目录：宿主的「默认项目」（首次使用时建在 Documents 下，
    * 自动标题为 `default-workspace`）。
@@ -117,8 +126,8 @@ export type SessionArchiveOutcome =
   | { ok: true }
   | {
     ok: false;
-    /** not-found = 会话不存在；busy = 有工作未停 */
-    reason: 'not-found' | 'busy' | 'failed';
+    /** not-found = 会话不存在；busy = 有工作未停；unavailable = 部署没有工作区服务 */
+    reason: 'not-found' | 'busy' | 'failed' | 'unavailable';
     message?: string;
   };
 
@@ -236,8 +245,14 @@ interface SessionTitleLike {
 /**
  * ctx.sessionController 的最小读契约（只用到 list）。
  *
- * `list()` 返回 Web 侧栏同一份会话摘要：`updatedAt = max(createdAt, lastPromptAt)`，
- * 其中 `lastPromptAt` 是投影 `sessionListMetadata` 记录的最近一条人类消息时间。
+ * 可选：只有 web 组合包挂载该服务，不在 qqterm 的 inject 里。`list()` 返回
+ * Web 侧栏同一份会话摘要：`updatedAt = max(createdAt, lastPromptAt)`，其中
+ * `lastPromptAt` 是投影 `sessionListMetadata` 记录的最近一条人类消息时间。
+ *
+ * 保留软读而不是删掉：base 里没有等价数据（会话 header 只有 createdAt，该投影
+ * 由 controller 自己注册），自己逐会话读事件日志取 `user/message` 的 `time`
+ * 在 `/sessions all` 上等于每次命令扫全量日志。缺服务时只丢排序与 blank，
+ * 列表本身照常返回。
  */
 interface SessionControllerLike {
   list?(request: object, signal?: AbortSignal): Promise<{ items?: readonly unknown[] } | undefined>;
@@ -323,6 +338,26 @@ async function sessionListMeta(
   return { recency, blank };
 }
 
+/**
+ * 读可选的 sessionController（只有 web 组合包提供）。
+ *
+ * 走 `ctx.get` 而不是属性读取：不在 inject 里时 Cordis 代理在属性访问处直接抛
+ * `cannot get property "sessionController" without inject`。拿不到就只用
+ * sessionQuery / sessionPersistence 的会话摘要（丢排序与 blank）。
+ */
+function optionalSessionController(ctx: Context): SessionControllerLike | undefined {
+  return optionalService<SessionControllerLike>(ctx, 'sessionController');
+}
+
+/**
+ * 读可选的 workspaceRegistry（只有 web 组合包提供）。
+ *
+ * 同样走 `ctx.get`；拿不到时列表仍按会话目录分组，只是没有工作区名、置顶与归档。
+ */
+function optionalWorkspaceRegistry(ctx: Context): WorkspaceRegistryLike | undefined {
+  return optionalService<WorkspaceRegistryLike>(ctx, 'workspaceRegistry');
+}
+
 /** 模块级函数的动态 import 结果缓存（spec 变量路径绕开本地依赖类型检查） */
 const moduleCache = new Map<string, Record<string, unknown> | undefined>();
 
@@ -344,26 +379,25 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
     sessionPersistence: SessionPersistenceLike;
     sessionQuery: SessionQueryLike;
     sessionTitle: SessionTitleLike;
-    sessionController?: SessionControllerLike;
-    workspaceRegistry: WorkspaceRegistryLike;
     workingDirectory: WorkingDirectoryLike;
   };
   const persistence = host.sessionPersistence;
   const query = host.sessionQuery;
-  const controller = host.sessionController;
+  const controller = optionalSessionController(ctx);
   const titleService = host.sessionTitle;
-  const registry = host.workspaceRegistry;
+  const registry = optionalWorkspaceRegistry(ctx);
 
   const capabilities: string[] = [
     'sessionEvents(snapshotEvents)',
     'sessionPersistence.stat',
-    'workspaceRegistry',
+    ...(registry === undefined ? [] : ['workspaceRegistry']),
     'sessionQuery',
     'sessionTitle.rename',
   ];
 
   /** registry.list() 收窄成纯数据快照；异常降级为空列表 */
   const workspaceList = (): WorkspaceInfo[] => {
+    if (registry === undefined) return [];
     try {
       return registry.list().flatMap((workspace) => {
         if (typeof workspace?.path !== 'string' || typeof workspace.id !== 'string') return [];
@@ -399,6 +433,7 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
     },
 
     async attachSessionToWorkspace(sessionId, cwd) {
+      if (registry === undefined) return;
       try {
         // 不传 title：宿主按目录最后一段生成显示名（一般规律）
         const workspace = await registry.create(cwd);
@@ -505,6 +540,7 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
     },
 
     async archiveSession(sessionId) {
+      if (registry === undefined) return workspaceUnavailable('archive');
       try {
         // stopActivity：宿主先让 providers 停掉该会话的工作再写归档集，避免
         // 活跃会话被 session-active 拒绝；进程内的 agent 由 manager 先释放
@@ -517,6 +553,7 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
     },
 
     async unarchiveSession(sessionId) {
+      if (registry === undefined) return workspaceUnavailable('unarchive');
       try {
         await registry.unarchiveSession(sessionId);
         logger?.debug?.(`host adapter: unarchived session ${sessionId}`);
@@ -527,11 +564,15 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
     },
 
     archivedSessionIds() {
-      return new Set(registry.archivedSessionIds);
+      return new Set(registry?.archivedSessionIds ?? []);
     },
 
     pinnedSessionIds() {
-      return new Set(registry.pinnedSessionIds);
+      return new Set(registry?.pinnedSessionIds ?? []);
+    },
+
+    supportsWorkspaceRegistry() {
+      return registry !== undefined;
     },
   };
 }
@@ -575,6 +616,12 @@ function renameFailure(err: unknown): SessionRenameOutcome {
     return { ok: false, reason: 'not-live', message };
   }
   return { ok: false, reason: 'failed', message };
+}
+
+/** 部署里没有 workspaceRegistry：不归档，也不假装成功 */
+function workspaceUnavailable(verb: 'archive' | 'unarchive'): SessionArchiveOutcome {
+  const action = verb === 'archive' ? '归档' : '取消归档';
+  return { ok: false, reason: 'unavailable', message: `当前部署不支持${action}` };
 }
 
 /**

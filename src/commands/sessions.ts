@@ -25,6 +25,9 @@
  * 归档走宿主 `workspaceRegistry.archiveSession`：只往 registry 的全局归档集里
  * 加一个 id，Web 侧栏与本命令都不再列出它，磁盘日志原样保留，随时可取消归档。
  *
+ * 归档相关子命令只在部署提供 workspaceRegistry 时存在：没有该服务时按未知子命令
+ * 处理，用法页也不列这几行。
+ *
  * 本插件**不提供物理删除**：宿主没有删除 API，按下层存储布局删目录既不可恢复，
  * 又容易撞上文件占用（Windows 上会话被 Web 端打开就删不掉）。归档是可逆的，
  * 足够满足「从列表里拿掉」的需求。
@@ -77,20 +80,30 @@ function attrValue(raw: string): string {
  */
 export const sessionAdminAuth = ownerOnlyAuth;
 
-const USAGE = [
-  '### 📖 /sessions 用法',
-  '',
-  '`/sessions [页码]` 工作中会话',
-  '`/sessions all [页码]` 全部会话',
-  '`/sessions archived [页码]` 已归档会话',
-  '`/sessions resume <id>` 恢复会话',
-  '`/sessions rename <id> <新标题>` 重命名会话',
-  '`/sessions archive [页码]` 列出待归档会话',
-  '`/sessions archive <id>[,…]` 归档会话',
-  '`/sessions unarchive <id>[,…]` 取消归档',
-  '',
-  '目标用 8 位短 id（行首 `#` 后那串）',
-].join('\n');
+/**
+ * 用法页：归档相关子命令只在部署提供 workspaceRegistry 时出现，
+ * 免得用户看到一条注定回「不支持」的命令。
+ */
+function usageFor(archivable: boolean): string {
+  return [
+    '### 📖 /sessions 用法',
+    '',
+    '`/sessions [页码]` 工作中会话',
+    '`/sessions all [页码]` 全部会话',
+    ...(archivable ? ['`/sessions archived [页码]` 已归档会话'] : []),
+    '`/sessions resume <id>` 恢复会话',
+    '`/sessions rename <id> <新标题>` 重命名会话',
+    ...(archivable
+      ? [
+          '`/sessions archive [页码]` 列出待归档会话',
+          '`/sessions archive <id>[,…]` 归档会话',
+          '`/sessions unarchive <id>[,…]` 取消归档',
+        ]
+      : []),
+    '',
+    '目标用 8 位短 id（行首 `#` 后那串）',
+  ].join('\n');
+}
 
 /** 目标解析结果 */
 export type SessionTargetResult =
@@ -235,9 +248,10 @@ function workspaceHeader(
   missing: boolean,
   linkable = false,
 ): string[] {
-  const name = clip(cleanInline(title)) || '未命名工作区';
+  const name = clip(cleanInline(title));
   if (path === '') {
-    return missing ? [`**${name}**`, '⚠️ 目录不存在'] : [`**${name}**`];
+    const label = name || '未分组';
+    return missing ? [`**${label}**`, '⚠️ 目录不存在'] : [`**${label}**`];
   }
   // 宿主的 workspace.path 都是绝对路径；相对路径交给 /new 会落到进程目录，
   // 不是用户点的那个工作区，所以不给入口
@@ -245,7 +259,8 @@ function workspaceHeader(
   const target = linkable && !missing && absolute
     ? workspaceLink(path)
     : `\`${path}\``;
-  const lines = [`**${name}** · ${target}`];
+  // 没有 registry 的部署只有路径：不编造工作区名，整行就是入口
+  const lines = name === '' ? [target] : [`**${name}** · ${target}`];
   if (missing) lines.push('⚠️ 目录不存在');
   return lines;
 }
@@ -313,9 +328,9 @@ function commandLink(command: string, show: string): string {
  * 持有列表底部：归档 / 全部视图；当前指针不在列表里时补一个恢复入口，
  * 避免「待恢复」只提示不给动作。
  */
-function heldFooter(recoverId?: string): string {
+function heldFooter(recoverId?: string, archivable = true): string {
   const parts = [
-    commandLink('/sessions archive', '归档'),
+    ...(archivable ? [commandLink('/sessions archive', '归档')] : []),
     commandLink('/sessions all', '全部会话'),
   ];
   if (recoverId !== undefined) {
@@ -345,13 +360,18 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Slash
     scope: 'c2c',
     authorized: sessionAdminAuth(config, logger),
     description: '管理会话',
-    usage: USAGE,
+    // getter：命令列表构建时不读服务（可选服务可能还没就绪），/help 取用时才判断
+    get usage(): string {
+      return usageFor(manager.workspaceRegistryAvailable());
+    },
     handler: async (cmdCtx) => {
       const raw = (cmdCtx.command?.raw ?? '').trim();
       const words = raw.split(/\s+/).filter(Boolean);
       let sub = words[0] ?? '';
       const rest = words.slice(1);
       const { scope, peerId } = getScopePeer(cmdCtx);
+      // 没有 workspaceRegistry 的部署：列表照常按目录分组，只是没有工作区名与归档
+      const archivable = manager.workspaceRegistryAvailable();
 
       // `/sessions 2` = 持有列表第二页；`all 2` / `archived 2` 同理
       let page = 1;
@@ -369,8 +389,9 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Slash
 
       const loadHeld = async (): Promise<WorkspaceSession[] | string> => {
         try {
+          const entries = await manager.listHeldSessions(scope, peerId);
           // 按工作区分组后排序：列表顺序固定，翻页不跳组
-          return groupHeldOrder(await manager.listHeldSessions(scope, peerId));
+          return groupHeldOrder(entries);
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           logger?.warn(`/sessions 列举工作中会话失败: ${message}`);
@@ -419,12 +440,17 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Slash
       };
 
       const render = async (): Promise<string> => {
+        // 没有 registry 时归档子命令按未知子命令处理，与其它拼错的子命令同一句话
+        if (!archivable && (sub === 'archive' || sub === 'a'
+          || sub === 'archived' || sub === 'unarchive' || sub === 'u' || sub === 'restore')) {
+          return `⚠️ 未知子命令: ${safeArg(sub)} · 用法: /help sessions`;
+        }
         switch (sub) {
           case '':
           case 'list': {
             const loaded = await loadHeld();
             if (typeof loaded === 'string') return loaded;
-            return renderHeldList(loaded, manager.currentSessionId(), page);
+            return renderHeldList(loaded, manager.currentSessionId(), page, archivable);
           }
 
           case 'workspace':
@@ -439,7 +465,7 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Slash
             // 只为当前页的行读标题：分组列表不知道会翻到哪一页，不能一次全读
             const rows = pageSlice(groupRows(groups), page);
             await manager.fillSessionTitles(rows.map((row) => row.entry));
-            return renderGroups(groups, page);
+            return renderGroups(groups, page, archivable);
           }
 
           case 'archived': {
@@ -629,7 +655,7 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Slash
           }
 
           case 'help':
-            return USAGE;
+            return usageFor(archivable);
 
           default:
             return `⚠️ 未知子命令: ${safeArg(sub)} · 用法: /help sessions`;
@@ -678,11 +704,13 @@ function groupHeldEntries(
     let group = byKey.get(key);
     if (group === undefined) {
       const title = cleanInline(entry.workspace ?? '');
+      // 路径要原样进可点击命令，只去换行。cleanInline 会删掉 `_` 等字符，
+      // 用净化后的路径开新会话就落到别的目录了。
+      const path = (entry.workspacePath ?? '').replace(/[\r\n]+/g, ' ').trim();
       group = {
-        title: title === '' ? '未分组' : title,
-        // 路径要原样进可点击命令，只去换行。cleanInline 会删掉 `_` 等字符，
-        // 用净化后的路径开新会话就落到别的目录了。
-        path: (entry.workspacePath ?? '').replace(/[\r\n]+/g, ' ').trim(),
+        // 没有工作区名（没有 registry）时保持空串，组标题只显示路径
+        title: title === '' && path === '' ? '未分组' : title,
+        path,
         missing: entry.workspaceMissing === true,
         rows: [],
       };
@@ -710,14 +738,15 @@ function groupHeldOrder(entries: readonly WorkspaceSession[]): WorkspaceSession[
  * 同一套写法），组内展示生成状态与当前项；目标一律用 8 位短 id。
  *
  * @param entries 已持有会话（已按工作区分组，当前优先，再按获取时间倒序）
- * @param workspace 当前工作区（只在空列表时展示）
  * @param currentId 当前指针；不在持有列表里时单独补一行
  * @param page 页码（1 起）
+ * @param archivable 部署里有没有 registry（决定页脚是否给归档入口）
  */
 function renderHeldList(
   entries: readonly WorkspaceSession[],
   currentId: string | undefined,
   page: number,
+  archivable = true,
 ): string {
   const total = entries.length;
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -752,7 +781,7 @@ function renderHeldList(
 
   if (total === 0) {
     lines.push('还没有工作中会话');
-    lines.push('', heldFooter(missingCurrentId));
+    lines.push('', heldFooter(missingCurrentId, archivable));
     return lines.join('\n');
   }
 
@@ -769,7 +798,7 @@ function renderHeldList(
 
   const nav = pageLinks(page, pages, (next) => `/sessions ${next}`);
   if (nav.length > 0) lines.push('', nav.join(' · '));
-  lines.push('', heldFooter(missingCurrentId));
+  lines.push('', heldFooter(missingCurrentId, archivable));
   return lines.join('\n');
 }
 
@@ -852,10 +881,13 @@ function groupRows(
  * 一页 10 条会话，跨工作区连续；翻页后仍会重复当前页首条所属工作区的
  * 标题。会话全部归档的工作区放在最后一页，避免每页重复。
  *
- * @param groups 宿主工作区分组
+ * 组标题来自 registry 的工作区名；没有 registry 时只有目录路径。
+ *
+ * @param groups 工作区分组（无 registry 时按会话目录聚合）
  * @param page 页码（1 起）
+ * @param archivable 部署里有没有 registry（决定页脚是否给归档入口）
  */
-function renderGroups(groups: readonly WorkspaceGroup[], page = 1): string {
+function renderGroups(groups: readonly WorkspaceGroup[], page = 1, archivable = true): string {
   const visible = groups.filter((group) => group.sessions.length > 0);
   if (visible.length === 0) {
     return [
@@ -912,7 +944,7 @@ function renderGroups(groups: readonly WorkspaceGroup[], page = 1): string {
   if (nav.length > 0) lines.push('', nav.join(' · '));
 
   const footer = [commandLink('/sessions', '工作中会话')];
-  if (archivedTotal > 0) footer.push(commandLink('/sessions archived', '查看已归档'));
+  if (archivable && archivedTotal > 0) footer.push(commandLink('/sessions archived', '查看已归档'));
   lines.push('', footer.join(' · '));
   return lines.join('\n').trimEnd();
 }

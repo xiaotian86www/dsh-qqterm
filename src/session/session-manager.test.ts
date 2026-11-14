@@ -33,6 +33,12 @@ const MINTED = /^session-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
 const REPLY: ReplyTarget = { scope: 'c2c', targetId: PEER };
 const REPLY_B: ReplyTarget = { scope: 'c2c', targetId: PEER_B };
 
+type AgentSelection = { provider: string; model: string; reasoningEffort?: string };
+/** 宿主 agent.model.select 的落点：sessionId → 最近一次选择 */
+const agentSelections = new Map<string, AgentSelection>();
+/** 测试挂的监听：模拟 model/selection 投影，断言写入顺序 */
+let onAgentSelect: ((sessionId: string, selection: AgentSelection) => void) | undefined;
+
 /** agents.resume 对不存在会话的报错 */
 const notFound = (id: string): Error =>
   Object.assign(new Error(`session "${id}" not found`), { name: 'SessionPersistenceNotFoundError' });
@@ -48,10 +54,9 @@ const corrupt = (id: string): Error => new Error(`EIO: corrupt session log for "
  */
 /** inject 保证存在的宿主服务：测试底座一并提供 */
 function hostCtxServices() {
-  // 宿主把模型选择记进会话（model/selection projection）：测试替身同样记住，
-  // 否则 /model 切换后 getEffectiveModel 读不到新值。
-  const selections = new Map<string, { provider: string; model: string; reasoningEffort?: string }>();
-  return {
+  // 宿主把模型选择记进会话（model/selection projection）：agent.model.select 的
+  // 替身写 agentSelections，视图与 /model 断言都读这一份。
+  const services = {
     llm: {
       listProviders: () => [{ id: 'p', name: 'p' }],
       listModels: async () => [],
@@ -59,24 +64,8 @@ function hostCtxServices() {
     },
     sessionProjections: {
       stateOf: (session: { id?: string } | undefined) => {
-        const selected = session?.id === undefined ? undefined : selections.get(session.id);
+        const selected = session?.id === undefined ? undefined : agentSelections.get(session.id);
         return selected === undefined ? undefined : { lastUsed: selected };
-      },
-    },
-    sessionController: {
-      selectModel: async (request: {
-        sessionId: string;
-        provider: string;
-        model: string;
-        reasoningEffort?: string;
-      }) => {
-        const selected = {
-          provider: request.provider,
-          model: request.model,
-          ...(request.reasoningEffort !== undefined ? { reasoningEffort: request.reasoningEffort } : {}),
-        };
-        selections.set(request.sessionId, selected);
-        return { selected };
       },
     },
     agentDefaultModel: {
@@ -94,6 +83,8 @@ function hostCtxServices() {
     commands: { find: () => undefined, execute: async () => undefined },
     permissionPresets: { names: [], optionOf: () => undefined },
   };
+  // 测试替身补上 ctx.get：插件读可选服务只走这个入口
+  return { ...services, get: (name: string) => (services as Record<string, unknown>)[name] };
 }
 
 function persistenceCtx(stat: (id: string) => Promise<{ header?: { agentPreset?: string } } | undefined>): Context {
@@ -127,6 +118,13 @@ function fakeAgent(id: string): DshAgent {
     cancel: vi.fn(),
     followup: vi.fn(),
     whenIdle: vi.fn(async () => {}),
+    // 宿主 dsh-agent 的 agent.model.select：append model/selection 事件
+    model: {
+      select: (selection: AgentSelection) => {
+        agentSelections.set(id, { ...selection });
+        onAgentSelect?.(id, selection);
+      },
+    },
   } as unknown as DshAgent;
 }
 
@@ -209,6 +207,8 @@ function createdIds(registry: { create: { mock: { calls: Array<[{ sessionId: str
 }
 
 beforeEach(() => {
+  agentSelections.clear();
+  onAgentSelect = undefined;
   env.home = mkdtempSync(join(tmpdir(), 'qqterm-session-'));
   mkdirSync(join(env.home, 'workspace'), { recursive: true });
 });
@@ -496,6 +496,70 @@ describe('getOrCreate — 会话创建/恢复后挂载到对应工作区', () =>
   });
 });
 
+describe('agentPresets 可选 — 部署里没有注册表', () => {
+  /**
+   * 真实 Cordis 里服务未注入时属性访问会抛错，不是返回 undefined；
+   * 两种形态都要能建会话。
+   */
+  function noRegistryCtx(shape: 'undefined' | 'throw'): Context {
+    const ctx = {
+      ...hostCtxServices(),
+      get: () => undefined,
+      on: vi.fn(),
+    } as unknown as Context;
+    Object.defineProperty(ctx, 'agentPresets', {
+      configurable: true,
+      get() {
+        if (shape === 'throw') throw new Error('service "agentPresets" is not available');
+        return undefined;
+      },
+    });
+    return ctx;
+  }
+
+  it.each(['undefined', 'throw'] as const)('缺失形态 %s：建会话照常，/preset 报无可用', async (shape) => {
+    const { registry } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
+    const manager = createManagerWithCtx(registry, noRegistryCtx(shape));
+
+    const record = await manager.getOrCreate('c2c', PEER, PEER, REPLY);
+
+    expect(record.sessionId).toMatch(MINTED);
+    expect(record.agentPreset).toBeUndefined();
+    expect(registry.create.mock.calls[0]![0]).not.toHaveProperty('setup');
+    expect(await manager.listPresets()).toEqual([]);
+    expect(manager.getEffectivePreset('c2c', PEER)).toBeUndefined();
+    await expect(manager.setPresetOverride('c2c', PEER, 'standard')).resolves.toEqual({
+      ok: false,
+      reason: 'unavailable',
+    });
+  });
+
+  it('真实 Cordis 形态：服务只能经 ctx.get 拿到（属性访问抛错）时照常可用', async () => {
+    const presets = {
+      defaultId: 'standard',
+      resolve: vi.fn(async (id?: string) => ({ id: id ?? 'standard' })),
+      mount: vi.fn(async () => {}),
+      list: vi.fn(async () => [{ id: 'standard' }, { id: 'ptc' }]),
+    };
+    const ctx = {
+      ...hostCtxServices(),
+      get: (name: string) => (name === 'agentPresets' ? presets : undefined),
+      on: vi.fn(),
+    } as unknown as Context;
+    // 不在 inject 里时，Cordis 代理的属性访问会直接抛
+    Object.defineProperty(ctx, 'agentPresets', {
+      configurable: true,
+      get() { throw new Error('cannot get property "agentPresets" without inject'); },
+    });
+
+    const { registry } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
+    const manager = createManagerWithCtx(registry, ctx);
+
+    expect(manager.presetsAvailable()).toBe(true);
+    expect((await manager.listPresets()).map((entry) => entry.id)).toEqual(['standard', 'ptc']);
+  });
+});
+
 describe('切换类操作 — 可重入', () => {
   /**
    * 带 agentPresets / settings 替身的 ctx：/preset 写核心默认值
@@ -574,7 +638,15 @@ describe('切换类操作 — 可重入', () => {
 
   it('新会话不继承旧会话的模型选择', async () => {
     const { registry } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
-    const manager = createManager(registry);
+    const ctx = {
+      ...absentCtx(),
+      llm: {
+        listProviders: () => [{ id: 'p', name: 'p' }],
+        listModels: async () => [{ id: 'other' }],
+        resolveModelInfo: async () => ({}),
+      },
+    } as unknown as Context;
+    const manager = createManagerWithCtx(registry, ctx);
     const created = await manager.getOrCreate('c2c', PEER, PEER, REPLY);
     await manager.setModelOverride('c2c', PEER, { provider: 'p', model: 'other' });
     expect(manager.getEffectiveModel('c2c', PEER)).toEqual({ provider: 'p', model: 'other' });
@@ -757,12 +829,13 @@ interface EffortHost {
 /**
  * ctx 替身：llm 元数据 + 宿主的会话选择 / 部署默认选择
  *
- * - `sessionController.selectModel` 模拟宿主：会话下一轮生效 + 保存默认
+ * - fakeAgent 的 `agent.model.select` 把会话选择记进 `state.pending`（下一轮生效）
  * - `sessionProjections.stateOf` 给出 modelSelection 的 pending / lastUsed
  * - `agentDefaultModel.currentSelection` 给出部署默认选择
  */
 function effortCtx(
   reasoning: Record<string, { efforts: typeof EFFORTS; defaultEffort?: string }>,
+  extraModels: string[] = [],
 ): EffortHost {
   const state = {
     pending: null as HostSelectionState | null,
@@ -776,14 +849,20 @@ function effortCtx(
       ...(request.reasoningEffort !== undefined ? { reasoningEffort: request.reasoningEffort } : {}),
     };
     state.pending = selected;
-    state.saved = selected;
     return { selected };
   });
+  // 宿主 agent.model.select 的替身：会话下一轮生效，部署默认值由插件自己写
+  onAgentSelect = (sessionId, selection) => { void selectModel({ sessionId, ...selection }); };
   const services: Record<string, unknown> = {
     ...hostCtxServices(),
     llm: {
-      listProviders: async () => [{ id: 'p', name: 'p' }],
-      listModels: async () => [],
+      listProviders: () => [{ id: 'p', name: 'p' }],
+      listModels: async (providerId: string) => [
+        ...Object.keys(reasoning)
+          .filter((key) => key.startsWith(`${providerId}/`))
+          .map((key) => ({ id: key.slice(providerId.length + 1) })),
+        ...extraModels.map((id) => ({ id })),
+      ],
       resolveModelInfo: async (providerId: string, model: string) => {
         const info = reasoning[`${providerId}/${model}`];
         return info ? { reasoning: info } : {};
@@ -794,7 +873,6 @@ function effortCtx(
       currentSelection: () => state.saved,
       saveSelection: async (next: HostSelectionState) => { state.saved = next; },
     },
-    sessionController: { selectModel },
   };
   const ctx = {
     ...services,
@@ -904,7 +982,7 @@ describe('思考强度 — 宿主选择与重建', () => {
 
     await manager.selectEffort('c2c', PEER, 'max');
 
-    // 宿主 selectModel 自带 saveSelection：部署默认跟着变，插件不再恢复
+    // 写会话选择后插件同步写部署默认值：新会话跟着变，旧默认不恢复
     expect(host.state.saved).toEqual({ provider: 'p', model: 'm', reasoningEffort: 'max' });
     expect(await manager.getEffortView('c2c', PEER)).toMatchObject({ current: { id: 'max' } });
   });
@@ -932,7 +1010,7 @@ describe('思考强度 — 宿主选择与重建', () => {
 
   it('换成不支持思考强度的模型时不显示档位，重建只带路由', async () => {
     const { registry } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
-    const host = effortCtx(REASONING);
+    const host = effortCtx(REASONING, ['plain']);
     const manager = createManagerWithCtx(registry, host.ctx);
     await manager.getOrCreate('c2c', PEER, PEER, REPLY);
     await manager.selectEffort('c2c', PEER, 'max');
@@ -947,7 +1025,7 @@ describe('思考强度 — 宿主选择与重建', () => {
 
   it('未知档位与不支持思考强度的模型都拒绝写入', async () => {
     const { registry } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
-    const host = effortCtx(REASONING);
+    const host = effortCtx(REASONING, ['plain']);
     const manager = createManagerWithCtx(registry, host.ctx);
     await manager.getOrCreate('c2c', PEER, PEER, REPLY);
 
@@ -975,6 +1053,52 @@ describe('思考强度 — 宿主选择与重建', () => {
       current: { id: 'max' },
       defaulted: false,
     });
+  });
+
+  it('模型与档位写进会话选择，不经过 sessionController', async () => {
+    const { registry } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
+    const host = effortCtx({ ...REASONING, 'p/m2': { efforts: EFFORTS, defaultEffort: 'high' } });
+    const manager = createManagerWithCtx(registry, host.ctx);
+    const record = await manager.getOrCreate('c2c', PEER, PEER, REPLY);
+
+    expect(await manager.setModelOverride('c2c', PEER, { provider: 'p', model: 'm2' }))
+      .toMatchObject({ provider: 'p', model: 'm2' });
+    expect(agentSelections.get(record.sessionId)).toEqual({ provider: 'p', model: 'm2' });
+
+    // low 不是 m2 的默认档位（high），会真正写一条会话选择
+    expect(await manager.selectEffort('c2c', PEER, 'low')).toEqual({ ok: true, effort: 'low' });
+    expect(agentSelections.get(record.sessionId)).toEqual({ provider: 'p', model: 'm2', reasoningEffort: 'low' });
+    // 会话选择之后插件顺手把部署默认值写成同一份（新会话沿用）
+    expect(host.state.saved).toEqual({ provider: 'p', model: 'm2', reasoningEffort: 'low' });
+  });
+
+  it('同一会话并发的模型切换串行执行（后一次不会拿着旧选择校验）', async () => {
+    const { registry } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
+    const host = effortCtx({ ...REASONING, 'p/m2': { efforts: EFFORTS }, 'p/narrow': { efforts: EFFORTS } });
+    const manager = createManagerWithCtx(registry, host.ctx);
+    await manager.getOrCreate('c2c', PEER, PEER, REPLY);
+
+    // 第一次切换卡在模型目录校验上，第二次必须等它写完才能开始
+    const gate = deferred<void>();
+    const llm = (host.ctx as unknown as { llm: { listModels: (providerId: string) => Promise<unknown[]> } }).llm;
+    const catalog = llm.listModels;
+    let active = 0;
+    let peak = 0;
+    llm.listModels = async (providerId: string) => {
+      active += 1;
+      peak = Math.max(peak, active);
+      await gate.promise;
+      active -= 1;
+      return catalog(providerId);
+    };
+
+    const first = manager.setModelOverride('c2c', PEER, { provider: 'p', model: 'm2' });
+    const second = manager.setModelOverride('c2c', PEER, { provider: 'p', model: 'narrow' });
+    gate.resolve(undefined);
+    await Promise.all([first, second]);
+
+    expect(peak).toBe(1);
+    expect(host.state.pending).toEqual({ provider: 'p', model: 'narrow' });
   });
 });
 

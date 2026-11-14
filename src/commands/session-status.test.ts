@@ -191,6 +191,12 @@ describe('/status（有会话）', () => {
     expect(text).not.toContain('**工作区**:');
     expect(text).toContain('**模型**: deepseek/deepseek-v4');
   });
+
+  it('工作区没有名字时只显示路径，不重复末段目录名', async () => {
+    const text = await run(makeManager({ workspace: { title: '', path: 'D:\\repo', missing: false } }));
+    expect(text).toContain('**工作区**: `D:\\repo`');
+    expect(text).not.toContain('repo ·');
+  });
 });
 
 describe('/status（没有会话）', () => {

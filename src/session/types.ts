@@ -71,6 +71,15 @@ export interface DshAgent {
   cancel(cause: { kind: string }): void;
   followup(message: unknown): void;
   whenIdle(): Promise<void>;
+  /**
+   * 选择模型 / 思考强度（宿主 dsh-agent 的 `agent.model`）
+   *
+   * `select()` 往会话里 append 一条 `model/selection`，下一步生效；Web 端切模型
+   * 落的也是这条事件。校验与部署默认值由调用方自己负责。
+   */
+  model: {
+    select(selection: { provider: string; model: string; reasoningEffort?: string }): void;
+  };
 }
 
 /** compact 操作结果 */
@@ -85,7 +94,8 @@ export interface CompactOutcome {
 /** preset 切换结果 */
 export interface PresetSwitchOutcome {
   ok: boolean;
-  reason?: 'unknown-preset' | 'broken' | 'failed';
+  /** unavailable = 部署里没有 agent-preset-registry，任何 preset 都切不了 */
+  reason?: 'unknown-preset' | 'broken' | 'failed' | 'unavailable';
   presetId?: string;
   /** true = 目标就是当前默认值，未写入 */
   unchanged?: boolean;
@@ -167,7 +177,7 @@ export interface DshAgentRegistry {
   }): Promise<DshAgentHandle>;
 }
 
-/** agent-presets 服务接口（可选，部署中可能没有） */
+/** agent-presets 服务接口（可选）：部署里没有 agent-preset-registry 时整个注册表不存在 */
 export interface AgentPresetsLike {
   readonly defaultId: string;
   resolve(id?: string): Promise<{ id: string; broken?: string }>;
@@ -423,8 +433,8 @@ export type RetryPromptOutcome =
 /** 归档 / 取消归档结果 */
 export interface ArchiveSessionOutcome {
   ok: boolean;
-  /** not-found = 会话不存在；busy = 有工作停不下来 */
-  reason?: 'not-found' | 'busy' | 'failed';
+  /** not-found = 会话不存在；busy = 有工作停不下来；unavailable = 部署没有工作区服务 */
+  reason?: 'not-found' | 'busy' | 'failed' | 'unavailable';
   message?: string;
   /** 因指向该会话而被改写的 per-chat 映射数（归档当前会话时 > 0） */
   remapped?: number;
@@ -447,7 +457,8 @@ export interface WorkspaceInfo {
  *
  * - missing：目标目录不存在 / 不是目录；
  * - ambiguous：标题匹配到多个工作区；
- * - not-found：既不是绝对路径，也没有同名工作区。
+ * - not-found：既不是绝对路径，也没有同名工作区；
+ * - unavailable：部署里没有 workspaceRegistry，不能按名字匹配工作区。
  */
 export type ChangeWorkspaceOutcome =
   | {
@@ -460,7 +471,8 @@ export type ChangeWorkspaceOutcome =
   }
   | { ok: false; reason: 'missing'; path: string }
   | { ok: false; reason: 'ambiguous'; matches: string[] }
-  | { ok: false; reason: 'not-found'; arg: string };
+  | { ok: false; reason: 'not-found'; arg: string }
+  | { ok: false; reason: 'unavailable'; arg: string };
 
 /** 一个工作区分组（/sessions all 用） */
 export interface WorkspaceGroup {

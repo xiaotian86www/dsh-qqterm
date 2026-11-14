@@ -59,7 +59,9 @@ async function renderStatus(
   const workspace = await manager.currentWorkspaceInfo(scope, peerId).catch(() => undefined);
   if (workspace) {
     const missing = workspace.missing ? ' ⚠️ 目录已不存在' : '';
-    lines.push(`**工作区**: ${workspace.title} · \`${workspace.path}\`${missing}`);
+    // 没有工作区名（没有 registry）时只给路径，不拿末段目录名冒充
+    const prefix = workspace.title === '' ? '' : `${workspace.title} · `;
+    lines.push(`**工作区**: ${prefix}\`${workspace.path}\`${missing}`);
   }
 
   // 模型 / 思考强度 / preset / 权限：没有会话时展示部署默认值（新建会话会用它），
