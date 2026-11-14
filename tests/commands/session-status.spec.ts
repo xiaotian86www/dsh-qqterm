@@ -30,8 +30,6 @@ interface StubOptions {
   agentStatus?: 'idle' | 'running';
   /** 会话日志里的标题（默认没有，模拟宿主还没生成标题） */
   title?: string;
-  messageCount?: number;
-  usage?: { input: number; output: number };
   context?: { used?: number; window?: number };
   workspace?: { title: string; path: string; missing: boolean } | undefined;
   /** 思考强度视图：默认支持 high、未显式设置 */
@@ -66,10 +64,8 @@ function makeManager(options: StubOptions = {}) {
       provider: 'deepseek',
       model: 'deepseek-v4',
       preset: active ? 'default' : undefined,
-      messageCount: options.messageCount ?? 12,
     })),
     getSessionRecord: vi.fn(() => record),
-    getTokenUsage: vi.fn(() => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, ...options.usage })),
     getContextUsage: vi.fn(() => options.context ?? {}),
     getTurnProgress: vi.fn(() => options.progress),
     getEffortView: vi.fn(async () => options.effort ?? {
@@ -174,16 +170,6 @@ describe('/status（有会话）', () => {
     expect(await run(makeManager({ context: {} }))).not.toContain('上下文');
   });
 
-  it('累计 token 与消息数', async () => {
-    const text = await run(makeManager({ usage: { input: 1234, output: 567 }, messageCount: 12 }));
-    expect(text).toContain('**消息**: 12 条');
-    expect(text).toContain('**Token**: 输入 1,234 · 输出 567（累计）');
-  });
-
-  it('没有 token 消耗时不显示 Token 行', async () => {
-    expect(await run(makeManager({ usage: { input: 0, output: 0 } }))).not.toContain('**Token**:');
-  });
-
   it('目录已不存在时明确告警', async () => {
     const text = await run(makeManager({ workspace: { title: 'gone', path: 'D:\\gone', missing: true } }));
     expect(text).toContain('⚠️ 目录已不存在');
@@ -268,11 +254,8 @@ describe('/status（没有会话）', () => {
     expect(text).not.toContain('默认');
   });
 
-  it('不展示会话级字段', async () => {
-    const text = await run(makeManager({ active: false }));
-    expect(text).not.toContain('**消息**:');
-    expect(text).not.toContain('**上下文**:');
-    expect(text).not.toContain('**Token**:');
+  it('没有会话时不展示上下文', async () => {
+    expect(await run(makeManager({ active: false }))).not.toContain('**上下文**:');
   });
 
   it('宿主读不出权限时保留该字段写 —，不整行消失', async () => {

@@ -2,7 +2,7 @@
  * 会话状态命令：/status
  *
  * 当前聊天会话的「现场」：会话标题与 id、生成状态、所在工作区、模型 / 思考强度 /
- * preset / 权限、消息数、上下文占用、累计 token。
+ * preset / 权限、上下文占用。
  *
  * 与其它状态类命令的分工：
  *   - `/cost` 只看计费口径（累计 token 与缓存命中率）；
@@ -125,17 +125,10 @@ async function renderStatus(
     lines.push('**权限**: —');
   }
 
-  // 以下只在会话已建立时有意义
+  // 上下文只在会话已建立时有意义；消息数与累计 token 不在这里重复
   if (status.active) {
-    lines.push(`**消息**: ${num(status.messageCount ?? 0)} 条`);
-
     const contextLine = renderContext(manager.getContextUsage(scope, peerId));
     if (contextLine) lines.push(`**上下文**: ${contextLine}`);
-
-    const usage = manager.getTokenUsage(scope, peerId);
-    if (usage.input + usage.output > 0) {
-      lines.push(`**Token**: 输入 ${num(usage.input)} · 输出 ${num(usage.output)}（累计）`);
-    }
   }
 
   // 生成中给一个可点击的停止入口：QQ 不能编辑消息，停止要能直接点到
