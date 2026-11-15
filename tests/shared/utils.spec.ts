@@ -20,6 +20,14 @@ function tempDir(): string {
   return dir;
 }
 
+/**
+ * Windows 上用 junction 代替 symlink：普通用户默认权限即可创建，
+ * pnpm 在 Windows 上也多用 junction；其它平台建目录符号链接。
+ */
+function linkPlugin(pluginSrc: string, linked: string): void {
+  symlinkSync(pluginSrc, linked, process.platform === 'win32' ? 'junction' : 'dir');
+}
+
 afterEach(() => {
   while (tempDirs.length > 0) {
     const dir = tempDirs.pop();
@@ -37,7 +45,7 @@ describe('getProfileDir', () => {
     const profile = join(root, 'home', 'profiles', 'web');
     const linked = join(profile, 'node_modules', 'dsh-qqterm');
     mkdirSync(join(profile, 'node_modules', '@tencent-connect'), { recursive: true });
-    symlinkSync(pluginSrc, linked);
+    linkPlugin(pluginSrc, linked);
 
     process.env.DSH_HOME = join(root, 'home');
     try {
@@ -55,7 +63,7 @@ describe('getProfileDir', () => {
     for (const name of ['desktop', 'web']) {
       const linked = join(root, 'home', 'profiles', name, 'node_modules', 'dsh-qqterm');
       mkdirSync(join(root, 'home', 'profiles', name, 'node_modules', '@tencent-connect'), { recursive: true });
-      symlinkSync(pluginSrc, linked);
+      linkPlugin(pluginSrc, linked);
     }
     process.env.DSH_HOME = join(root, 'home');
     const argv = process.argv;
@@ -66,6 +74,9 @@ describe('getProfileDir', () => {
       // --profile flag 形式
       process.argv = ['node', '/path/to/dsh', '--profile', 'web'];
       expect(getProfileDir(pluginSrc)).toBe(join(root, 'home', 'profiles', 'web'));
+      // --profile= 形式
+      process.argv = ['node', '/path/to/dsh', '--profile=desktop'];
+      expect(getProfileDir(pluginSrc)).toBe(join(root, 'home', 'profiles', 'desktop'));
     } finally {
       process.argv = argv;
       delete process.env.DSH_HOME;
@@ -79,7 +90,7 @@ describe('getProfileDir', () => {
     for (const name of ['desktop', 'web']) {
       const linked = join(root, 'home', 'profiles', name, 'node_modules', 'dsh-qqterm');
       mkdirSync(join(root, 'home', 'profiles', name, 'node_modules', '@tencent-connect'), { recursive: true });
-      symlinkSync(pluginSrc, linked);
+      linkPlugin(pluginSrc, linked);
     }
     process.env.DSH_HOME = join(root, 'home');
     const versions = process.versions as { electron?: string };

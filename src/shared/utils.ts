@@ -74,7 +74,7 @@ export function getProfileDir(baseDir: string = PLUGIN_ROOT): string | null {
   }
 
   // link: 安装（symlink）下插件真实路径在 node_modules 之外，正向反推必失败；
-  // 反查 profiles/*/node_modules 里指向本插件根的 symlink（#78）
+  // 反查 profiles/*/node_modules 里指向本插件根的链接（#78；Windows 上 pnpm 用 junction，需 native realpath 才能解析）
   return findProfileBySymlink(baseDir);
 }
 
@@ -85,14 +85,14 @@ function findProfileBySymlink(baseDir: string): string | null {
   if (!existsSync(profilesRoot)) return null;
   let realBase: string;
   try {
-    realBase = realpathSync(baseDir);
+    realBase = realpathSync.native(baseDir);
   } catch {
     return null;
   }
   const match = (name: string): string | null => {
     const linked = resolve(profilesRoot, name, 'node_modules', 'dsh-qqterm');
     try {
-      return realpathSync(linked) === realBase ? resolve(profilesRoot, name) : null;
+      return realpathSync.native(linked) === realBase ? resolve(profilesRoot, name) : null;
     } catch {
       return null; // 该 profile 未装本插件或链接损坏
     }

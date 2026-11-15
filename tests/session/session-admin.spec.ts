@@ -9,6 +9,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import type { Context } from '@deepseek-ai/cordis';
+import { withPlatform } from '../fixtures/platform.ts';
 import { ConfigSchema, type QQTermConfig } from '../../src/config.ts';
 import type { Logger, ReplyTarget } from '../../src/types.ts';
 import type { DshAgent, DshAgentHandle, DshAgentRegistry } from '../../src/session/types.ts';
@@ -303,8 +304,17 @@ describe('listWorkspaceSessions', () => {
       sessions: [{ id: 'session-a', cwd: WORKSPACE().toUpperCase(), createdAt: 1 }],
     });
     const { manager } = createManager(ctx);
-    const entries = await manager.listWorkspaceSessions('c2c', PEER);
+    const entries = await withPlatform('win32', () => manager.listWorkspaceSessions('c2c', PEER));
     expect(entries.map((entry) => entry.id)).toEqual(['session-a']);
+  });
+
+  it('非 Windows 平台路径大小写不同视为不同目录', async () => {
+    const ctx = createCtx({
+      sessions: [{ id: 'session-a', cwd: WORKSPACE().toUpperCase(), createdAt: 1 }],
+    });
+    const { manager } = createManager(ctx);
+    const entries = await withPlatform('linux', () => manager.listWorkspaceSessions('c2c', PEER));
+    expect(entries).toEqual([]);
   });
 
   it('归档的会话仍然列出，但带 archived 标记（过滤交给展示层）', async () => {
@@ -474,6 +484,28 @@ describe('listWorkspaceGroups', () => {
     ]);
     expect(groups[0]?.sessions.map((session) => session.id)).toEqual(['session-a']);
     expect(manager.workspaceRegistryAvailable()).toBe(false);
+  });
+
+  it('没有 workspaceRegistry 时仅 Windows 合并大小写不同的目录', async () => {
+    const upper = join(env.home, 'Repo');
+    const lower = join(env.home, 'repo');
+    const ctx = createCtx({
+      withQuery: true,
+      withRegistry: false,
+      sessions: [
+        { id: 'session-upper', cwd: upper, createdAt: 2 },
+        { id: 'session-lower', cwd: lower, createdAt: 1 },
+      ],
+    });
+    const { manager } = createManager(ctx);
+
+    const windowsGroups = await withPlatform('win32', () => manager.listWorkspaceGroups('c2c', PEER));
+    expect(windowsGroups).toHaveLength(1);
+    expect(windowsGroups[0]?.sessions.map((session) => session.id))
+      .toEqual(['session-upper', 'session-lower']);
+
+    const posixGroups = await withPlatform('linux', () => manager.listWorkspaceGroups('c2c', PEER));
+    expect(posixGroups.map((group) => group.path)).toEqual([upper, lower]);
   });
 });
 

@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, writeFileSync, existsSync, utimesSync, statS
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseDocument, isSeq, type YAMLSeq } from 'yaml';
+import { withPlatform } from '../fixtures/platform.ts';
 import {
   persistCredentialsToProfile,
   removeCredentialsFromProfile,
@@ -215,6 +216,31 @@ describe('updateProfileConfig', () => {
     expect(after).toContain('- id: qqterm');
     expect(after).toContain('debug: false');
     expect(after).not.toContain('appId: x');
+  });
+});
+
+describe('无 profile 目录时的环境变量引导', () => {
+  it.each([
+    ['win32', '  set QQBOT_APPID=test-app', '  set QQBOT_SECRET=test-secret'],
+    ['darwin', '  export QQBOT_APPID="test-app"', '  export QQBOT_SECRET="test-secret"'],
+    ['linux', '  export QQBOT_APPID="test-app"', '  export QQBOT_SECRET="test-secret"'],
+  ] as const)('%s 使用对应的 shell 语法', async (platform, appLine, secretLine) => {
+    const lines: string[] = [];
+    const spy = vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      lines.push(args.map(String).join(' '));
+    });
+    try {
+      const saved = await withPlatform(
+        platform,
+        () => persistCredentialsToProfile(credentials, undefined, log),
+      );
+      expect(saved).toBe(false);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(lines[0]).toContain('未检测到 profile 目录');
+    expect(lines).toContain(appLine);
+    expect(lines).toContain(secretLine);
   });
 });
 
