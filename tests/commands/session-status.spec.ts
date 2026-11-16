@@ -117,7 +117,8 @@ describe('/status（有会话）', () => {
   it('给出会话标题、短 id、工作区、模型与 preset', async () => {
     const text = await run(makeManager({ title: '修登录' }));
     expect(text).toContain('### 📊 会话状态');
-    expect(text).toContain('**会话**: 「修登录」 · `#9d2c4410` · 空闲');
+    expect(text).toContain('**会话**: 「修登录」 · `#9d2c4410`');
+    expect(text).toContain('**状态**: 空闲');
     expect(text).toContain('**工作区**: repo · `D:\\repo`');
     expect(text).toContain('**模型**: deepseek/deepseek-v4');
     expect(text).toContain('**思考强度**: 高');
@@ -132,13 +133,15 @@ describe('/status（有会话）', () => {
 
   it('宿主还没生成标题时只给短 id，不写「未命名会话」', async () => {
     const text = await run(makeManager());
-    expect(text).toContain('**会话**: `#9d2c4410` · 空闲');
+    expect(text).toContain('**会话**: `#9d2c4410`');
+    expect(text).toContain('**状态**: 空闲');
     expect(text).not.toContain('未命名会话');
   });
 
   it('空标题按没有标题处理', async () => {
     const text = await run(makeManager({ title: '   ' }));
-    expect(text).toContain('**会话**: `#9d2c4410` · 空闲');
+    expect(text).toContain('**会话**: `#9d2c4410`');
+    expect(text).toContain('**状态**: 空闲');
   });
 
   it('标题过长时截断，不撑破一行', async () => {
@@ -146,9 +149,13 @@ describe('/status（有会话）', () => {
     expect(text).toContain(`**会话**: 「${'标'.repeat(20)}…」`);
   });
 
-  it('生成中与空闲区分开', async () => {
-    expect(await run(makeManager({ agentStatus: 'running' }))).toContain('生成中');
-    expect(await run(makeManager({ agentStatus: 'idle' }))).toContain('空闲');
+  it('生成中与空闲都收在状态一行里', async () => {
+    const running = await run(makeManager({ agentStatus: 'running' }));
+    expect(running).toContain('**状态**: 生成中');
+    expect(running).not.toContain('**会话**: `#9d2c4410` · 生成中');
+    const idle = await run(makeManager({ agentStatus: 'idle' }));
+    expect(idle).toContain('**状态**: 空闲');
+    expect(idle).not.toContain('**会话**: `#9d2c4410` · 空闲');
   });
 
   it('上下文给出占用 / 窗口 / 百分比 / 剩余', async () => {
@@ -187,7 +194,7 @@ describe('/status（有会话）', () => {
     expect(text).not.toContain('repo ·');
   });
 
-  it('生成中给出本轮耗时、步骤与正在执行的工具', async () => {
+  it('生成中依次给步数、总时长与正在执行的工具', async () => {
     const text = await run(makeManager({
       agentStatus: 'running',
       progress: {
@@ -198,8 +205,9 @@ describe('/status（有会话）', () => {
         toolName: 'read',
       },
     }));
-    expect(text).toContain('**本轮**: 2m10s · 第 3 步');
-    expect(text).toContain('**进度**: 正在 `read`');
+    expect(text).toContain('**状态**: 第 3 步 · 共 2m10s · 正在 `read`');
+    expect(text).not.toContain('**本轮**');
+    expect(text).not.toContain('**进度**');
   });
 
   it('等待模型响应时给重试退避', async () => {
@@ -212,22 +220,25 @@ describe('/status（有会话）', () => {
         retry: { attempt: 2, delayMs: 10_000, since: Date.now() },
       },
     }));
-    expect(text).toContain('**进度**: 等待模型响应');
+    expect(text).toContain('**状态**: 共 45s · 等待模型响应');
     expect(text).toContain('**重试**: 第 2 次 · ');
     expect(text).toContain('后重发');
   });
 
-  it('空闲时不展示本轮现场', async () => {
+  it('空闲时不展示生成中的现场', async () => {
     const text = await run(makeManager({
       progress: { elapsedMs: 1000, step: 1, waiting: 'model', waitingSince: Date.now() },
     }));
-    expect(text).not.toContain('**本轮**:');
+    expect(text).toContain('**状态**: 空闲');
+    expect(text).not.toContain('第 1 步');
+    expect(text).not.toContain('等待模型响应');
   });
 
-  it('生成中但没有进度事件时不添加空行', async () => {
+  it('生成中但没有进度事件时只写「生成中」', async () => {
     const text = await run(makeManager({ agentStatus: 'running' }));
-    expect(text).not.toContain('**本轮**:');
-    expect(text).not.toContain('**进度**:');
+    expect(text).toContain('**状态**: 生成中\n');
+    expect(text).not.toContain('**本轮**');
+    expect(text).not.toContain('**进度**');
   });
 
   it('生成中给可点击的 /stop 入口', async () => {

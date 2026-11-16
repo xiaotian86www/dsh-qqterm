@@ -47,24 +47,27 @@ function formatDuration(ms: number): string {
   return minutes === 0 ? `${hours}h` : `${hours}h${minutes}m`;
 }
 
-/** 生成中的现场：本轮多长、第几步、在等工具还是模型、是否在重试 */
-function renderProgress(progress: SessionTurnProgress): string[] {
-  const parts = [formatDuration(progress.elapsedMs)];
+/**
+ * 生成状态：先给步数与累计时长（看出跑了多久、是否在动），最后说现在在做什么；
+ * 「生成中」与「正在 read」是同一件事，不重复写。
+ */
+function renderState(progress: SessionTurnProgress | undefined): string {
+  if (!progress) return '生成中';
+  const parts: string[] = [];
   if (progress.step !== undefined) parts.push(`第 ${progress.step} 步`);
-  const lines = [`**本轮**: ${parts.join(' · ')}`];
+  // elapsedMs 是本轮从 turn/start 起的累计时间；标「共」避免被读成当前这一步的耗时
+  parts.push(`共 ${formatDuration(progress.elapsedMs)}`);
+  parts.push(progress.waiting === 'tool'
+    ? (progress.toolName ? `正在 \`${progress.toolName}\`` : '正在执行工具')
+    : '等待模型响应');
+  return parts.join(' · ');
+}
 
-  const phase = progress.waiting === 'tool'
-    ? (progress.toolName ? `正在 \`${progress.toolName}\`` : '正在工具执行')
-    : '等待模型响应';
-  lines.push(`**进度**: ${phase} · ${formatDuration(Date.now() - progress.waitingSince)}`);
-
-  if (progress.retry) {
-    const remaining = progress.retry.since + progress.retry.delayMs - Date.now();
-    lines.push(
-      `**重试**: 第 ${progress.retry.attempt} 次 · ${remaining > 0 ? `${formatDuration(remaining)} 后重发` : '正在重发'}`,
-    );
-  }
-  return lines;
+/** 重试退避单独一行：它和「在等什么」不是同一件事，混进状态会看不清还要等多久 */
+function renderRetry(progress: SessionTurnProgress): string | undefined {
+  if (!progress.retry) return undefined;
+  const remaining = progress.retry.since + progress.retry.delayMs - Date.now();
+  return `**重试**: 第 ${progress.retry.attempt} 次 · ${remaining > 0 ? `${formatDuration(remaining)} 后重发` : '正在重发'}`;
 }
 
 /** 渲染会话状态正文（handler 只负责兜错与发送） */
@@ -78,21 +81,21 @@ async function renderStatus(
 
   const lines: string[] = ['### 📊 会话状态', ''];
 
-  // 会话：标题 + 短 id + 是否正在生成（标题还没生成时只给 id）
+  // 会话：标题 + 短 id（标题还没生成时只给 id）
   const running = record?.agent.status === 'running';
   if (status.active && status.sessionId) {
     const title = record === undefined ? undefined : sessionTitleOf(record);
-    lines.push(
-      `**会话**: ${sessionTargetLabel(status.sessionId, title)} · ${running ? '生成中' : '空闲'}`,
-    );
+    lines.push(`**会话**: ${sessionTargetLabel(status.sessionId, title)}`);
+
+    // 状态：生成中 / 空闲以及生成中的现场都收在这一行
+    const progress = running ? manager.getTurnProgress(scope, peerId) : undefined;
+    lines.push(`**状态**: ${running ? renderState(progress) : '空闲'}`);
+    if (running && progress) {
+      const retry = renderRetry(progress);
+      if (retry) lines.push(retry);
+    }
   } else {
     lines.push('**会话**: 未建立');
-  }
-
-  // 生成中才给现场：长时间没回复时，至少能看出卡在工具还是模型
-  if (running) {
-    const progress = manager.getTurnProgress(scope, peerId);
-    if (progress) lines.push(...renderProgress(progress));
   }
 
   // 工作区：会话落在哪个目录（读不到就跳过，不影响其它字段）
