@@ -6,7 +6,7 @@
 
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 [![QQ Bot](https://img.shields.io/badge/QQ_Bot-API_v2-red)](https://bot.q.qq.com/wiki/)
-[![Node](https://img.shields.io/badge/node-%E2%89%A520.3-brightgreen)](https://nodejs.org/)
+[![Node](https://img.shields.io/badge/node-%E2%89%A522.12-brightgreen)](https://nodejs.org/)
 
 <br/>
 

@@ -7,7 +7,7 @@
 
 - dsh（DeepSeek Harness）的 QQ Bot IM 通道插件，纯 Cordis 插件，不改宿主 loop。
 - 宿主加载 `lib/index.js`，浏览器加载 `lib/client.js`（dsh.client 模块）。
-- Node ≥ 20.3、TypeScript ESM、pnpm、vitest、tsdown。
+- Node ≥ 22.12、TypeScript ESM、pnpm、vitest、tsdown。
 - 当前宿主 dsh 0.2.2-rc.1 实测可运行；`dsh.compatibility` 只是声明，宿主升级后必须重新验收并更新。
 - `lib/` 的 js 要提交（开箱即用）；`lib/**/*.d.ts`、`lib/**/*.map` 被 .gitignore 排除。
 
@@ -209,7 +209,7 @@ QQ 只有一个窗口，多个已获取会话的输出、提问、审批都回�
 
 - 开发快照保持基线版本，只加 `-dev.N`（`0.0.1` → `0.0.1-dev.0`），不要抬成 `0.0.2`。
 - 发布：更新 `CHANGELOG.md` / `CHANGELOG_EN.md`（Keep a Changelog）→ 改版本号 → `pnpm build` → 打包。
-- `prepublishOnly` 会再 build 一次；发布前仍要确认 `lib/` 与 `src/` 一致。仓库没有 CI，由维护者本地构建后发布。
+- `prepublishOnly` 会再 build 一次；发布前仍要确认 `lib/` 与 `src/` 一致。CI 会跑 build / test / package；发布仍由维护者本地确认 `lib/` 后手动执行。
 - `ci:prepare-test-pkg` 会把包名改成 `@tencent/dsh-qqterm` 并改写 `cordis.patch.yml`，只在一次性分支 / 临时目录跑，不要提交它的改动。
 - 宿主升级后更新 `dsh.compatibility.dshReleases` 与 note，重新验收客户端槽位与扫码绑定全流程。
 
@@ -236,6 +236,7 @@ QQ 只有一个窗口，多个已获取会话的输出、提问、审批都回�
 
 - [ ] `pnpm build` 通过，`lib/` 的 js 已更新并提交
 - [ ] `pnpm test` 全绿；新逻辑有对应 `tests/**/*.spec.ts`
+- [ ] CI 的 verify / test（三平台）/ package 全绿
 - [ ] 未新增 `@deepseek-ai/*` 运行期依赖；`inject` 与实际依赖一致
 - [ ] `apply()` 没有阻塞式 await；异步错误都有 catch
 - [ ] 客户端改动已 typecheck，并在 C2C 验证一次按钮回退
