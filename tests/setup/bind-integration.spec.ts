@@ -241,11 +241,14 @@ describe('绑定链路 × 真实 persist 落盘（#53 回归）', () => {
     const { statSync, utimesSync } = await import('node:fs');
     const past = new Date(Date.now() - 1000);
     utimesSync(patchPath, past, past);
+    // 不同文件系统对 utimes 的精度不同（Linux 上回读可能差不到 1ms），
+    // 以回读值为基准，只断言重放没有再次写文件。
+    const mtimeBeforeReplay = statSync(patchPath).mtimeMs;
 
     const second = fakeRes();
     await invoke(routes.get(BIND_CONFIG_PATH), fakeReq('POST', '{"showToolResults":false}'), second);
     expect(second.statusCode).toBe(200);
-    expect(statSync(patchPath).mtimeMs).toBe(past.getTime()); // 无变化 → 无写 → mtime 不动
+    expect(statSync(patchPath).mtimeMs).toBe(mtimeBeforeReplay); // 无变化 → 无写 → mtime 不动
   });
 
   it('manual 请求体仍受 4KB 上限约束', async () => {
