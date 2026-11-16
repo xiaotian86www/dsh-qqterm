@@ -205,9 +205,11 @@ describe('updateProfileConfig', () => {
     writeFileSync(patchPath, '- id: qqterm\n  config:\n    debug: false\n', 'utf8');
     const past = new Date(Date.now() - 1000);
     utimesSync(patchPath, past, past);
+    // 文件系统对 utimes 的精度不同，以回读值为基准，只断言没有再次写文件
+    const mtimeBefore = statSync(patchPath).mtimeMs;
 
     expect(updateProfileConfig({ debug: false }, dir, log)).toBe(true);
-    expect(statSync(patchPath).mtimeMs).toBe(past.getTime());
+    expect(statSync(patchPath).mtimeMs).toBe(mtimeBefore);
   });
 
   it('条目不存在时追加，跳过凭据键', () => {
