@@ -203,6 +203,43 @@ describe('/sessions 持有视图', () => {
     expect(text).not.toContain('修复登录 bug');
   });
 
+  it('持有会话下的子会话紧跟父行展示，不做成可恢复目标', async () => {
+    const manager = makeManager({
+      listHeldSessions: vi.fn(async () => [
+        entry({
+          id: 'session-cccc1111',
+          current: true,
+          held: true,
+          running: true,
+          title: '当前会话',
+          workspace: 'repo',
+          workspacePath: '/repo',
+          children: [
+            entry({
+              id: 'session-ffff9999',
+              title: '子代理任务',
+              live: true,
+              subagent: true,
+              running: true,
+            }),
+          ],
+        }),
+      ]),
+      currentSessionId: vi.fn(() => 'session-cccc1111'),
+    });
+
+    const text = await run(manager, '');
+
+    expect(text).toContain('### 🗂 工作中会话（1 个工作区 · 1 个会话 · 1 个子会话）');
+    expect(text).toContain('#ffff9999 · 子代理任务 · 子会话 · 生成中');
+    // 子会话不单独成目标：解析不到，给 resume 链接只会报错
+    expect(text).not.toContain('/sessions resume #ffff9999');
+    expect(text).toContain('<qqbot-cmd-input text="/sessions resume #cccc1111"');
+    // 父行是按钮，子行是纯文本：子行不应被 <qqbot-cmd-input> 包住
+    const childLine = text.split('\n').find((line) => line.includes('#ffff9999')) ?? '';
+    expect(childLine.startsWith('<qqbot-cmd-input')).toBe(false);
+  });
+
   it('当前不在持有列表时单独补一行', async () => {
     const manager = makeManager({
       listHeldSessions: vi.fn(async () => [entry({ held: true, title: '后台会话' })]),

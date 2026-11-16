@@ -1834,8 +1834,49 @@ export class SessionManager {
       return currentDiff !== 0 ? currentDiff : right.acquiredAt - left.acquiredAt;
     });
 
+    // 子代理会话：宿主只把子会话的 parentSession 指向父会话。运行中的子会话
+    // （origin 为 subagent 且 live）挂到父条目下，隔代（子代理再起子代理）也收；
+    // 兄弟按活跃时间倒序，保证刚更新过的子会话排在前面。
+    const subagentsByParent = new Map<string, HostSessionInfo[]>();
+    for (const info of hostSessions) {
+      if (info.origin !== 'subagent' || !info.live) continue;
+      const parent = info.parentSession;
+      if (parent === undefined) continue;
+      const siblings = subagentsByParent.get(parent);
+      if (siblings === undefined) subagentsByParent.set(parent, [info]);
+      else siblings.push(info);
+    }
+    for (const siblings of subagentsByParent.values()) {
+      siblings.sort((left, right) => right.updatedAt - left.updatedAt);
+    }
+    const descendantsOf = (rootId: string): HostSessionInfo[] => {
+      const collected: HostSessionInfo[] = [];
+      const visited = new Set<string>([rootId]);
+      const walk = (parentId: string): void => {
+        for (const child of subagentsByParent.get(parentId) ?? []) {
+          if (visited.has(child.id)) continue;
+          visited.add(child.id);
+          collected.push(child);
+          walk(child.id);
+        }
+      };
+      walk(rootId);
+      return collected;
+    };
+    const childrenById = new Map(
+      ordered.map((record) => [record.sessionId, descendantsOf(record.sessionId)]),
+    );
+
+    // 标题读取有上限：先给持有会话，再用剩余名额补子会话
+    const titleIds = ordered.slice(0, TITLE_FETCH_LIMIT_HELD).map((record) => record.sessionId);
+    for (const record of ordered) {
+      for (const child of childrenById.get(record.sessionId) ?? []) {
+        if (titleIds.length >= TITLE_FETCH_LIMIT_HELD) break;
+        if (!titleIds.includes(child.id)) titleIds.push(child.id);
+      }
+    }
     const titles = await this.host
-      .sessionTitles(ordered.slice(0, TITLE_FETCH_LIMIT_HELD).map((record) => record.sessionId))
+      .sessionTitles(titleIds)
       .catch(() => new Map<string, string>());
     const workspaces = this.host.workspaceList();
 
@@ -1849,6 +1890,19 @@ export class SessionManager {
       // 没有 registry 时只有路径：不拿目录名冒充工作区名，分组标题只显示路径
       const workspaceTitle = workspace?.title
         ?? (this.host.supportsWorkspaceRegistry() && directory !== undefined ? basename(directory) : undefined);
+      const children = (childrenById.get(record.sessionId) ?? []).map((child) => ({
+        id: child.id,
+        ...(titles.has(child.id) ? { title: titles.get(child.id) } : {}),
+        createdAt: child.createdAt,
+        updatedAt: child.updatedAt,
+        current: false,
+        live: true,
+        held: false,
+        running: true,
+        isSeeded: child.isSeeded,
+        archived: false,
+        subagent: true,
+      }));
       return {
         id: record.sessionId,
         ...(titles.has(record.sessionId) ? { title: titles.get(record.sessionId) } : {}),
@@ -1864,6 +1918,7 @@ export class SessionManager {
         ...(workspacePath !== undefined
           ? { workspacePath, workspaceMissing: !isDirectory(workspacePath) }
           : {}),
+        ...(children.length > 0 ? { children } : {}),
       };
     });
   }

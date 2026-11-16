@@ -271,6 +271,7 @@ function workspaceHeader(
  * 其它视图不展示状态，只标 `📌`；状态词只出现在 `/sessions` 默认视图。
  */
 function statusOf(entry: WorkspaceSession): string {
+  if (entry.subagent) return entry.live ? '生成中' : '空闲';
   if (entry.held) return entry.running ? '生成中' : '空闲';
   return '待恢复';
 }
@@ -291,6 +292,8 @@ function renderRow(entry: WorkspaceSession, options: RowOptions = {}): string {
   const body: string[] = [];
   body.push(displayId(entry.id));
   body.push(shortTitle(entry));
+  // 子会话紧跟父行，纯文本行没有缩进与按钮，用这个词说明自己不是独立会话
+  if (entry.subagent) body.push('子会话');
   if (options.showStatus) body.push(statusOf(entry));
   const time = formatRelativeTime(entry.updatedAt);
   if (time !== '—') body.push(time);
@@ -757,6 +760,7 @@ function renderHeldList(
   const start = (page - 1) * PAGE_SIZE;
   const shown = total === 0 ? [] : entries.slice(start, start + PAGE_SIZE);
   const workspaceCount = groupHeldEntries(entries).length;
+  const subagentCount = entries.reduce((sum, entry) => sum + (entry.children?.length ?? 0), 0);
   const currentEntry = entries.find((entry) => entry.current);
   const currentLineId = currentId !== undefined && !shown.some((entry) => entry.current)
     ? currentId
@@ -773,7 +777,8 @@ function renderHeldList(
   }
 
   const lines: string[] = [
-    `### 🗂 工作中会话（${workspaceCount} 个工作区 · ${total} 个会话）`,
+    `### 🗂 工作中会话（${workspaceCount} 个工作区 · ${total} 个会话`
+      + `${subagentCount > 0 ? ` · ${subagentCount} 个子会话` : ''}）`,
     '',
     ...fields,
     ...(fields.length > 0 ? [''] : []),
@@ -793,6 +798,10 @@ function renderHeldList(
         showStatus: true,
         showCurrent: true,
       })));
+      // 子会话不是独立目标（/sessions resume 解析不到），只作为父行后的说明
+      for (const child of row.children ?? []) {
+        lines.push(renderRow(child, { showStatus: true }));
+      }
     }
   });
 

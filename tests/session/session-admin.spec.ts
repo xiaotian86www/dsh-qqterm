@@ -611,6 +611,58 @@ describe('listHeldSessions', () => {
     expect(held?.workspace).toBeUndefined();
     expect(held?.workspacePath).toBe(WORKSPACE());
   });
+
+  it('运行中的子会话挂在父条目下（含孙会话），完成的子会话不出现', async () => {
+    const ctx = createCtx({
+      withQuery: true,
+      sessions: [
+        { id: 'session-parent', cwd: WORKSPACE(), createdAt: 1, live: true },
+        {
+          id: 'session-child',
+          cwd: WORKSPACE(),
+          parentSession: 'session-parent',
+          origin: 'subagent',
+          createdAt: 2,
+          live: true,
+        },
+        {
+          id: 'session-grandchild',
+          cwd: WORKSPACE(),
+          parentSession: 'session-child',
+          origin: 'subagent',
+          createdAt: 3,
+          live: true,
+        },
+        {
+          id: 'session-dead',
+          cwd: WORKSPACE(),
+          parentSession: 'session-parent',
+          origin: 'subagent',
+          createdAt: 4,
+          live: false,
+        },
+      ],
+    });
+    const { manager } = createManager(ctx);
+
+    await manager.switchSession('c2c', PEER, 'session-parent', PEER, REPLY);
+    const entries = await manager.listHeldSessions('c2c', PEER);
+
+    expect(entries).toHaveLength(1);
+    const parent = entries[0];
+    expect(parent?.id).toBe('session-parent');
+    expect(parent?.children?.map((child) => child.id))
+      .toEqual(['session-child', 'session-grandchild']);
+    expect(parent?.children?.[0]).toMatchObject({
+      subagent: true,
+      live: true,
+      held: false,
+      running: true,
+      current: false,
+      archived: false,
+      title: '标题-hild',
+    });
+  });
 });
 
 describe('switchSession', () => {
