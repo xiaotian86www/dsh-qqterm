@@ -1,0 +1,112 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.4.2
+
+      # 最低支持版本：验证源码没有用 22.12 之后才有的 API
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+
+      - name: 校验 lib/ 与 src/ 同步
+        run: |
+          if [ -n "$(git status --porcelain -- lib)" ]; then
+            echo "::error::lib/ 与 src/ 不一致，本地执行 pnpm build 并提交 lib/ 的 js"
+            git status --porcelain -- lib
+            git diff --stat -- lib
+            exit 1
+          fi
+
+      - run: pnpm typecheck:client
+
+  test:
+    name: test (${{ matrix.os }}, node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # 版本区间两端：22 是最低支持版，26 是当前 Active LTS
+          - os: ubuntu-latest
+            node: 22
+          - os: ubuntu-latest
+            node: 26
+          # 平台维度只在当前 LTS 上铺开，抓真实文件系统 / 路径差异
+          - os: windows-latest
+            node: 26
+          - os: macos-latest
+            node: 26
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.4.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+
+  package:
+    name: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.4.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: mkdir -p .artifacts && pnpm pack --pack-destination .artifacts
+
+      - name: 校验包内容
+        run: |
+          tgz=$(ls .artifacts/*.tgz)
+          tar -tzf "$tgz" | tr -d '\r' | sort > .artifacts/files.txt
+          for f in \
+            package/lib/index.js \
+            package/lib/client.js \
+            package/lib/index.d.ts \
+            package/cordis.patch.yml \
+            package/locale/zh.json \
+            package/locale/en.json; do
+            grep -qx "$f" .artifacts/files.txt || { echo "::error::包内缺少 $f"; exit 1; }
+          done
+          if grep -qE '^package/(src|tests|scripts)/' .artifacts/files.txt; then
+            echo "::error::包内混入开发文件"
+            exit 1
+          fi
