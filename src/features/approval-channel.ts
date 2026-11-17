@@ -91,6 +91,8 @@ interface PendingApproval {
   /** 本审批的唯一标识，编码进按钮 data，点击时必须匹配（防旧卡片混淆） */
   nonce: string;
   onAbort?: () => void;
+  /** 交回宿主 answerer（渠道释放时用） */
+  handoff?: () => Promise<ApprovalOutcome>;
 }
 
 const COMMAND_CLIP = 500;
@@ -128,6 +130,10 @@ function commandOf(req: ApprovalRequest): string | undefined {
 
 export class ApprovalChannel {
   private readonly pending = new Map<string, PendingApproval>();
+  /** 正在投递卡片（entry 还没建）的会话：渠道在这期间被释放要记下来 */
+  private readonly inFlight = new Set<string>();
+  /** 投递期间收到释放请求的会话：发完立刻交回宿主 */
+  private readonly handoffRequested = new Set<string>();
   private readonly manager: ApprovalChannelManagerLike;
   private readonly sender: ApprovalChannelSenderLike;
   private readonly logger: Logger;
@@ -169,11 +175,37 @@ export class ApprovalChannel {
 
   /** 会话回收时清理其 pending 审批，避免 Promise 悬挂 */
   public cancelPending(sessionId: string): void {
+    this.handoffRequested.delete(sessionId);
     const entry = this.pending.get(sessionId);
     if (!entry) return;
     this.pending.delete(sessionId);
     this.removeAbort(entry);
     entry.resolve('cancelled');
+  }
+
+  /**
+   * 渠道释放时把待批审批交回宿主：删掉本地状态，再走 nextFn。
+   *
+   * 不 await 调用方（Web 端可能很久才决策）；no answerer 时按「未决策」结束。
+   */
+  public async handoffPending(sessionId: string): Promise<void> {
+    const entry = this.pending.get(sessionId);
+    if (entry === undefined) {
+      if (this.inFlight.has(sessionId)) this.handoffRequested.add(sessionId);
+      return;
+    }
+    this.pending.delete(sessionId);
+    this.removeAbort(entry);
+    if (entry.handoff === undefined) {
+      entry.resolve('cancelled');
+      return;
+    }
+    try {
+      entry.resolve(await entry.handoff());
+    } catch (err) {
+      this.logger.error(`qqterm: no answerer accepted the approval after release: ${err instanceof Error ? err.message : String(err)}`);
+      entry.resolve('cancelled');
+    }
   }
 
   /** 按钮点击决策：按 button_data 的 `s` 找会话，校验点击者后 settle pending 审批 */
@@ -224,6 +256,7 @@ export class ApprovalChannel {
     // 会话回收/取消可能在发送前发生：signal 已 abort 则直接失败
     if (request.signal?.aborted) return 'cancelled';
 
+    this.inFlight.add(sessionId);
     const command = commandOf(request);
     const nonce = randomUUID().slice(0, 8);
     const isCurrent = this.manager.isCurrentSession?.(sessionId) ?? true;
@@ -235,6 +268,9 @@ export class ApprovalChannel {
         { keyboard: buildApprovalKeyboard(nonce, sessionId) },
       );
     } catch (err) {
+      this.inFlight.delete(sessionId);
+      // 投递失败本身就会走宿主兜底，释放标记不再需要
+      this.handoffRequested.delete(sessionId);
       const msg = err instanceof Error ? err.message : String(err);
       this.logger.error(`qqterm: approval send failed sessionId=${sessionId}: ${msg}`);
       // 卡片没送到 QQ 时不能把请求吞掉：交回链上其他通道（Web GUI 仍可弹窗）。
@@ -250,8 +286,12 @@ export class ApprovalChannel {
       }
     }
 
+    this.inFlight.delete(sessionId);
+    // 发卡期间渠道被释放：卡片已经没人能点了，直接交回宿主
+    if (this.handoffRequested.delete(sessionId)) return this.delegateToHost(delegate);
+
     return new Promise<ApprovalOutcome>((resolve) => {
-      const entry: PendingApproval = { record, request, resolve, nonce };
+      const entry: PendingApproval = { record, request, resolve, nonce, handoff: delegate };
       if (request.signal) {
         const onAbort = (): void => {
           if (this.pending.get(sessionId) !== entry) return;
@@ -264,6 +304,16 @@ export class ApprovalChannel {
       this.pending.set(sessionId, entry);
       this.logger.info(`qqterm: approval sent to QQ, waiting for decision sessionId=${sessionId}`);
     });
+  }
+
+  /** 交回宿主 answerer；链上没有 answerer 时按「未决策」结束（fail-closed） */
+  private async delegateToHost(delegate: () => Promise<ApprovalOutcome>): Promise<ApprovalOutcome> {
+    try {
+      return await delegate();
+    } catch (err) {
+      this.logger.error(`qqterm: no answerer accepted the approval: ${err instanceof Error ? err.message : String(err)}`);
+      return 'cancelled';
+    }
   }
 
   private removeAbort(entry: PendingApproval): void {

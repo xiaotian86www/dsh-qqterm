@@ -143,6 +143,30 @@ describe('createReplyAwareBot', () => {
     expect(targets[4]!.targetId).toBe('u1');
   });
 
+  it('凭证过期（40034005）丢掉该 target 的凭证后原样抛出：重试即降级主动推送', async () => {
+    let attempt = 0;
+    const calls: Call[] = [];
+    const raw = {
+      send: async () => ({}),
+      sendMarkdown: async (t: ReplyTarget) => {
+        attempt += 1;
+        calls.push({ method: 'sendMarkdown', args: [t] });
+        if (attempt === 1) throw Object.assign(new Error('API Error'), { httpStatus: 400, bizCode: 40034005 });
+        return {};
+      },
+    };
+    const bot = raw as unknown as QQBot;
+    const store = makeStore();
+    store.recordMessage('c2c', 'u1', 'm1');
+    createReplyAwareBot(bot, store);
+
+    await expect(bot.sendMarkdown(target, 'hi')).rejects.toThrow('API Error');
+    // 凭证已被丢掉，第二次解析不再填 msgId
+    await bot.sendMarkdown(target, 'hi');
+    expect((calls[0]!.args[0] as { msgId?: string }).msgId).toBe('m1');
+    expect((calls[1]!.args[0] as { msgId?: string }).msgId).toBeUndefined();
+  });
+
   it('发送失败原样抛给上层，不做自动重试', async () => {
     const bot = {
       send: async () => ({}),

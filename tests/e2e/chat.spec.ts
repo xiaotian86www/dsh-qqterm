@@ -167,25 +167,39 @@ describe('QQ 消息全链路', () => {
     expect(text).toContain('/sessions resume #abcdef12');
   });
 
-  it('sendMarkdown 失败只丢那一条：错误入库，链路继续', async () => {
+  it('sendMarkdown 偶发失败先重试一次：这一条不丢，下一条照常', async () => {
     const { host, bot, manager } = setup();
     await inbound(host, manager, bot, '你好');
     const record = manager.getSessionRecord('c2c', OWNER)!;
     const agent = record.agent as Agent;
 
     bot.failNext(1);
-    host.sessionEvent(agent, assistant('第一条会失败'));
+    host.sessionEvent(agent, assistant('第一条重试后送达'));
     await settle();
 
-    expect(host.logger.has('error', 'sendMarkdown failed')).toBe(true);
-    expect(bot.texts()).toEqual([]);
+    expect(bot.texts()).toEqual(['第一条重试后送达']);
 
     host.sessionEvent(agent, assistant('第二条正常'));
     host.sessionEvent(agent, TURN_END);
     await settle();
 
-    // 失败不重放（QQ 侧没拿到就是没拿到），但下一条照常送达，会话也未失效
-    expect(bot.texts()).toEqual(['第二条正常']);
+    expect(bot.texts()).toEqual(['第一条重试后送达', '第二条正常']);
+    expect(manager.currentSessionId()).toBe(record.sessionId);
+    host.dispose();
+  });
+
+  it('连续失败不中断会话：消息挂起等恢复，会话仍可继续', async () => {
+    const { host, bot, manager } = setup();
+    await inbound(host, manager, bot, '你好');
+    const record = manager.getSessionRecord('c2c', OWNER)!;
+    const agent = record.agent as Agent;
+
+    bot.failNext(10);
+    host.sessionEvent(agent, assistant('这条会挂起'));
+    await settle();
+
+    // 两次都失败：不丢弃也不重放，进待投队列等网络恢复
+    expect(bot.texts()).toEqual([]);
     expect(manager.currentSessionId()).toBe(record.sessionId);
     host.dispose();
   });

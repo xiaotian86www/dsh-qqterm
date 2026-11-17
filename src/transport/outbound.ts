@@ -23,6 +23,7 @@ import {
   type OutboundImages,
 } from './outbound-images.ts';
 import { rewriteLocalFileLinks } from './file-links.ts';
+import { Outbox } from './outbox.ts';
 import {
   RETRY_NOTICE_AFTER,
   RETRYABLE_FAILURE_CODES,
@@ -52,6 +53,12 @@ export interface QQBotSender {
 /** 出站事件入口（注册到 ctx.on('session/event')） */
 export interface OutboundHandlers {
   routeSessionEvent(session: SessionLike, event: RawSessionEvent): void;
+  /** 网络恢复（ready / resumed）或收到新消息时补发积压 */
+  flushPending(): Promise<void>;
+  /** 渠道失效：积压消息不会再送达 */
+  clearPending(): void;
+  /** 该会话（缺省为任意会话）是否还有消息在等 */
+  hasPendingDelivery(sessionId?: string): boolean;
 }
 
 /** dsh Session 简化类型 */
@@ -94,6 +101,8 @@ class OutboundRouter {
   private readonly deliverer: DeliverablesDelivererLike | undefined;
   /** assistant/message 里的 image 块 → QQ 图片；未注入时不发图 */
   private readonly images: OutboundImages | undefined;
+  /** 发送失败后的重试与等待：同一会话保持顺序，等网关信号再补发 */
+  private readonly outbox: Outbox;
 
   public constructor(
     manager: SessionManager,
@@ -103,6 +112,7 @@ class OutboundRouter {
     toolsRegistry: ToolsRegistryLike | undefined,
     deliverer?: DeliverablesDelivererLike,
     images?: OutboundImages,
+    onChannelBroken?: (reason: string) => void,
   ) {
     this.manager = manager;
     this.bot = bot;
@@ -111,6 +121,7 @@ class OutboundRouter {
     this.toolsRegistry = toolsRegistry;
     this.deliverer = deliverer;
     this.images = images;
+    this.outbox = new Outbox({ logger, onChannelBroken });
   }
 
   /** 事件分发入口 */
@@ -318,21 +329,70 @@ class OutboundRouter {
     const current = this.manager.isCurrentSession(record.sessionId);
     // 本地文件链接换成 /get 命令：QQ 点不开本地路径
     const body = rewriteLocalFileLinks(text, this.manager.directoryForAgent(record.agent));
-    const chunks = current
-      ? chunkMarkdownText(body, this.config.textChunkLimit)
-      : chunkDecoratedSessionMessage(
-        body,
-        record.sessionId,
-        sessionTitleOf(record),
-        this.config.textChunkLimit,
-      );
-    for (const chunk of chunks) {
-      try {
-        await this.bot.sendMarkdown(record.replyTarget, chunk);
-      } catch (err) {
-        this.logger.error(`qqterm: ${tag} failed: ${err instanceof Error ? err.message : String(err)}`);
+    const chunk = (value: string, limit: number): string[] => (current
+      ? chunkMarkdownText(value, limit)
+      : chunkDecoratedSessionMessage(value, record.sessionId, sessionTitleOf(record), limit));
+
+    const queue = chunk(body, this.config.textChunkLimit);
+    const send = (value: string): Promise<unknown> => this.bot.sendMarkdown(record.replyTarget, value);
+    let blockedNotified = false;
+
+    while (queue.length > 0) {
+      const part = queue.shift()!;
+      const outcome = await this.outbox.deliver(record.sessionId, tag, () => send(part));
+
+      // 暂不可用：本条与后续分片一起排队，恢复后按原顺序补发
+      if (outcome === 'queued') {
+        for (const rest of queue) this.outbox.enqueue(record.sessionId, tag, () => send(rest));
+        return;
+      }
+      // 渠道判死：后续分片已经没有任何意义
+      if (outcome === 'broken') return;
+      if (outcome === 'sent') continue;
+
+      // 内容类失败：超长切小重发，风控只告知一次
+      if (outcome === 'too-long') {
+        const limit = Math.max(1, Math.floor(Math.min(part.length, this.config.textChunkLimit) / 2));
+        if (limit < part.length) {
+          const smaller = chunk(part, limit);
+          if (smaller.length > 1) {
+            queue.unshift(...smaller);
+            continue;
+          }
+          // 没有换行可断（长串）：按字符硬切，保证每片比原文短
+          const hard: string[] = [];
+          for (let start = 0; start < part.length; start += limit) {
+            hard.push(part.slice(start, start + limit));
+          }
+          if (hard.length > 1) {
+            queue.unshift(...hard);
+            continue;
+          }
+        }
+      }
+      if (!blockedNotified) {
+        blockedNotified = true;
+        await this.outbox.deliver(
+          record.sessionId,
+          'sendBlockedNotice',
+          () => send('❌ 上一条消息被 QQ 拦截，未送达。原文见 Web 会话。'),
+        );
       }
     }
+  }
+
+  /** 网络恢复：把积压在队列里的消息按原顺序补发 */
+  public async flushPending(): Promise<void> {
+    await this.outbox.flush();
+  }
+
+  /** 渠道失效：积压消息不会再送达 */
+  public clearPending(): void {
+    this.outbox.clear();
+  }
+
+  public hasPendingDelivery(sessionId?: string): boolean {
+    return this.outbox.hasPending(sessionId);
   }
 }
 
@@ -351,9 +411,22 @@ export function createOutboundHandler(
   toolsRegistry?: ToolsRegistryLike,
   deliverer?: DeliverablesDelivererLike,
   images?: OutboundImages,
+  onChannelBroken?: (reason: string) => void,
 ): OutboundHandlers {
-  const router = new OutboundRouter(manager, bot, config, logger, toolsRegistry, deliverer, images);
+  const router = new OutboundRouter(
+    manager,
+    bot,
+    config,
+    logger,
+    toolsRegistry,
+    deliverer,
+    images,
+    onChannelBroken,
+  );
   return {
     routeSessionEvent: (session, event) => router.route(session, event),
+    flushPending: () => router.flushPending(),
+    clearPending: () => router.clearPending(),
+    hasPendingDelivery: (sessionId) => router.hasPendingDelivery(sessionId),
   };
 }

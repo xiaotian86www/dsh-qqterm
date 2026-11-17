@@ -21,6 +21,13 @@ type AnyFn = (...args: unknown[]) => unknown;
 /** 第一个参数就是 target 的方法：解析后原位替换，其余参数原样传 */
 const TARGET_FIRST_METHODS = ['sendText', 'sendTextWithKeyboard'] as const;
 
+/**
+ * 被动凭证已失效的业务码：msg_id 过期、事件过期、被动窗口或次数用完。
+ * 这类失败重放多少次都一样，必须先丢掉凭证，下一次自动降级为主动推送。
+ * 文档：发送单聊消息 → 错误码 40034005 / 40034128。
+ */
+const PASSIVE_EXPIRED_CODES = new Set([40034005, 304103, 40034026, 40034128]);
+
 function bindMethod(bot: QQBot, name: string): AnyFn | undefined {
   const fn = (bot as unknown as Record<string, unknown>)[name];
   return typeof fn === 'function' ? (fn as AnyFn).bind(bot) : undefined;
@@ -33,6 +40,18 @@ function bindMethod(bot: QQBot, name: string): AnyFn | undefined {
  */
 export function createReplyAwareBot(bot: QQBot, store: ReplyStore): QQBot {
   const target = bot as unknown as Record<string, unknown>;
+  /**
+   * 凭证被平台判死后忘掉它并原样抛出：外层（Outbox）会重试一次，这一次就没
+   * 有被动凭证，SDK 自动改走主动推送。
+   */
+  const forgetExpired = (result: unknown, replyTarget: ReplyTarget): unknown => {
+    if (typeof (result as PromiseLike<unknown> | undefined)?.then !== 'function') return result;
+    return (result as Promise<unknown>).catch((err: unknown) => {
+      const code = (err as { bizCode?: unknown }).bizCode;
+      if (typeof code === 'number' && PASSIVE_EXPIRED_CODES.has(code)) store.forget(replyTarget);
+      throw err;
+    });
+  };
   const send = bindMethod(bot, 'send');
   if (send === undefined) {
     throw new Error('QQBot 实例缺少 send()，无法接管被动回复');
@@ -49,15 +68,18 @@ export function createReplyAwareBot(bot: QQBot, store: ReplyStore): QQBot {
       if (resolved.eventId !== undefined) {
         // SDK sendMarkdown 不支持 event_id，只能走低层 send 的 extra。
         // msg_seq 必须每次不同：平台按 (event_id, msg_seq) 去重，缺省时 SDK 恒填 1。
-        return send({
-          target: { scope: resolved.scope, targetId: resolved.targetId, msgId: undefined },
-          msgType: MsgType.MARKDOWN,
-          markdown: { content },
-          keyboard: opts?.keyboard,
-          extra: { event_id: resolved.eventId, msg_seq: resolved.msgSeq },
-        });
+        return forgetExpired(
+          send({
+            target: { scope: resolved.scope, targetId: resolved.targetId, msgId: undefined },
+            msgType: MsgType.MARKDOWN,
+            markdown: { content },
+            keyboard: opts?.keyboard,
+            extra: { event_id: resolved.eventId, msg_seq: resolved.msgSeq },
+          }),
+          replyTarget,
+        );
       }
-      return markdown(resolved, content, opts);
+      return forgetExpired(markdown(resolved, content, opts), replyTarget);
     };
   }
 
@@ -65,7 +87,7 @@ export function createReplyAwareBot(bot: QQBot, store: ReplyStore): QQBot {
     const original = bindMethod(bot, name);
     if (original === undefined) continue;
     target[name] = (replyTarget: ReplyTarget, ...rest: unknown[]): unknown =>
-      original(store.resolve(replyTarget, false), ...rest);
+      forgetExpired(original(store.resolve(replyTarget, false), ...rest), replyTarget);
   }
 
   // 媒体只在这一层解析凭证：SDK 的 sendImage / sendVideo / sendVoice / sendFile
@@ -75,7 +97,7 @@ export function createReplyAwareBot(bot: QQBot, store: ReplyStore): QQBot {
   const sendMedia = bindMethod(bot, 'sendMedia');
   if (sendMedia !== undefined) {
     target['sendMedia'] = (opts: { target: ReplyTarget } & Record<string, unknown>): unknown =>
-      sendMedia({ ...opts, target: store.resolve(opts.target, false) });
+      forgetExpired(sendMedia({ ...opts, target: store.resolve(opts.target, false) }), opts.target);
   }
 
   return bot;

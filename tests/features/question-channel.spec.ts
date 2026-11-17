@@ -543,6 +543,28 @@ describe('QuestionChannel.install routing（user-questions/request waterfall）'
     expect(logger.warn).toHaveBeenCalled();
   });
 
+  it('handoffPending 把挂起的提问交还宿主，不判成中止', async () => {
+    const sent: SentMessage[] = [];
+    const record = makeRecord(sessionKey('c2c', 'u9'));
+    (record as { sessionId?: string }).sessionId = 'sess-qq';
+    const manager = createManager({
+      findBySessionId: (id) => (id === 'sess-qq' ? record : undefined),
+      getSessionRecord: () => record,
+    });
+    const ch = new QuestionChannel(manager, createSender(sent), { askTimeoutMs: 60_000, access: { owner: 'U1' } }, createLogger());
+    const { handler } = installChannel(ch);
+
+    const next = vi.fn(async () => ({ answers: [{ id: 'q', selected: ['web'] }] }));
+    const p = handler({ questions: [q2()], agent: { id: 'sess-qq' } }, next) as Promise<UserQuestionResult>;
+    await sleep(10);
+    expect(sent).toHaveLength(1);
+
+    ch.handoffPending('sess-qq');
+
+    expect(await p).toEqual({ answers: [{ id: 'q', selected: ['web'] }] });
+    expect(next).toHaveBeenCalledTimes(1);
+  });
+
   it('delegates the whole request when a later question fails to deliver', async () => {
     let calls = 0;
     const record = makeRecord(sessionKey('c2c', 'u9'));
