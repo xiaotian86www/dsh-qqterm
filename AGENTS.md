@@ -247,7 +247,7 @@ QQ 只有一个窗口，多个已获取会话的输出、提问、审批都回�
 
 ## 10. 已知坑
 
-- DSH 沙箱会话里直接 `pnpm build` 可能因 ACL 写不了 `lib/`、`src/`（EPERM）；用普通终端，或在会话内提权。与仓库无关。
+- DSH 沙箱会话里往 `lib/`、`src/`、`node_modules/` 写报 `EPERM`，原因是该目录缺沙箱要求的 Low 完整性标签；`icacls <目录> /setintegritylevel "(OI)(CI)Low" /t` 就地修好，不必换普通终端。
 - 某些 pnpm 版本跑 `pnpm run build` 会先校验依赖并尝试重建 `node_modules`；可直接跑 `node_modules/.bin/tsc` + `node_modules/.bin/tsdown`。
 - 改包名后只重建、不清宿主模块缓存，客户端可能报 “loaded without registering”。
-- DSH 沙箱里 `pnpm test` 起不来：Vite 探测网络盘会 `exec("net use")`、worker 走 `child_process`，都被沙箱拦成 `EPERM`。绕法（仅沙箱内，不进仓库）：预加载脚本把 `node:child_process` 的 `exec` / `execFile` 替成失败回调，再跑 `node --import <preload> node_modules/vitest/vitest.mjs run --configLoader native --pool=vmThreads`。`symlinkSync` 相关用例（`tests/shared/utils.spec.ts`）在沙箱里必失败，属环境限制。
+- DSH 沙箱里 `pnpm test` 起不来：Vite 加载 TS 配置时会 `exec("net use")` 探测网络盘、forks worker 又要起子进程，都被沙箱拦成 `spawn EPERM`。改用 `node node_modules/vitest/vitest.mjs run --configLoader native --pool=vmThreads` 可全绿（66 个文件 943 个用例，2026-11-17 实测）。
