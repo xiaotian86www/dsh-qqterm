@@ -5,13 +5,44 @@
  * - /reset（别名 /clear）：停掉当前会话，再在原工作区重新开始
  * - /compact：原地压缩会话历史（保留 sessionId，摘要替换旧历史）
  */
+import type { SlashCommandHandlerContext } from '@tencent-connect/qqbot-nodejs';
 import type { CommandDeps, SlashCommand } from './types.ts';
+import type { SessionConfirmAction } from '../features/session-confirm.ts';
 import type { ChangeWorkspaceOutcome } from '../session/index.ts';
 import { getScopePeer } from '../shared/index.ts';
 
 /** 千分位（与 /status 一致，避免不同环境的本地化分隔符） */
 function num(n: number): string {
   return n.toLocaleString('en-US');
+}
+
+/**
+ * 有会话时的二次确认。
+ *
+ * `/clear`、`/clear all`、`/new` 都会停掉或切走会话，先在 QQ 里发一张确认卡，
+ * 点「确认」才执行 run。门禁只在真有可能误伤时打开：没有当前会话（且没有已获取
+ * 会话）就没什么可停的，直接执行。卡片发不出去时放弃本次动作——退回直接执行
+ * 等于没有二次确认。
+ */
+async function confirmOrRun(
+  cmdCtx: SlashCommandHandlerContext,
+  manager: CommandDeps['manager'],
+  action: SessionConfirmAction,
+  run: () => Promise<string>,
+): Promise<string | { kind: 'noop' }> {
+  const channel = manager.sessionConfirmChannel;
+  const currentId = manager.currentSessionId();
+  const risky = currentId !== undefined || (action === 'reset-all' && manager.size > 0);
+  if (!channel || !risky) return run();
+
+  const { scope, peerId } = getScopePeer(cmdCtx);
+  const offered = await channel.offer({
+    action,
+    ...(currentId === undefined ? {} : { currentId }),
+    target: { scope, targetId: peerId },
+    run,
+  });
+  return offered ? { kind: 'noop' as const } : '⚠️ 确认卡片没能发出，稍后再试一次';
 }
 
 /**
@@ -46,8 +77,10 @@ export function newCommand({ manager, config }: CommandDeps): SlashCommand {
 
       // 不带参数 = 留在当前工作区；异步释放 agent，不阻塞回复
       if (arg === '') {
-        void manager.remove();
-        return '✅ 已开启新会话';
+        return confirmOrRun(cmdCtx, manager, 'new', async () => {
+          void manager.remove();
+          return '✅ 已开启新会话';
+        });
       }
 
       // 带参数 = 换工作区（= 换 agent 能读写的目录）：只允许唯一绑定用户
@@ -64,14 +97,16 @@ export function newCommand({ manager, config }: CommandDeps): SlashCommand {
       const resolved = manager.resolveWorkspace(arg);
       if (!resolved.ok) return describeChangeFailure(resolved);
 
-      await manager.remove();
-      const changed = await manager.changeChatWorkspace(scope, peerId, arg);
-      if (!changed.ok) return describeChangeFailure(changed);
-      // 没有 registry 时 title 只是路径末段，贴出来就是重复；只显示路径
-      const label = manager.workspaceRegistryAvailable()
-        ? `工作区: ${changed.title} · ${changed.path}`
-        : `工作区: ${changed.path}`;
-      return `✅ 已开启新会话\n${label}`;
+      return confirmOrRun(cmdCtx, manager, 'new', async () => {
+        await manager.remove();
+        const changed = await manager.changeChatWorkspace(scope, peerId, arg);
+        if (!changed.ok) return describeChangeFailure(changed);
+        // 没有 registry 时 title 只是路径末段，贴出来就是重复；只显示路径
+        const label = manager.workspaceRegistryAvailable()
+          ? `工作区: ${changed.title} · ${changed.path}`
+          : `工作区: ${changed.path}`;
+        return `✅ 已开启新会话\n${label}`;
+      });
     },
   };
 }
@@ -127,14 +162,18 @@ export function resetCommand({ manager }: CommandDeps): SlashCommand {
           return `⚠️ /${name} 不支持指定工作区\n换工作区用 /new <工作区|路径>。`;
         }
 
-        const stopped = await manager.resetAllSessions();
-        return stopped === 0
-          ? '✅ 已开启新会话'
-          : `✅ 已停止 ${stopped} 个会话，并开启新会话`;
+        return confirmOrRun(cmdCtx, manager, 'reset-all', async () => {
+          const stopped = await manager.resetAllSessions();
+          return stopped === 0
+            ? '✅ 已开启新会话'
+            : `✅ 已停止 ${stopped} 个会话，并开启新会话`;
+        });
       }
 
-      const stopped = await manager.resetCurrentSession();
-      return stopped ? '✅ 已停止当前会话，并开启新会话' : '✅ 已开启新会话';
+      return confirmOrRun(cmdCtx, manager, 'reset', async () => {
+        const stopped = await manager.resetCurrentSession();
+        return stopped ? '✅ 已停止当前会话，并开启新会话' : '✅ 已开启新会话';
+      });
     },
   };
 }

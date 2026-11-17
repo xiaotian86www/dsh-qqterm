@@ -36,6 +36,7 @@ import type { ModelRoute, ModelEntry, ReasoningInfo, EffortOption } from '../mod
 import type { QuestionChannel } from '../features/question-channel.ts';
 import type { ApprovalChannel } from '../features/approval-channel.ts';
 import type { RetryChannel } from '../features/retry-channel.ts';
+import type { SessionConfirmChannel } from '../features/session-confirm.ts';
 import type {
   SessionEventLike,
   DshAgent,
@@ -229,6 +230,8 @@ export class SessionManager {
   public approvalChannel?: ApprovalChannel;
   /** 由 bootstrap 注入的重发通道（失败卡片 → 「重发 / 放弃」），会话释放时清理其待确认卡片 */
   public retryChannel?: RetryChannel;
+  /** 由 bootstrap 注入的会话确认通道（`/clear`、`/new` 的二次确认） */
+  public sessionConfirmChannel?: SessionConfirmChannel;
   /** 最近一次读到的有效部署默认权限预设（部署默认被写坏时用它回正） */
   private lastKnownDefaultPermission?: string;
 
@@ -2387,6 +2390,8 @@ export class SessionManager {
     this.questionChannel?.cancelPending(sessionId);
     this.approvalChannel?.cancelPending(sessionId);
     this.retryChannel?.cancelPending(sessionId);
+    // 确认卡按聊天只留一张，会话一变就作废，免得点下去停掉别的会话
+    this.sessionConfirmChannel?.cancelPending();
   }
 
   /**
@@ -2413,6 +2418,7 @@ export class SessionManager {
     this.records.clear();
     const keys = [...this.currentByKey.keys()];
     for (const key of keys) this.clearCurrent(key);
+    this.sessionConfirmChannel?.cancelPending();
     for (const record of records) this.handoffPendingFor(record.sessionId);
     this.logger.warn(`qqterm: channel released (reason=${reason}, sessions=${records.length})`);
   }
@@ -2463,6 +2469,7 @@ export class SessionManager {
     const records = [...this.records.values()];
     this.records.clear();
     this.currentByKey.clear();
+    this.sessionConfirmChannel?.cancelPending();
 
     const owned: SessionRecord[] = [];
     for (const record of records) {

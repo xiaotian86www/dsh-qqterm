@@ -4,6 +4,12 @@
 
 This file records product-level changes to QQ SuperTerm. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [Unreleased]
+
+### Changed
+
+- **Second confirmation for reset / new session**: while a session is live, `/reset` (alias `/clear`), `/clear all`, and `/new` first send a card with "✅ Confirm / ❌ Cancel" buttons; the action runs only after the confirm button is tapped within 5 minutes. If the card cannot be sent the action is dropped rather than executed unconfirmed, and switching sessions before the tap voids the confirmation.
+
 ## [0.0.1] - 2026-11-14
 
 ### Added
