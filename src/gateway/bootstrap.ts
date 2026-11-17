@@ -18,6 +18,7 @@ import type { QQBotSender } from '../transport/outbound.ts';
 import { QuestionChannel } from '../features/question-channel.ts';
 import { ApprovalChannel, type ApprovalChannelContext } from '../features/approval-channel.ts';
 import { RetryChannel } from '../features/retry-channel.ts';
+import { SessionConfirmChannel } from '../features/session-confirm.ts';
 import { decodeButtonData } from '../features/button-utils.ts';
 import { buildUserAgent, shortSessionId } from '../shared/index.ts';
 import { decorateSessionMessage, sessionTitleOf } from '../transport/session-source.ts';
@@ -48,6 +49,7 @@ function dispatchInteraction(event: InteractionEvent, manager: SessionManager): 
   if (button.t === 'question') return manager.questionChannel?.handleInteraction(event) ?? false;
   if (button.t === 'approval') return manager.approvalChannel?.handleInteraction(event) ?? false;
   if (button.t === 'retry') return manager.retryChannel?.handleInteraction(event) ?? false;
+  if (button.t === 'confirm') return manager.sessionConfirmChannel?.handleInteraction(event) ?? false;
   return false;
 }
 
@@ -181,6 +183,10 @@ export async function bootstrapGateway(
   // ── 重发通道（轮次失败 → 「重发 / 放弃」卡片） ──
   // 不 install：它不订阅宿主事件，只被 outbound 的失败告知与 interaction 分发调用
   manager.retryChannel = new RetryChannel(manager, sender, config, logger);
+
+  // ── 会话确认通道（/clear、/new 在会话还在时先问一次） ──
+  // 同样不 install：只被命令层发起、被 interaction 分发调用
+  manager.sessionConfirmChannel = new SessionConfirmChannel(manager, sender, logger);
 
   // ── 按钮点击回调（interaction）：统一分发到问答/审批通道 ──
   bot.on('interaction', async (_iCtx: unknown, event: InteractionEvent) => {

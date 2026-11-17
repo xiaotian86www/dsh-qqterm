@@ -11,6 +11,7 @@ import type { SessionManager } from '../../src/session/index.ts';
 import type { Logger } from '../../src/types.ts';
 import type { CommandDeps } from '../../src/commands/types.ts';
 import { compactCommand, newCommand, resetCommand } from '../../src/commands/session.ts';
+import type { SessionConfirmRequest } from '../../src/features/session-confirm.ts';
 
 const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
 
@@ -26,6 +27,9 @@ function makeManager() {
     workspaceRegistryAvailable: vi.fn(() => true),
     resolveWorkspace: vi.fn(() => ({ ok: true as const, title: 'repo', path: 'D:\\repo', isNew: false })),
     changeChatWorkspace: vi.fn(async () => ({ ok: true as const, title: 'repo', path: 'D:\\repo', isNew: false })),
+    // 默认没有当前会话：既有用例不该被确认门禁挡住
+    currentSessionId: vi.fn(() => undefined as string | undefined),
+    size: 0,
   };
 }
 
@@ -48,6 +52,8 @@ function makeResetManager(stopped = true, allStopped = 0) {
   return {
     resetCurrentSession: vi.fn(async () => stopped),
     resetAllSessions: vi.fn(async () => allStopped),
+    currentSessionId: vi.fn(() => undefined as string | undefined),
+    size: 0,
   };
 }
 
@@ -184,6 +190,8 @@ describe('/new <工作区>', () => {
       workspaceRegistryAvailable: vi.fn(() => true),
       resolveWorkspace: vi.fn(() => ({ ok: true as const, title: 'repo', path: 'D:\\repo', isNew: false })),
       changeChatWorkspace: vi.fn(async () => ({ ok: false as const, reason: 'missing' as const, path: 'D:\\repo' })),
+      currentSessionId: vi.fn(() => undefined as string | undefined),
+      size: 0,
     };
 
     const text = await run(manager, 'repo');
@@ -211,6 +219,8 @@ describe('/new <工作区>', () => {
       workspaceRegistryAvailable: vi.fn(() => false),
       resolveWorkspace: vi.fn(() => ({ ok: true as const, title: 'repo', path: 'D:\\repo', isNew: true })),
       changeChatWorkspace: vi.fn(async () => ({ ok: true as const, title: 'repo', path: 'D:\\repo', isNew: true })),
+      currentSessionId: vi.fn(() => undefined as string | undefined),
+      size: 0,
     };
 
     const text = await run(manager, 'D:\\repo');
@@ -225,6 +235,113 @@ describe('/new <工作区>', () => {
     expect(manager.remove).not.toHaveBeenCalled();
     expect(manager.changeChatWorkspace).not.toHaveBeenCalled();
     expect(text).toContain('仅限绑定用户可用');
+  });
+});
+
+describe('有会话时的二次确认', () => {
+  function makeChannel(offered = true) {
+    const list: SessionConfirmRequest[] = [];
+    return {
+      list,
+      offer: vi.fn(async (req: SessionConfirmRequest) => {
+        list.push(req);
+        return offered;
+      }),
+      handleInteraction: vi.fn(() => true),
+      cancelPending: vi.fn(),
+    };
+  }
+
+  async function runNew(manager: Record<string, unknown>, raw = ''): Promise<unknown> {
+    const command = newCommand({ manager: manager as unknown as SessionManager, config, logger });
+    return command.handler(makeCtx(raw, 'user1', 'new'));
+  }
+
+  async function runResetCmd(manager: Record<string, unknown>, raw = ''): Promise<unknown> {
+    const command = resetCommand({ manager } as unknown as CommandDeps);
+    return command.handler(makeCtx(raw, 'user1', 'clear'));
+  }
+
+  it('/new 有当前会话时先发卡片，不直接开新会话', async () => {
+    const channel = makeChannel();
+    const manager = { ...makeManager(), currentSessionId: vi.fn(() => 'sess-1'), sessionConfirmChannel: channel };
+
+    expect(await runNew(manager)).toEqual({ kind: 'noop' });
+    expect(manager.remove).not.toHaveBeenCalled();
+    expect(channel.offer).toHaveBeenCalledTimes(1);
+
+    const req = channel.list[0]!;
+    expect(req.action).toBe('new');
+    expect(req.currentId).toBe('sess-1');
+    expect(req.target).toEqual({ scope: 'c2c', targetId: 'user1' });
+
+    // 点了确认才真正执行
+    await expect(req.run()).resolves.toBe('✅ 已开启新会话');
+    expect(manager.remove).toHaveBeenCalledWith();
+  });
+
+  it('/new 没有当前会话时不做确认', async () => {
+    const channel = makeChannel();
+    const manager = { ...makeManager(), sessionConfirmChannel: channel };
+
+    expect(await runNew(manager)).toBe('✅ 已开启新会话');
+    expect(channel.offer).not.toHaveBeenCalled();
+    expect(manager.remove).toHaveBeenCalledWith();
+  });
+
+  it('/clear 有当前会话时先发卡片，不直接停会话', async () => {
+    const channel = makeChannel();
+    const manager = { ...makeResetManager(true), currentSessionId: vi.fn(() => 'sess-1'), sessionConfirmChannel: channel };
+
+    expect(await runResetCmd(manager)).toEqual({ kind: 'noop' });
+    expect(manager.resetCurrentSession).not.toHaveBeenCalled();
+    expect(channel.list[0]!.action).toBe('reset');
+
+    await expect(channel.list[0]!.run()).resolves.toBe('✅ 已停止当前会话，并开启新会话');
+    expect(manager.resetCurrentSession).toHaveBeenCalledWith();
+  });
+
+  it('/clear all 没有当前会话但有已获取会话时也要确认', async () => {
+    const channel = makeChannel();
+    const manager = { ...makeResetManager(true, 2), size: 2, sessionConfirmChannel: channel };
+
+    expect(await runResetCmd(manager, 'all')).toEqual({ kind: 'noop' });
+    expect(manager.resetAllSessions).not.toHaveBeenCalled();
+    expect(channel.list[0]!.action).toBe('reset-all');
+    expect(channel.list[0]!.currentId).toBeUndefined();
+  });
+
+  it('/clear all 一个会话都没有时直接执行', async () => {
+    const channel = makeChannel();
+    const manager = { ...makeResetManager(true, 0), size: 0, sessionConfirmChannel: channel };
+
+    expect(await runResetCmd(manager, 'all')).toBe('✅ 已开启新会话');
+    expect(channel.offer).not.toHaveBeenCalled();
+    expect(manager.resetAllSessions).toHaveBeenCalledWith();
+  });
+
+  it('卡片发不出去时放弃动作，不退回直接执行', async () => {
+    const channel = makeChannel(false);
+    const manager = { ...makeManager(), currentSessionId: vi.fn(() => 'sess-1'), sessionConfirmChannel: channel };
+
+    expect(await runNew(manager)).toBe('⚠️ 确认卡片没能发出，稍后再试一次');
+    expect(manager.remove).not.toHaveBeenCalled();
+  });
+
+  it('/new <路径> 解析失败时不发卡片', async () => {
+    const channel = makeChannel();
+    const manager = {
+      ...makeManager(),
+      currentSessionId: vi.fn(() => 'sess-1'),
+      resolveWorkspace: vi.fn(() => ({ ok: false as const, reason: 'missing' as const, path: 'D:\\nope' })),
+      sessionConfirmChannel: channel,
+    };
+
+    const text = await runNew(manager, 'D:\\nope');
+
+    expect(String(text)).toContain('目录不存在');
+    expect(channel.offer).not.toHaveBeenCalled();
+    expect(manager.remove).not.toHaveBeenCalled();
   });
 });
 

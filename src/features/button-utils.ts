@@ -47,7 +47,14 @@ export interface RetryButtonData {
   d: 'resend' | 'discard';
 }
 
-export type ButtonData = QuestionButtonData | ApprovalButtonData | RetryButtonData;
+/** 会话二次确认：n=本次确认的 nonce（旧卡片的点击不生效），d=决策 */
+export interface ConfirmButtonData {
+  t: 'confirm';
+  n: string;
+  d: 'yes' | 'no';
+}
+
+export type ButtonData = QuestionButtonData | ApprovalButtonData | RetryButtonData | ConfirmButtonData;
 
 /** 编码 button_data（JSON 字符串） */
 export function encodeButtonData(data: ButtonData): string {
@@ -61,7 +68,7 @@ export function decodeButtonData(raw: string): ButtonData | undefined {
     if (
       parsed !== null
       && typeof parsed === 'object'
-      && (parsed.t === 'question' || parsed.t === 'approval' || parsed.t === 'retry')
+      && (parsed.t === 'question' || parsed.t === 'approval' || parsed.t === 'retry' || parsed.t === 'confirm')
     ) {
       return parsed as ButtonData;
     }
