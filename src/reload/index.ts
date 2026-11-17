@@ -14,9 +14,10 @@
  * （`ready` 或续传的 `resumed`）时读状态文件补上；本插件没被替换（磁盘上没变、
  * 或变的是别人）时不会有新的连接，只能由当前实例在重载结束后自己发。
  *
- * 新 fiber 连上时结论可能还没落盘（reconcile 还在跑），这里不等待：读不到结论就
- * 什么都不发，留给下一条 `/plugins reload` 开始前的补发。等待换来的只是「早几十毫秒
- * 送达」，代价是一整套超时判断。
+ * 新 fiber 连上时结论可能还没落盘：reconcile 要先 dispose 旧 fiber（可能几秒到十几秒，
+ * 实测一次 reload 约 10s），而新 fiber 的网关连上只要一两秒。所以看到「有通知、没结论」
+ * 要交给后台轮询（`createSettledWatch`），等 reconcile 落盘即补发——读一次就放弃的话，
+ * 这条「已应用变更」要等下一轮 `/plugins reload` 才可能被捞出来。命令路径不等待。
  *
  * 「到底换没换」靠重载前后比各 entry 的 fiber uid：`reconcileProfile` 的返回值
  * 里没有这个信息，而用户最想知道的恰恰是「这次到底应用了什么」。
@@ -29,6 +30,7 @@ import type { Context } from '@deepseek-ai/cordis';
 import type { QQBot } from '@tencent-connect/qqbot-nodejs';
 import {
   changedEntries,
+  createSettledWatch,
   entryReplaced,
   entryUids,
   errorText,
@@ -68,7 +70,10 @@ export interface Reloader {
   run(notice?: ReloadNotice, bot?: QQBot): void;
   /** 上次重载的一句话描述（`/status` 用） */
   describe(): string | undefined;
-  /** 新 fiber 连上、或下一条命令开始前：补发上一次重载留下的结果 */
+  /**
+   * 新 fiber 连上、或下一条命令开始前：补发上一次重载留下的结果。
+   * 结论还没落盘时交给后台轮询，不阻塞调用方。
+   */
   announce(bot: QQBot): Promise<void>;
 }
 
@@ -82,6 +87,8 @@ export interface ReloaderOptions {
 const RELOAD_DELAY_MS = 200;
 /** 超过这个时长的记录不再播报（避免下次正常重启时冒出陈旧通知） */
 const STALE_MS = 600_000;
+/** 结论晚于 ready 落盘时的轮询间隔（与插件安装的轮询同一套节奏） */
+const POLL_MS = 2_000;
 
 /**
  * 在「不在 HMR 事务里」的上下文执行。
@@ -148,6 +155,16 @@ export function createReloader(ctx: Context, logger: Logger, options?: ReloaderO
     }
   };
 
+  /** 结论晚于 ready 落盘：后台等它，最长等到陈旧线 */
+  const watch = createSettledWatch<ReloadState>({
+    pollMs: POLL_MS,
+    staleMs: STALE_MS,
+    read: () => readReloadState(statePath, logger),
+    write: (state) => writeReloadState(statePath, state, logger),
+    expire: (state) => ({ ...state, phase: 'failed', error: '重载超时' }),
+    logger,
+  });
+
   return {
     get available(): boolean {
       return service<HmrLike>('hmr') !== undefined;
@@ -206,8 +223,12 @@ export function createReloader(ctx: Context, logger: Logger, options?: ReloaderO
 
     async announce(bot: QQBot): Promise<void> {
       const state = readReloadState(statePath, logger);
-      // 还没跑完（没有 phase）：不猜等待，留给下一次命令前的补发
-      if (state === undefined || state.phase === undefined) return;
+      if (state === undefined || state.notify === undefined) return;
+      // 结论还没落盘：交给后台轮询，别在 ready / 命令路径上等
+      if (state.phase === undefined && Date.now() - state.startedAt <= STALE_MS) {
+        watch(state.startedAt, (settled) => deliver(bot, settled));
+        return;
+      }
       await deliver(bot, state);
     },
   };
