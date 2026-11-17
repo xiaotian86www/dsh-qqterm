@@ -353,7 +353,7 @@ describe('announce', () => {
     expect(bot.sendMarkdown).not.toHaveBeenCalled();
   });
 
-  it('结论还没落盘时连上先不发，留给下一次命令前的补发', async () => {
+  it('结论一直没落盘：连上后不阻塞，也不乱发', async () => {
     const path = statePath();
     const bot = fakeBot();
     // reconcile 卡住不返回：状态一直停在「有 notify、没结论」
@@ -366,6 +366,40 @@ describe('announce', () => {
     await reloader.announce(bot);
 
     expect(bot.sendMarkdown).not.toHaveBeenCalled();
+  });
+
+  it('结论晚到：连上后后台等，reconcile 一结束就补发', async () => {
+    const path = statePath();
+    const bot = fakeBot();
+    // reconcile 卡在 gate 上：状态停在「有 notify、没结论」，正是新 fiber 先连上的场景
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const hmr = {
+      runExclusive: vi.fn(async () => {
+        await gate;
+        return {};
+      }),
+      reconcileProfile: vi.fn(),
+    };
+    const reloader = createReloader(fakeContext({ hmr }), logger, { statePath: path });
+
+    reloader.run({ targetId: 'u1' });
+    await vi.advanceTimersByTimeAsync(300);
+
+    // 连上时结论还没落盘：announce 立即返回，转后台轮询
+    await reloader.announce(bot);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(bot.sendMarkdown).not.toHaveBeenCalled();
+
+    release();
+    await vi.advanceTimersByTimeAsync(2_000);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(bot.sendMarkdown).toHaveBeenCalledTimes(1);
+    expect(bot.sendMarkdown.mock.calls[0]?.[1]).toContain('✅');
+    expect(readReloadState(path)?.notify).toBeUndefined();
   });
 
   it('连发两次重载时，第二轮不会顶掉第一轮的结果', async () => {

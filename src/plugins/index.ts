@@ -16,6 +16,7 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type { QQBot } from '@tencent-connect/qqbot-nodejs';
 import {
+  createSettledWatch,
   entryReplaced,
   entryUids,
   errorText,
@@ -153,9 +154,6 @@ export function createPluginInstaller(
 
   /** 结果投递串行化：新 fiber 的 ready 与「下一条命令前补发」可能同时触发 */
   let delivering = false;
-  /** 结果轮询只能有一份：多次 ready / announce 不能各起一条轮询链 */
-  let watching = false;
-
   /** 发结果通知；成功才清 notify，失败留给下一次 ready 重试 */
   const deliver = async (bot: QQBot, state: PluginOpState): Promise<void> => {
     if (delivering) return;
@@ -183,34 +181,14 @@ export function createPluginInstaller(
    * 后台等结果：reconcile 在 install 返回前完成，新 fiber 的 ready 常早于落盘，
    * 所以看到「还在跑」不能直接放弃。只等自己这一轮（startedAt 变了就让位）。
    */
-  const watch = (bot: QQBot, startedAt: number): void => {
-    if (watching) return;
-    watching = true;
-    const deadline = Date.now() + STALE_MS;
-
-    const tick = async (): Promise<void> => {
-      const latest = readPluginOpState(statePath, logger);
-      if (latest === undefined || latest.startedAt !== startedAt) {
-        watching = false;
-        return;
-      }
-      if (latest.phase !== undefined) {
-        watching = false;
-        await deliver(bot, latest);
-        return;
-      }
-      if (Date.now() >= deadline) {
-        const failed: PluginOpState = { ...latest, phase: 'failed', code: 'timeout' };
-        writePluginOpState(statePath, failed, logger);
-        watching = false;
-        await deliver(bot, failed);
-        return;
-      }
-      setTimeout(() => void tick(), POLL_MS).unref?.();
-    };
-
-    setTimeout(() => void tick(), POLL_MS).unref?.();
-  };
+  const watch = createSettledWatch<PluginOpState>({
+    pollMs: POLL_MS,
+    staleMs: STALE_MS,
+    read: () => readPluginOpState(statePath, logger),
+    write: (state) => writePluginOpState(statePath, state, logger),
+    expire: (state) => ({ ...state, phase: 'failed', code: 'timeout' }),
+    logger,
+  });
 
   /** 解析更新目标：没给版本时问 registry，选一个可升级的版本 */
   const resolveUpdate = async (request: PluginOpRequest): Promise<UpdateOutcome> => {
@@ -371,7 +349,7 @@ export function createPluginInstaller(
           return;
         }
         // 结论还没落盘：后台轮询，不阻塞命令处理
-        watch(bot, state.startedAt);
+        watch(state.startedAt, (settled) => deliver(bot, settled));
         return;
       }
 
