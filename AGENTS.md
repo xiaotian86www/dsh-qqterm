@@ -65,7 +65,7 @@
 ### 3.4 交互与消息
 
 - 只做 C2C 私聊，群消息在 accessPolicy 拦掉，代码里没有群聊分支。按钮键盘只在 C2C 可用，发送失败必须降级成文本并记 warn；改问答 / 审批时在 C2C 验证回退。
-- `ask_user_question` / `approval` 走宿主 waterfall，不要退回 `userQuestions.ask` 式探测。QQ 卡片投递失败必须 `return nextFn()` 交回宿主其它通道（Web 仍能弹窗），不能判成 `unavailable` 吞掉。
+- `ask_user_question` / `approval` 走宿主 waterfall，不要退回 `userQuestions.ask` 式探测。投递失败先按键盘→纯文本降级；仍失败按「暂不可用」挂起，等渠道恢复（`ready` / `resumed` 或新入站消息）后重发，不判成 `unavailable` 吞掉。插件卸载或渠道失效释放会话时，把挂起中的提问 / 审批 `handoffPending` 交还宿主其它通道；借来的会话不 cancel、不 dispose。
 - 聊天会话 key 固定 `qqterm:${appId}:chat`，全 bot 只有一个「当前会话」。已获取会话可以有多份，全部输出回 QQ；非当前会话消息首行 `` > `#短id` · 标题 ``，正文后空一行给「回复」「恢复」链接（长回复只在首片带首行、末片带链接）。
 - `/sessions` 默认按工作区分组列工作中会话（组标题带路径，行带 `生成中` / `空闲` 与 `✅`）；`/sessions all` 看全部、只标 `📌`。没有 `workspaceRegistry` 时仍按目录分组、组标题只显示路径、不标 `📌`、不给归档入口，归档相关子命令按未知子命令处理，`/new` 只认绝对路径（见 §3.1）。`resume` 只改当前指针；`/new` 清指针（不预先铸 id，下一条消息再建会话）；切走不 dispose 旧会话；`/clear`（别名 `/reset`）停当前再开新，`/clear all` 停全部；`/stop` 停当前，`/stop all` 停全部正在生成的。无映射即全新会话，id 由 `mintSessionId()` 铸造。
 - 启动恢复：QQ `ready` 后 `SessionManager.restoreCurrentSession()` 按 prefs 指针走 `getOrCreate`（singleflight）；盘上已无则跳过并清指针，**恢复失败绝不新建**；占用 / 后端故障时指针保持原样。

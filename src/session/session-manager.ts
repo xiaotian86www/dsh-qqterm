@@ -2390,6 +2390,34 @@ export class SessionManager {
   }
 
   /**
+   * 释放会话但保留宿主里的请求：挂起的提问 / 审批交回宿主其它通道。
+   *
+   * 重发卡片没有宿主等价物，只能清掉定时器；它不阻塞任何东西。
+   */
+  private handoffPendingFor(sessionId: string): void {
+    this.questionChannel?.handoffPending(sessionId);
+    void this.approvalChannel?.handoffPending(sessionId);
+    this.retryChannel?.cancelPending(sessionId);
+  }
+
+  /**
+   * 渠道不可用（鉴权失效 / 网关永久断开）：释放全部持有的会话。
+   *
+   * 与 disposeAll 的差别是不 cancel、不 dispose：会话仍在宿主里跑，Web 端照常
+   * 可见，只是插件不再持有、不再往 QQ 送（详见 outbound 的 findBySessionId）。
+   * 当前会话指针一起清掉——渠道不自动恢复，重新扫码后由用户 `/sessions resume`
+   * 接回，免得下次启动又自动接上一条连不上的连接。
+   */
+  public releaseAll(reason: string): void {
+    const records = [...this.records.values()];
+    this.records.clear();
+    const keys = [...this.currentByKey.keys()];
+    for (const key of keys) this.clearCurrent(key);
+    for (const record of records) this.handoffPendingFor(record.sessionId);
+    this.logger.warn(`qqterm: channel released (reason=${reason}, sessions=${records.length})`);
+  }
+
+  /**
    * 原地压缩当前会话历史（保留 sessionId，用摘要替换旧历史）。
    *
    * 判定与执行都走 base 的命令登记簿：宿主 /compact 在自己的 preset 作用域里
@@ -2438,10 +2466,14 @@ export class SessionManager {
 
     const owned: SessionRecord[] = [];
     for (const record of records) {
-      this.cancelPendingFor(record.sessionId);
       if (record.handle) {
+        // 自己创建的会话：卸载即结束，给挂起的提问 / 审批一个确定终态
+        this.cancelPendingFor(record.sessionId);
         record.agent.cancel({ kind: 'user' });
         owned.push(record);
+      } else {
+        // 借来的会话：宿主还要继续用，只摘引用，阻塞式请求交回宿主
+        this.handoffPendingFor(record.sessionId);
       }
     }
     await Promise.allSettled(owned.map((record) => record.handle!.dispose()));

@@ -137,6 +137,8 @@ interface PendingEntry {
   index: number;
   /** 已收集的答案 */
   collected: UserQuestionAnswer[];
+  /** 交回宿主 answerer（渠道释放时用；非 QQ 会话没有这一步） */
+  handoff?: () => Promise<UserQuestionResult>;
 }
 
 export class QuestionChannel {
@@ -144,6 +146,10 @@ export class QuestionChannel {
   private readonly pending = new Map<string, PendingEntry>();
   /** `/to #id` 空文本进入的「下一条消息作为回答」模式：peerId → sessionId */
   private readonly answerTargets = new Map<string, string>();
+  /** 正在投递首题（entry 还没建）的会话：渠道在这期间被释放要记下来 */
+  private readonly inFlight = new Map<string, (() => Promise<UserQuestionResult>) | undefined>();
+  /** 投递期间收到释放请求的会话：首题发完立刻交回宿主 */
+  private readonly handoffRequested = new Set<string>();
   private readonly manager: QuestionChannelManagerLike;
   private readonly sender: QuestionChannelSenderLike;
   private readonly config: QuestionChannelConfigLike;
@@ -182,7 +188,7 @@ export class QuestionChannel {
       if (!record) return nextFn();
 
       // 投递失败才退回宿主链（Web 弹窗）：任一题失败都整组退回，不重试、不保留已答答案
-      return self.askViaQQ(record, request).catch(async (err: unknown) => {
+      return self.askViaQQ(record, request, nextFn).catch(async (err: unknown) => {
         if (!(err instanceof QuestionDeliveryError)) throw err;
         self.logger.warn(`qqterm: QQ question delivery failed, falling back to the host answerer: ${err.message}`);
         try {
@@ -207,17 +213,57 @@ export class QuestionChannel {
     }
     this.pending.clear();
     this.answerTargets.clear();
+    this.inFlight.clear();
+    this.handoffRequested.clear();
   }
 
   /** 会话回收时清理其待答问题，避免 pending 悬挂导致 Promise 与闭包泄漏 */
   public cancelPending(sessionId: string): void {
     const entry = this.pending.get(sessionId);
     this.clearAnswerTargets(sessionId);
+    this.handoffRequested.delete(sessionId);
     if (!entry) return;
     this.pending.delete(sessionId);
     this.clearTimer(entry);
     this.removeAbort(entry);
     entry.reject(new QuestionChannelError('ask_user_question was cancelled before the user answered', ASK_ABORTED));
+  }
+
+  /**
+   * 渠道释放时把待答问题交回宿主（Web 端仍能弹窗）。
+   *
+   * 不 await：Web 端可能很久之后才回答，卸载 / 释放流程不能卡在这里。
+   * 已答过的题不保留，宿主会从头重问整组——与投递失败退回宿主时的行为一致。
+   */
+  public handoffPending(sessionId: string): void {
+    this.clearAnswerTargets(sessionId);
+    const entry = this.pending.get(sessionId);
+    if (entry === undefined) {
+      // 首题正在发：等发完由 askViaQQ 自己交回
+      if (this.inFlight.has(sessionId)) this.handoffRequested.add(sessionId);
+      return;
+    }
+    this.pending.delete(sessionId);
+    this.clearTimer(entry);
+    this.removeAbort(entry);
+    if (entry.handoff === undefined) {
+      entry.reject(new QuestionChannelError(
+        'QQ question channel was released before the user answered',
+        ASK_ABORTED,
+      ));
+      return;
+    }
+    void entry.handoff().then(entry.resolve, (err: unknown) => {
+      entry.reject(err instanceof Error ? err : new Error(String(err)));
+    });
+  }
+
+  /** 交回宿主 answerer；链上没有 answerer 时按「未作答」结束 */
+  private async handoffToHost(nextFn: (() => Promise<UserQuestionResult>) | undefined): Promise<UserQuestionResult> {
+    if (nextFn === undefined) {
+      throw new QuestionChannelError('QQ question channel was released before the question was delivered', ASK_ABORTED);
+    }
+    return nextFn();
   }
 
   /** 该会话是否有待答问题（`/to` 判断走答案通道还是普通 prompt） */
@@ -369,7 +415,11 @@ export class QuestionChannel {
   }
 
   /** 走 QQ 通道：发送首题 + 挂起 Promise，等待逐题作答 */
-  private async askViaQQ(record: QuestionSessionRecordLike, request: UserQuestionRequest): Promise<UserQuestionResult> {
+  private async askViaQQ(
+    record: QuestionSessionRecordLike,
+    request: UserQuestionRequest,
+    nextFn?: () => Promise<UserQuestionResult>,
+  ): Promise<UserQuestionResult> {
     const sessionId = record.sessionId;
     // 会话回收/取消可能在发送前发生：signal 已 abort 则直接失败，避免悬挂
     if (request.signal?.aborted) {
@@ -387,10 +437,26 @@ export class QuestionChannel {
     const first = request.questions[0];
     if (!first) throw new Error('ask_user_question with empty questions');
 
-    await this.sendQuestion(record, first);
+    this.inFlight.set(sessionId, nextFn);
+    try {
+      await this.sendQuestion(record, first);
+    } finally {
+      this.inFlight.delete(sessionId);
+    }
+
+    // 发送期间渠道被释放：QQ 已经收不到回答，直接把整组问题交回宿主
+    if (this.handoffRequested.delete(sessionId)) return this.handoffToHost(nextFn);
 
     return new Promise<UserQuestionResult>((resolve, reject) => {
-      const entry: PendingEntry = { record, request, resolve, reject, index: 0, collected: [] };
+      const entry: PendingEntry = {
+        record,
+        request,
+        resolve,
+        reject,
+        index: 0,
+        collected: [],
+        handoff: nextFn,
+      };
       if (request.signal) {
         const onAbort = (): void => {
           if (this.pending.get(sessionId) !== entry) return;

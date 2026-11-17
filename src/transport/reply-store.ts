@@ -174,6 +174,16 @@ export class ReplyStore {
       : { scope: target.scope, targetId: target.targetId, msgId: candidate.id };
   }
 
+  /**
+   * 平台明确说这条凭证已失效（msg_id 过期 / 被动窗口用完）：丢掉该 target 的
+   * 全部候选，下一次发送改走主动推送。否则失效凭证会被反复取用，重试永远失败。
+   */
+  public forget(target: ReplyTarget): void {
+    if (!this.targets.delete(this.key(target.scope, target.targetId))) return;
+    this.logger.warn?.(`qqterm: 被动回复凭证已失效，改用主动推送（${target.scope}:${target.targetId}）`);
+    this.schedulePersist();
+  }
+
   /** 立即落盘（合并窗口内的待写内容一次性写完）；dispose 与测试用 */
   public flush(): void {
     if (this.flushTimer !== null) {

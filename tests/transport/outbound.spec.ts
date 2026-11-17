@@ -55,6 +55,8 @@ function setup(opts?: {
   images?: { send: ReturnType<typeof vi.fn> };
   /** 会话工作目录（本地文件链接按它解析相对路径） */
   dir?: string;
+  /** 渠道级失效回调 */
+  onChannelBroken?: (reason: string) => void;
 }) {
   const bot = createBot();
   const record = 'record' in (opts ?? {}) ? opts!.record : createRecord(c2cTarget);
@@ -66,7 +68,7 @@ function setup(opts?: {
   } as unknown as SessionManager;
   const outbound = createOutboundHandler(
     manager, bot, opts?.config ?? createConfig(), createLogger(), undefined, opts?.deliverer,
-    opts?.images as never,
+    opts?.images as never, opts?.onChannelBroken,
   );
   return { outbound, bot, record };
 }
@@ -523,5 +525,94 @@ describe('OutboundRouter 本地文件链接', () => {
     const sent = (bot.sendMarkdown as ReturnType<typeof vi.fn>).mock.calls.map((call) => call[1] as string);
     expect(sent.map((text) => text.trim())).toEqual(['图与数据', '后面还有话']);
     expect(sent.join('')).not.toContain('![');
+  });
+});
+
+describe('OutboundRouter 投递失败', () => {
+  const event = { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '你好' }] } } };
+
+  async function drain(): Promise<void> {
+    for (let i = 0; i < 30; i++) await Promise.resolve();
+  }
+
+  function httpError(status: number, message = 'send failed'): Error {
+    return Object.assign(new Error(message), { status });
+  }
+
+  it('暂不可用先重试一次，第二次成功就不排队', async () => {
+    const { outbound, bot } = setup();
+    (bot.sendMarkdown as ReturnType<typeof vi.fn>)
+      .mockRejectedValueOnce(new Error('timeout'))
+      .mockResolvedValueOnce(undefined);
+
+    outbound.routeSessionEvent({ header: { id: 'sess-qq' } }, event);
+    await drain();
+
+    expect(bot.sendMarkdown).toHaveBeenCalledTimes(2);
+    expect(outbound.hasPendingDelivery()).toBe(false);
+    expect((bot.sendMarkdown as ReturnType<typeof vi.fn>).mock.calls[1]?.[1]).toBe('你好');
+  });
+
+  it('两次都失败就整条挂起，网络恢复后 flush 补发', async () => {
+    const { outbound, bot } = setup();
+    const send = bot.sendMarkdown as ReturnType<typeof vi.fn>;
+    send.mockRejectedValue(new Error('timeout'));
+
+    outbound.routeSessionEvent({ header: { id: 'sess-qq' } }, event);
+    await drain();
+
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(outbound.hasPendingDelivery('sess-qq')).toBe(true);
+
+    send.mockResolvedValue(undefined);
+    await outbound.flushPending();
+
+    expect(outbound.hasPendingDelivery()).toBe(false);
+    expect(send.mock.calls.at(-1)?.[1]).toBe('你好');
+  });
+
+  it('超长按一半重切，切到能发为止', async () => {
+    const { outbound, bot } = setup();
+    const send = bot.sendMarkdown as ReturnType<typeof vi.fn>;
+    send.mockImplementation(async (_target: unknown, text: string) => {
+      if (text.length > 1200) throw httpError(40054007, 'message too long');
+    });
+
+    outbound.routeSessionEvent({ header: { id: 'sess-qq' } }, {
+      type: 'assistant/message',
+      data: { message: { content: [{ type: 'text', text: 'a'.repeat(9000) }] } },
+    });
+    await drain();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const lengths = send.mock.calls.map((call) => String(call[1]).length);
+    expect(lengths.some((len) => len > 1200)).toBe(true);
+    expect(lengths.filter((len) => len <= 1200).length).toBeGreaterThan(0);
+    expect(send.mock.calls.every((call) => !String(call[1]).includes('拦截'))).toBe(true);
+  });
+
+  it('被风控拦截时只补一条替代消息', async () => {
+    const { outbound, bot } = setup();
+    const send = bot.sendMarkdown as ReturnType<typeof vi.fn>;
+    send.mockRejectedValue(new Error('sensitive content detected'));
+
+    outbound.routeSessionEvent({ header: { id: 'sess-qq' } }, event);
+    await drain();
+
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(String(send.mock.calls[1]?.[1])).toContain('上一条消息被 QQ 拦截');
+    expect(outbound.hasPendingDelivery()).toBe(false);
+  });
+
+  it('鉴权失败判渠道失效，通知调用方', async () => {
+    const onChannelBroken = vi.fn();
+    const { outbound, bot } = setup({ onChannelBroken });
+    (bot.sendMarkdown as ReturnType<typeof vi.fn>).mockRejectedValue(httpError(401, 'unauthorized'));
+
+    outbound.routeSessionEvent({ header: { id: 'sess-qq' } }, event);
+    await drain();
+
+    expect(onChannelBroken).toHaveBeenCalledTimes(1);
+    expect(outbound.hasPendingDelivery()).toBe(false);
   });
 });

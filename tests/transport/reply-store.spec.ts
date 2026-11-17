@@ -46,6 +46,14 @@ describe('ReplyStore', () => {
     expect(store.resolve({ scope: 'c2c', targetId: 'u1' }, true).msgId).toBeUndefined();
   });
 
+  it('forget 清掉该 target 的凭证，之后解析降级为主动推送', () => {
+    const { store } = tempStore();
+    store.recordMessage('c2c', 'u1', 'm1');
+    expect(store.resolve({ scope: 'c2c', targetId: 'u1' }, true).msgId).toBe('m1');
+    store.forget({ scope: 'c2c', targetId: 'u1' });
+    expect(store.resolve({ scope: 'c2c', targetId: 'u1' }, true).msgId).toBeUndefined();
+  });
+
   it('用量按需合并落盘，flush 之后才可见', () => {
     const { store, file } = tempStore();
     store.recordMessage('c2c', 'u1', 'm1');

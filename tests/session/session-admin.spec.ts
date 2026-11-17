@@ -1141,6 +1141,7 @@ describe('多会话：已获取集合 / /to / 切走不释放', () => {
       hasPending: () => true,
       answer,
       beginAnswerMode,
+      handoffPending: vi.fn(),
       cancelPending: vi.fn(),
     } as unknown as NonNullable<typeof manager.questionChannel>;
 
@@ -1160,6 +1161,7 @@ describe('多会话：已获取集合 / /to / 切走不释放', () => {
       hasPending: () => true,
       answer: vi.fn(() => false),
       beginAnswerMode,
+      handoffPending: vi.fn(),
       cancelPending: vi.fn(),
     } as unknown as NonNullable<typeof manager.questionChannel>;
 
@@ -1214,6 +1216,63 @@ describe('多会话：已获取集合 / /to / 切走不释放', () => {
     expect(manager.size).toBe(0);
   });
 
+  it('卸载时借来的会话交还提问/审批，不停掉它的轮次', async () => {
+    const { agent, registry, handles } = liveRegistry();
+    const ctx = createCtx({ sessions: [] });
+    const { manager } = createManager(ctx, registry);
+
+    await manager.getOrCreate('c2c', PEER, PEER, REPLY);
+    await manager.sendTo('c2c', PEER, PEER, TARGET, 'hi', REPLY);
+
+    const questionHandoff = vi.fn();
+    const questionCancel = vi.fn();
+    manager.questionChannel = {
+      handoffPending: questionHandoff,
+      cancelPending: questionCancel,
+    } as unknown as NonNullable<typeof manager.questionChannel>;
+    const approvalHandoff = vi.fn(async () => {});
+    manager.approvalChannel = {
+      handoffPending: approvalHandoff,
+      cancelPending: vi.fn(),
+    } as unknown as NonNullable<typeof manager.approvalChannel>;
+    const retryCancel = vi.fn();
+    manager.retryChannel = { cancelPending: retryCancel } as unknown as NonNullable<typeof manager.retryChannel>;
+
+    await manager.disposeAll();
+
+    expect(questionHandoff).toHaveBeenCalledWith(TARGET);
+    expect(questionCancel).not.toHaveBeenCalledWith(TARGET);
+    expect(approvalHandoff).toHaveBeenCalledWith(TARGET);
+    expect(retryCancel).toHaveBeenCalledWith(TARGET);
+    expect(agent.cancel).not.toHaveBeenCalled();
+    expect(handles[0]?.dispose).toHaveBeenCalled();
+  });
+
+  it('releaseAll：摘掉全部引用并清指针，不 cancel 不 dispose', async () => {
+    const { agent, registry, handles } = liveRegistry();
+    const ctx = createCtx({ sessions: [] });
+    const { manager } = createManager(ctx, registry);
+
+    await manager.getOrCreate('c2c', PEER, PEER, REPLY);
+    await manager.sendTo('c2c', PEER, PEER, TARGET, 'hi', REPLY);
+
+    const questionHandoff = vi.fn();
+    manager.questionChannel = {
+      handoffPending: questionHandoff,
+      cancelPending: vi.fn(),
+    } as unknown as NonNullable<typeof manager.questionChannel>;
+
+    manager.releaseAll('gateway');
+
+    expect(manager.size).toBe(0);
+    expect(manager.findBySessionId(TARGET)).toBeUndefined();
+    expect(manager.getSessionRecord('c2c', PEER)).toBeUndefined();
+    expect(persistedId()).toBeUndefined();
+    expect(questionHandoff).toHaveBeenCalledWith(TARGET);
+    expect(agent.cancel).not.toHaveBeenCalled();
+    expect(handles[0]?.dispose).not.toHaveBeenCalled();
+  });
+
   it('外部把同一 id 换成另一个 agent：旧记录被摘掉，不再转发', async () => {
     const { registry } = liveRegistry();
     const ctx = createCtx({ sessions: [] });
@@ -1238,7 +1297,10 @@ describe('多会话：已获取集合 / /to / 切走不释放', () => {
     Object.assign(agent, { status: 'running' });
     Object.assign(current.agent, { status: 'running' });
     const cancelPending = vi.fn();
-    manager.questionChannel = { cancelPending } as unknown as NonNullable<typeof manager.questionChannel>;
+    manager.questionChannel = {
+      handoffPending: vi.fn(),
+      cancelPending,
+    } as unknown as NonNullable<typeof manager.questionChannel>;
 
     const cancelled = manager.cancelAllRunning();
 
@@ -1267,7 +1329,10 @@ describe('多会话：已获取集合 / /to / 切走不释放', () => {
     const current = await manager.getOrCreate('c2c', PEER, PEER, REPLY);
     await manager.sendTo('c2c', PEER, PEER, TARGET, 'hi', REPLY);
     const cancelPending = vi.fn();
-    manager.questionChannel = { cancelPending } as unknown as NonNullable<typeof manager.questionChannel>;
+    manager.questionChannel = {
+      handoffPending: vi.fn(),
+      cancelPending,
+    } as unknown as NonNullable<typeof manager.questionChannel>;
 
     const stopped = await manager.resetCurrentSession();
 

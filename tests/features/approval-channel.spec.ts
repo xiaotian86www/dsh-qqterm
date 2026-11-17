@@ -195,6 +195,27 @@ describe('ApprovalChannel.install', () => {
     await expect(p).resolves.toBe('allowed-once');
   });
 
+  it('handoffPending 把挂起的审批交还宿主 answerer', async () => {
+    const sent: SentMessage[] = [];
+    const ch = new ApprovalChannel(
+      createManager({ findBySessionId: (id) => (id === 'sess-qq' ? makeRecord('sess-qq') : undefined) }),
+      createSender(sent),
+      makeConfig(),
+      createLogger(),
+    );
+    const { handler } = installAndCapture(ch, sent);
+
+    const next = vi.fn(async () => 'allowed-once' as ApprovalOutcome);
+    const p = handler(makeRequest({ id: 'sess-qq' }), next) as Promise<ApprovalOutcome>;
+    await sleep(20);
+    expect(sent).toHaveLength(1);
+
+    await ch.handoffPending('sess-qq');
+
+    await expect(p).resolves.toBe('allowed-once');
+    expect(next).toHaveBeenCalledTimes(1);
+  });
+
   it('recovers the gated command from the session log', async () => {
     const sent: SentMessage[] = [];
     const ch = new ApprovalChannel(

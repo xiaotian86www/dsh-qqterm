@@ -105,6 +105,8 @@ export async function bootstrapGateway(
     if (config.debug) {
       logger.debug(`← message (post-middleware): ${JSON.stringify(msg, null, 2).slice(0, 500)}`);
     }
+    // 能收到消息就说明通道通了：先把上次没发出去的补发掉，再处理这一条
+    void outbound.flushPending();
     await handleInbound(mCtx, manager, logger);
   });
 
@@ -148,6 +150,11 @@ export async function bootstrapGateway(
     toolsRegistry,
     deliverablesDeliverer,
     outboundImages,
+    // 鉴权失败 = 整条渠道没了：丢掉积压，释放全部持有（会话仍在宿主里跑）
+    (reason: string) => {
+      outbound.clearPending();
+      manager.releaseAll(`auth: ${reason}`);
+    },
   );
   // session/event 按 agent 作用域派发；带 global 才能收到所有已获取会话的事件，
   // 不只当前会话（多会话输出都要回 QQ）。同一入口顺带跟运行期 cd：只有当前会话
@@ -197,11 +204,18 @@ export async function bootstrapGateway(
       logger.warn(`Bot disconnected (${detail}), reconnecting...`);
     } else {
       logger.error(`Bot disconnected permanently (${detail}), giving up`);
+      // 不会自动重连了：积压消息已经没有送达路径，先丢掉再释放全部持有。
+      // 会话不 cancel、不 dispose，仍可在 Web 端继续；重新扫码后由用户手动接回。
+      outbound.clearPending();
+      manager.releaseAll('gateway');
     }
   });
 
   onGatewayConnected(bot, (event) => {
     console.log(`[qqterm] Bot ${event}! appId=${config.appId}`);
+
+    // 通道恢复：补发断线期间积压的消息（按会话、按原顺序）
+    void outbound.flushPending();
 
     // 启动恢复：把上次的会话接回来，避免「/status 说未建立、下一条消息又能接回」。
     // 失败时主动推一条带重试入口的消息——重启后没有入站消息，只能发给持久化的
@@ -267,6 +281,9 @@ export async function bootstrapGateway(
       logger.info(`Starting bot (appId=${config.appId})`);
       bot.start().catch((err: unknown) => {
         logger.error(`Bot start failed: ${err instanceof Error ? err.message : String(err)}`);
+        // 握手就失败（例如 appSecret 失效）：同样是整条渠道不可用
+        outbound.clearPending();
+        manager.releaseAll('start');
       });
 
       return async () => {
