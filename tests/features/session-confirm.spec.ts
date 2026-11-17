@@ -100,8 +100,15 @@ describe('SessionConfirmChannel.offer', () => {
 
     expect(await channel.offer(request('reset'))).toBe(true);
     expect(sent).toHaveLength(1);
-    expect(sent[0]!.text).toContain('⚠️ 重置会停掉当前会话');
-    expect(sent[0]!.text).toContain('> 👇 点「确认」继续');
+    expect(sent[0]!.text).toBe(
+      [
+        '**⚠️ 确认重置会话**',
+        '',
+        '当前会话会停止，下一条消息开新会话。',
+        '',
+        '> 👇 点「确认」继续',
+      ].join('\n'),
+    );
     expect(sent[0]!.opts?.keyboard).toBeDefined();
   });
 
@@ -112,8 +119,10 @@ describe('SessionConfirmChannel.offer', () => {
     await channel.offer(request('reset-all'));
     await channel.offer(request('new'));
 
-    expect(sent[0]!.text).toContain('重置会停掉全部会话');
-    expect(sent[1]!.text).toContain('当前会话还在，仍要新建？');
+    expect(sent[0]!.text).toContain('**⚠️ 确认重置全部会话**');
+    expect(sent[0]!.text).toContain('全部会话都会停止，下一条消息开新会话。');
+    expect(sent[1]!.text).toContain('**⚠️ 确认新建会话**');
+    expect(sent[1]!.text).toContain('当前会话继续运行，下一条消息开新会话。');
     expect(sent[1]!.text).toContain('> 👇 点「确认」继续');
   });
 
