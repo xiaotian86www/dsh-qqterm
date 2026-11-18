@@ -180,26 +180,20 @@ export function compactCommand({ manager }: CommandDeps): SlashCommand {
     scope: 'all',
     description: '压缩会话历史',
     handler: async (cmdCtx) => {
-      const { scope, peerId } = getScopePeer(cmdCtx);
       const msg = cmdCtx.message;
-      const outcome = await manager.compact(scope, peerId, {
-        senderId: msg.senderId,
-        replyTarget: { scope, targetId: peerId },
+      const { scope, peerId } = getScopePeer(cmdCtx);
+      // 没有活跃会话时从磁盘拉起：历史在磁盘上仍可压缩
+      const record = await manager.getOrCreate(scope, peerId, msg.senderId, {
+        scope,
+        targetId: peerId,
       });
+      const run = await manager.runHostCommand(record.agent, 'compact');
 
-      // 文本是宿主原文：不估算压缩后的占比（真实占用要等下一轮请求才更新）
-      if (outcome.ok) return outcome.message ? `✅ 压缩完成: ${outcome.message}` : '✅ 压缩完成';
-
-      switch (outcome.reason) {
-        case 'no-session':
-          return '⚠️ 当前没有会话';
-        case 'busy':
-          return '⚠️ 正在生成中，无法压缩';
-        case 'no-compaction':
-          return '⚠️ 当前 preset 没有压缩能力';
-      }
-
-      return outcome.message ? `❌ 压缩失败: ${outcome.message}` : '❌ 压缩失败';
+      // 文本是宿主原文：不估占比、不做映射（真实占用要等下一轮请求才更新）
+      if (run.kind === 'unsupported') return '⚠️ 当前 preset 没有压缩能力';
+      if (run.kind === 'threw') return `❌ 压缩失败: ${run.message}`;
+      if (run.kind === 'success') return run.text ? `✅ 压缩完成: ${run.text}` : '✅ 压缩完成';
+      return run.text ? `❌ 压缩失败: ${run.text}` : '❌ 压缩失败';
     },
   };
 }

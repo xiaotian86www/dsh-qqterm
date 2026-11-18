@@ -82,14 +82,15 @@ export interface DshAgent {
   };
 }
 
-/** compact 操作结果：宿主只给 kind + 文本，这里原样带回，不做映射 */
-export interface CompactOutcome {
-  ok: boolean;
-  /** 插件本地判定的前置条件（与宿主文本无关） */
-  reason?: 'no-session' | 'busy' | 'no-compaction';
-  /** 宿主命令的原始文本，原样透传给 QQ */
-  message?: string;
-}
+/** 宿主斜杠命令的执行结果：只给 kind + 文本，原样带回，不做映射 */
+export type HostCommandRun =
+  /** 登记簿里没有这条命令（当前 preset / 组合包没装它） */
+  | { kind: 'unsupported' }
+  /** 宿主执行完，成败与文本都由宿主决定 */
+  | { kind: 'success'; text?: string }
+  | { kind: 'error'; text?: string }
+  /** 宿主抛错：只把 message 包出来，插件不判断语义 */
+  | { kind: 'threw'; message: string };
 
 /** preset 切换结果 */
 export interface PresetSwitchOutcome {

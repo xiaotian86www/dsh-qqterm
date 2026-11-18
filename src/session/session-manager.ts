@@ -60,7 +60,7 @@ import type {
   TokenUsageStats,
   SessionContextUsage,
   SessionTurnProgress,
-  CompactOutcome,
+  HostCommandRun,
   WorkspaceSession,
   WorkspaceGroup,
   WorkspaceInfo,
@@ -2398,39 +2398,31 @@ export class SessionManager {
   }
 
   /**
-   * 原地压缩当前会话历史（保留 sessionId，用摘要替换旧历史）。
+   * 执行宿主斜杠命令。
    *
-   * 判定与执行都走 base 的命令登记簿：宿主 /compact 在自己的 preset 作用域里
-   * 取压缩引擎并写 command/run、command/done，qqterm 不解析 preset 服务，
-   * 也就完全不碰 web 组件。preset 没挂压缩组时命令查不到，本地拒绝。
+   * 只做机械部分：查登记簿确认命令可见、参数拼成一行、把 { kind, text } 原样交回。
+   * 成败判定、文案主题、要不要先判 idle 都留给宿主与调用方——例如 /compact 的
+   * "busy" 由宿主压缩锁自己判，插件不再前置检查 status（既假阳性又 TOCTOU，
+   * 还与 Web 端行为不一致）。
    */
-  async compact(
-    scope: ChatScope,
-    peerId: string,
-    revive?: { senderId: string; replyTarget: ReplyTarget },
-  ): Promise<CompactOutcome> {
-    const key = this.sessionKey();
-    let record = this.currentRecord(key);
-    if (!record) {
-      // 无活跃会话（重启后尚未打开）时从磁盘拉起，历史在磁盘上仍可压缩
-      if (!revive) return { ok: false, reason: 'no-session' };
-      record = await this.getOrCreate(scope, peerId, revive.senderId, revive.replyTarget);
-    }
-    if (record.agent.status !== 'idle') return { ok: false, reason: 'busy' };
-
-    if (this.commands.find(record.agent, 'compact') === undefined) {
-      return { ok: false, reason: 'no-compaction' };
-    }
+  async runHostCommand(
+    agent: DshAgent,
+    name: string,
+    args: readonly string[] = [],
+  ): Promise<HostCommandRun> {
+    const commands = this.commands;
+    if (commands.find(agent, name) === undefined) return { kind: 'unsupported' };
+    const line = args.length === 0 ? `/${name}` : `/${name} ${args.join(' ')}`;
 
     try {
-      const executed = await this.commands.execute(record.agent, '/compact', [], new AbortController().signal);
-      if (executed === undefined) return { ok: false, reason: 'no-compaction' };
-      // 只看 kind：success 即使文案是「没有可压缩历史」也算成功，文本原样带回 QQ
-      return { ok: executed.result.kind === 'success', message: executed.result.text };
+      const executed = await commands.execute(agent, line, [], new AbortController().signal);
+      if (executed === undefined) return { kind: 'unsupported' };
+      const { kind, text } = executed.result;
+      return text === undefined ? { kind } : { kind, text };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      this.logger.warn(`compact failed: key=${key} err=${message}`);
-      return { ok: false, message };
+      this.logger.warn(`host command failed: name=${name} err=${message}`);
+      return { kind: 'threw', message };
     }
   }
 
