@@ -8,6 +8,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { MiddlewareContext } from '@tencent-connect/qqbot-nodejs';
 import { handleInbound } from '../../src/transport/inbound.ts';
+import { WorktreeError } from '../../src/session/worktree.ts';
 import type { SessionManager, SessionRecord } from '../../src/session/index.ts';
 import type { Logger } from '../../src/types.ts';
 
@@ -106,5 +107,60 @@ describe('handleInbound：派发不等待本轮 turn', () => {
 
     expect(followup).toHaveBeenCalledTimes(2);
     expect(followup.mock.calls.map(call => textOf(call[0]))).toEqual(['一', '二']);
+  });
+});
+
+describe('handleInbound：工作树', () => {
+  /** 取出 bot.sendMarkdown 的调用参数 */
+  function sent(ctx: ReturnType<typeof makeCtx>): Array<[unknown, string]> {
+    return (ctx.bot.sendMarkdown as unknown as { mock: { calls: Array<[unknown, string]> } }).mock.calls;
+  }
+
+  function failingManager(error: unknown): SessionManager {
+    return { getOrCreate: vi.fn(async () => { throw error; }) } as unknown as SessionManager;
+  }
+
+  it('建树失败：说清会话没创建，重发会重新尝试', async () => {
+    const ctx = makeCtx('hi');
+
+    await handleInbound(ctx, failingManager(new WorktreeError('create', 'fatal: cannot lock ref')), logger);
+
+    expect(sent(ctx).at(-1)?.[1]).toBe(
+      '❌ 工作树没建成: fatal: cannot lock ref\n本次会话没有创建，重发一次会重新尝试。',
+    );
+  });
+
+  it('工作树重建失败：给下一步，不谎称会话没了', async () => {
+    const ctx = makeCtx('hi');
+
+    await handleInbound(ctx, failingManager(new WorktreeError('restore', 'fatal: path exists')), logger);
+
+    expect(sent(ctx).at(-1)?.[1]).toBe(
+      '❌ 工作树重建失败: fatal: path exists · 用 /new 重新开会话',
+    );
+  });
+
+  it('非工作树错误仍然走通用兜底', async () => {
+    const ctx = makeCtx('hi');
+
+    await handleInbound(ctx, failingManager(new Error('EIO')), logger);
+
+    expect(sent(ctx).at(-1)?.[1]).toBe('⚠️ 处理消息时出现异常，请稍后重试。');
+  });
+
+  it('新会话建了树：回执只发一次，之后不再重复', async () => {
+    const { record } = makeRecord('session-a');
+    record.worktreeNotice = '✅ 已在新工作树 `dsh-x` 里开启会话\n路径: `D:\\repo\\.agents\\worktrees\\dsh-x`';
+    const manager = managerOf([record]);
+    const first = makeCtx('一');
+
+    await handleInbound(first, manager, logger);
+
+    expect(sent(first).some(([, text]) => text === '✅ 已在新工作树 `dsh-x` 里开启会话\n路径: `D:\\repo\\.agents\\worktrees\\dsh-x`')).toBe(true);
+    expect(record.worktreeNotice).toBeUndefined();
+
+    const second = makeCtx('二');
+    await handleInbound(second, manager, logger);
+    expect(sent(second)).toHaveLength(0);
   });
 });

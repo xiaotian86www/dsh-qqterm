@@ -117,6 +117,16 @@ export class ModelResolver {
     this.prefs.setTarget(sessionKey, targetId);
   }
 
+  /** 新会话是否开工作树；从未设置过返回 undefined（调用方按开处理） */
+  getWorktreeDefault(): boolean | undefined {
+    return this.prefs.getWorktree();
+  }
+
+  /** 记下新会话是否开工作树（值不变时不写盘） */
+  setWorktreeDefault(enabled: boolean): void {
+    this.prefs.setWorktree(enabled);
+  }
+
   /**
    * 模型支持的思考强度档位
    *

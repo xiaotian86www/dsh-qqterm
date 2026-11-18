@@ -18,6 +18,24 @@ afterEach(() => {
 
 const store = (): PrefsStore => new PrefsStore(undefined, { path });
 
+describe('PrefsStore 工作树默认值', () => {
+  it('从未设置过：返回 undefined（调用方按开处理）', () => {
+    expect(store().getWorktree()).toBeUndefined();
+  });
+
+  it('设置后落盘，新实例读得回', () => {
+    store().setWorktree(false);
+    expect(JSON.parse(readFileSync(path, 'utf8')).worktree).toBe(false);
+    expect(store().getWorktree()).toBe(false);
+  });
+
+  it('没设过的实例写别的段时不冲掉磁盘上的值', () => {
+    store().setWorktree(true);
+    store().setSessionId('k', 's1');
+    expect(JSON.parse(readFileSync(path, 'utf8')).worktree).toBe(true);
+  });
+});
+
 describe('PrefsStore 并发安全（E3）', () => {
   it('写前合并：后写实例保留磁盘上其他写者的条目（多实例共存）', () => {
     const a = store();

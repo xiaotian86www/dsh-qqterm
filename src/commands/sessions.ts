@@ -609,11 +609,16 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Slash
               );
             }
 
+            // 先记下有没有树：归档会释放记录，之后查不到
+            const withWorktree = picks.some((entry) => manager.hasWorktree(entry.id));
             const results: ArchiveResult[] = [];
             for (const entry of picks) {
               results.push({ entry, outcome: await manager.archiveSession(entry.id) });
             }
-            return renderArchiveResults('archive', results, skipped, batch.errors);
+            const text = renderArchiveResults('archive', results, skipped, batch.errors);
+            return withWorktree
+              ? `${text}\n\n> 💡 工作树随归档清理：干净则删目录，分支保留。`
+              : text;
           }
 
           case 'unarchive':

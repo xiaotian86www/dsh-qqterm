@@ -4,6 +4,7 @@
  * 管理聊天会话 → dsh Agent 的映射和生命周期。
  */
 export { SessionManager } from './session-manager.ts';
+export { WorktreeError } from './worktree.ts';
 export type {
   AgentSetup,
   AgentOptionsLike,
@@ -36,4 +37,5 @@ export type {
   ArchiveSessionOutcome,
   SendToOutcome,
   RetryPromptOutcome,
+  WorktreeInfo,
 } from './types.ts';
