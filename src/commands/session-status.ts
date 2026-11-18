@@ -13,7 +13,6 @@ import type { SessionContextUsage, SessionManager, SessionTurnProgress } from '.
 import type { ChatScope } from '../types.ts';
 import { getScopePeer, sendMarkdownChunked } from '../shared/index.ts';
 import { sessionTargetLabel, sessionTitleOf } from '../transport/session-source.ts';
-import { shortCommit } from '../session/worktree.ts';
 import { effortLabel } from '../model/effort-label.ts';
 import { presetLabel } from './permission.ts';
 
@@ -112,7 +111,7 @@ async function renderStatus(
   const worktree = manager.worktreeOf(scope, peerId);
   if (worktree) {
     lines.push(
-      `**工作树**: \`${worktree.branch}\` · 基点 \`${shortCommit(worktree.baseCommit)}\` · \`${worktree.path}\``,
+      `**工作树**: \`${worktree.branch}\` · \`${worktree.path}\``,
     );
   }
 

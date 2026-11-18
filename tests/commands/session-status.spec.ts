@@ -129,7 +129,7 @@ describe('/status（有会话）', () => {
     expect(text).toContain('**权限**: 工作区内修改 (workspace-write)');
   });
 
-  it('会话在工作树里时多给一行分支、基点与树路径', async () => {
+  it('会话在工作树里时多给一行分支与树路径', async () => {
     const text = await run(makeManager({
       worktree: {
         branch: 'dsh-1a2b3c4d-9f0e',
@@ -138,7 +138,7 @@ describe('/status（有会话）', () => {
       },
     }));
     expect(text).toContain(
-      '**工作树**: `dsh-1a2b3c4d-9f0e` · 基点 `6b1f02c` · `D:\\repo\\.agents\\worktrees\\dsh-1a2b3c4d-9f0e`',
+      '**工作树**: `dsh-1a2b3c4d-9f0e` · `D:\\repo\\.agents\\worktrees\\dsh-1a2b3c4d-9f0e`',
     );
   });
 
