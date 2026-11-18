@@ -246,7 +246,7 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqterm/cordis.dev.yml
 | `/sessions rename <id> <新标题>` | 修改会话名；标题会被固定，不被自动标题覆盖。目标须已打开（先 `/sessions resume`） |
 | `/sessions archive [页码]` | 不带目标时列出所有工作区的归档候选（与 `/sessions all` 同源），按工作区分组，标题给 `X 个工作区 · Y 个会话`，候选不编号；只给页码时翻页，例如 `/sessions archive 2` |
 | `/sessions archive <id>[,<id>…]` | 归档会话：从本命令与 Web 侧栏隐藏，**磁盘日志保留**，可随时取消归档；多个目标用英文逗号分隔（一次最多 10 个） |
-| `/sessions archived [页码]` | 查看已归档会话；每行带短 id 与所属工作区，点一下把 `/sessions unarchive <id>` 填进输入框；底部的翻页与返回列表也是链接 |
+| `/sessions archived [页码]` | 查看已归档会话，按工作区分组，组标题与 `/sessions all` 同写法，标题给 `X 个工作区 · Y 个会话`；每条只给短 id 与标题，点一下把 `/sessions unarchive <id>` 填进输入框；底部的翻页与返回列表也是链接 |
 | `/sessions unarchive <id>[,<id>…]` | 取消归档，让它重新出现在列表里 |
 | `/to <会话> <文本>` | 向指定会话发一条消息；目标在等 `ask_user_question` 时，文本会作为答案提交 |
 | `/to <会话>` | 目标在等答案时进入「下一条消息作为回答」模式 |

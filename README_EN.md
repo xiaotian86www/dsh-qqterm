@@ -246,7 +246,7 @@ A workspace *is* the session's `cwd`. It is written into the session header when
 | `/sessions rename <id> <title>` | Rename a session; the title is pinned against automatic titles. The target must already be open (use `/sessions resume` first) |
 | `/sessions archive [page]` | Without a target it lists archive candidates across every workspace (same source as `/sessions all`), grouped by workspace, titled `X 个工作区 · Y 个会话`, never numbered; a bare page number pages through them, e.g. `/sessions archive 2` |
 | `/sessions archive <id>[,<id>…]` | Archive sessions: hidden from this command and the Web sidebar, **on-disk log kept**, restorable at any time; separate multiple targets with commas (up to 10 per command) |
-| `/sessions archived [page]` | List archived sessions; each row shows its short id and workspace and fills `/sessions unarchive <id>` into the input box; the paging and back links at the bottom work too |
+| `/sessions archived [page]` | View archived sessions grouped by workspace with the same headers as `/sessions all`, titled `X 个工作区 · Y 个会话`; each row carries only the short id and title and fills `/sessions unarchive <id>` into the input box; the paging and back links at the bottom work too |
 | `/sessions unarchive <id>[,<id>…]` | Restore the session to the regular list |
 | `/to <session> <text>` | Send a message to a specific session; if it is waiting on `ask_user_question`, the text is submitted as the answer |
 | `/to <session>` | When the target is waiting for an answer, the next message becomes the answer |
