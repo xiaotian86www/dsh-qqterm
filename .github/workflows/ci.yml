@@ -77,6 +77,7 @@ jobs:
 
       - name: 只改文档，跳过 verify
         if: env.CODE != 'true'
+        shell: bash
         run: echo "只改了文档，跳过构建 · lib/ 同步校验 · 客户端类型检查" >> "$GITHUB_STEP_SUMMARY"
 
       - uses: pnpm/action-setup@v4
@@ -135,6 +136,7 @@ jobs:
 
       - name: 只改文档，跳过测试
         if: env.CODE != 'true'
+        shell: bash
         run: echo "只改了文档，跳过 pnpm test" >> "$GITHUB_STEP_SUMMARY"
 
       - uses: pnpm/action-setup@v4
@@ -163,6 +165,7 @@ jobs:
 
       - name: 只改文档，跳过打包
         if: env.CODE != 'true'
+        shell: bash
         run: echo "只改了文档，跳过 pnpm pack 与包内容校验" >> "$GITHUB_STEP_SUMMARY"
 
       - uses: pnpm/action-setup@v4
