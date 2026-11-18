@@ -12,10 +12,14 @@ This file records product-level changes to QQ SuperTerm. The format follows [Kee
 
 ### Changed
 
-- **New sessions start in a Git worktree**: inside a Git repository the first message after `/new` first creates a worktree on a `dsh-<short session id>` branch at the current HEAD, and the session runs there, matching the web app; `/new <workspace|path>` behaves the same, the directory only decides where the worktree is created. A failed creation means no session that round, with a two-line reason. Deployments without the worktree service, non-Git directories, and a read-only default sandbox create the session in place and never mention worktrees. `/status` gains a worktree line with its base commit; archiving removes a clean worktree and keeps its branch, while a dirty one is retained.
+- **New sessions start in a Git worktree**: inside a Git repository the first message after `/new` first creates a worktree on a `dsh-<short session id>` branch at the current HEAD, and the session runs there, matching the web app; `/new <workspace|path>` behaves the same, the directory only decides where the worktree is created. A failed creation means no session that round, with a two-line reason. Deployments without the worktree service, non-Git directories, and a read-only default sandbox create the session in place and never mention worktrees. `/status` gains a worktree line with its branch, base commit, and path, while the workspace line still names the main checkout; archiving removes a clean worktree and keeps its branch, while a dirty one is retained.
 - **`/worktree` switch**: on by default; after `/worktree 关` new sessions (including those started by `/clear`) run in the main checkout while existing sessions and their worktrees are untouched. `/worktree 开` turns it back on; the bare command shows the current value plus the two clickable choices (`on` / `off` also work). The value lives in `model-prefs.json` and survives restarts; deployments without the worktree service do not register the command at all.
 - **Second confirmation for resetting sessions**: while a session is live, `/reset` (alias `/clear`) and `/clear all` first send a card with "✅ Confirm / ❌ Cancel" buttons; the action runs only after the confirm button is tapped within 5 minutes. If the card cannot be sent the action is dropped rather than executed unconfirmed, and switching sessions before the tap voids the confirmation. `/new` never stops the old session, so it runs directly without a card.
 - **`/compact` no longer pre-checks the busy state**: the local `agent.status !== 'idle'` gate is gone — the host's compaction lock decides, so running sessions can be compacted too. Command execution is now a reusable `runHostCommand`, ready for `/goal` and other host commands.
+
+### Fixed
+
+- **The `/status` workspace line no longer shows the worktree directory**: a session running in a worktree reports the main checkout (the same source `/sessions` groups by) and the worktree line carries the tree path; resuming such a session also attaches it to the session directory instead of creating a workspace named after the tree.
 
 ## [0.0.1] - 2026-11-14
 
