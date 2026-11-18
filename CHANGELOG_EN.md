@@ -6,6 +6,10 @@ This file records product-level changes to QQ SuperTerm. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+
+- **`/goal` long-running goals**: forwards to the host `/goal` (create, show, edit, pause, resume, clear) with arguments passed through verbatim; success follows the host result and the reply carries the host text, with a single unsupported notice when the deployment lacks the command.
+
 ### Changed
 
 - **Second confirmation for reset / new session**: while a session is live, `/reset` (alias `/clear`), `/clear all`, and `/new` first send a card with "✅ Confirm / ❌ Cancel" buttons; the action runs only after the confirm button is tapped within 5 minutes. If the card cannot be sent the action is dropped rather than executed unconfirmed, and switching sessions before the tap voids the confirmation.
