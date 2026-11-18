@@ -249,11 +249,26 @@ describe('/sessions 持有视图', () => {
     });
     const text = await run(manager, '');
 
-    expect(text).toContain('**当前**: #eeee3333 · 待恢复');
+    // 指针指向的会话不在名单里：只给 id，不编状态，也不说成「待恢复」
+    expect(text).toContain('**当前**: #eeee3333');
+    expect(text).not.toContain('待恢复');
     expect(text).toContain('后台会话');
     expect(text).toContain('<qqbot-cmd-input text="/sessions resume #eeee3333" show="恢复当前"/>');
     // 不在列表里的当前项没有 ✅
     expect(text).not.toContain(' ✅');
+  });
+
+  it('重启后还没打开的会话列出但不显示状态（不说成空闲）', async () => {
+    const manager = makeManager({
+      listHeldSessions: vi.fn(async () => [
+        entry({ id: 'session-cold1111', title: '旧会话', held: false, live: false, running: false }),
+      ]),
+    });
+    const text = await run(manager, '');
+
+    expect(text).toContain('#cold1111 · 旧会话');
+    expect(text).not.toContain('待恢复');
+    expect(text).not.toContain('空闲');
   });
 
   it('跨工作区的持有项按工作区分组，行内不重复工作区名', async () => {

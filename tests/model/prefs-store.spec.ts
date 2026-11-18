@@ -181,3 +181,50 @@ describe('PrefsStore 聊天工作目录', () => {
     writes.mockRestore();
   });
 });
+
+describe('PrefsStore 会话名册', () => {
+  const KEY = 'qqterm:app:chat';
+
+  it('记住的会话重启后读得回，最近获取在前且去重', () => {
+    const a = store();
+    a.rememberHeld(KEY, 's1');
+    a.rememberHeld(KEY, 's2');
+    a.rememberHeld(KEY, 's1');
+
+    expect(JSON.parse(readFileSync(path, 'utf8')).held[KEY]).toEqual(['s1', 's2']);
+    expect(store().getHeld(KEY)).toEqual(['s1', 's2']);
+  });
+
+  it('名册最多 20 条，超出丢最旧的', () => {
+    const a = store();
+    for (let i = 1; i <= 25; i += 1) a.rememberHeld(KEY, `s${i}`);
+    const ids = store().getHeld(KEY);
+    expect(ids).toHaveLength(20);
+    expect(ids[0]).toBe('s25');
+    expect(ids).not.toContain('s5');
+  });
+
+  it('忘掉一个会话后留空数组，不删 key（合并时才知道本进程写空过）', () => {
+    const a = store();
+    a.rememberHeld(KEY, 's1');
+    a.forgetHeld(KEY, 's1');
+    expect(store().getHeld(KEY)).toEqual([]);
+    expect(JSON.parse(readFileSync(path, 'utf8')).held[KEY]).toEqual([]);
+  });
+
+  it('另一个实例清空名册后写回空数组，它写过的别的 key 保留', () => {
+    store().rememberHeld(`${KEY}:a`, 's1');
+    const b = store();
+    b.rememberHeld(`${KEY}:b`, 's2');
+    b.forgetHeld(`${KEY}:a`, 's1');
+
+    const disk = JSON.parse(readFileSync(path, 'utf8')).held;
+    expect(disk[`${KEY}:a`]).toEqual([]);
+    expect(disk[`${KEY}:b`]).toEqual(['s2']);
+  });
+
+  it('坏数据按空名册处理（非字符串条目过滤掉）', () => {
+    writeFileSync(path, JSON.stringify({ held: { k: ['s1', 42, '', null] } }), 'utf8');
+    expect(store().getHeld('k')).toEqual(['s1']);
+  });
+});
