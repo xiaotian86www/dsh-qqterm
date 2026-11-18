@@ -222,7 +222,7 @@ export class SessionManager {
   public approvalChannel?: ApprovalChannel;
   /** 由 bootstrap 注入的重发通道（失败卡片 → 「重发 / 放弃」），会话释放时清理其待确认卡片 */
   public retryChannel?: RetryChannel;
-  /** 由 bootstrap 注入的会话确认通道（`/clear`、`/new` 的二次确认） */
+  /** 由 bootstrap 注入的会话确认通道（`/clear`、`/clear all` 的二次确认） */
   public sessionConfirmChannel?: SessionConfirmChannel;
   /** 最近一次读到的有效部署默认权限预设（部署默认被写坏时用它回正） */
   private lastKnownDefaultPermission?: string;

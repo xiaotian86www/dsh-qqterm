@@ -262,31 +262,23 @@ describe('有会话时的二次确认', () => {
     return command.handler(makeCtx(raw, 'user1', 'clear'));
   }
 
-  it('/new 有当前会话时先发卡片，不直接开新会话', async () => {
+  it('/new 有当前会话时直接开新会话，不发卡片', async () => {
     const channel = makeChannel();
     const manager = { ...makeManager(), currentSessionId: vi.fn(() => 'sess-1'), sessionConfirmChannel: channel };
 
-    expect(await runNew(manager)).toEqual({ kind: 'noop' });
-    expect(manager.remove).not.toHaveBeenCalled();
-    expect(channel.offer).toHaveBeenCalledTimes(1);
-
-    const req = channel.list[0]!;
-    expect(req.action).toBe('new');
-    expect(req.currentId).toBe('sess-1');
-    expect(req.target).toEqual({ scope: 'c2c', targetId: 'user1' });
-
-    // 点了确认才真正执行
-    await expect(req.run()).resolves.toBe('✅ 已开启新会话');
+    expect(await runNew(manager)).toBe('✅ 已开启新会话');
     expect(manager.remove).toHaveBeenCalledWith();
+    expect(channel.offer).not.toHaveBeenCalled();
   });
 
-  it('/new 没有当前会话时不做确认', async () => {
+  it('/new <路径> 直接换工作区，不发卡片', async () => {
     const channel = makeChannel();
-    const manager = { ...makeManager(), sessionConfirmChannel: channel };
+    const manager = { ...makeManager(), currentSessionId: vi.fn(() => 'sess-1'), sessionConfirmChannel: channel };
 
-    expect(await runNew(manager)).toBe('✅ 已开启新会话');
-    expect(channel.offer).not.toHaveBeenCalled();
+    expect(await runNew(manager, 'D:\\repo')).toBe('✅ 已开启新会话\n工作区: repo · D:\\repo');
     expect(manager.remove).toHaveBeenCalledWith();
+    expect(manager.changeChatWorkspace).toHaveBeenCalledWith('c2c', 'user1', 'D:\\repo');
+    expect(channel.offer).not.toHaveBeenCalled();
   });
 
   it('/clear 有当前会话时先发卡片，不直接停会话', async () => {
@@ -322,13 +314,13 @@ describe('有会话时的二次确认', () => {
 
   it('卡片发不出去时放弃动作，不退回直接执行', async () => {
     const channel = makeChannel(false);
-    const manager = { ...makeManager(), currentSessionId: vi.fn(() => 'sess-1'), sessionConfirmChannel: channel };
+    const manager = { ...makeResetManager(true), currentSessionId: vi.fn(() => 'sess-1'), sessionConfirmChannel: channel };
 
-    expect(await runNew(manager)).toBe('⚠️ 确认卡片没能发出，稍后再试一次');
-    expect(manager.remove).not.toHaveBeenCalled();
+    expect(await runResetCmd(manager)).toBe('⚠️ 确认卡片没能发出，稍后再试一次');
+    expect(manager.resetCurrentSession).not.toHaveBeenCalled();
   });
 
-  it('/new <路径> 解析失败时不发卡片', async () => {
+  it('/new <路径> 解析失败时不动会话', async () => {
     const channel = makeChannel();
     const manager = {
       ...makeManager(),
