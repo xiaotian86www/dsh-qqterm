@@ -2074,23 +2074,45 @@ export class SessionManager {
   }
 
   /**
-   * 这个聊天当前所在的工作区（标题 / 路径 / 目录是否还在）。
+   * 这个聊天当前的工作目录（`/get`、`/ls` 的相对路径基准）。
    *
-   * @param scope 当前 chat 作用域
-   * @param peerId 当前 chat 的 peer id
+   * 取会话的 live 目录：工作树里的会话就是树路径，运行期 cd 也跟着变。
+   * `/status` 要的是工作区，见 {@link chatWorkspaceInfo}。
    */
   async currentWorkspaceInfo(
     _scope: ChatScope,
     _peerId: string,
   ): Promise<{ title: string; path: string; missing: boolean } | undefined> {
-    const workspace = this.chatDirectory();
-    const info = this.host.workspaceList().find((item) => samePath(item.path, workspace));
-    if (info) {
-      return { title: info.title, path: info.path, missing: !isDirectory(info.path) };
-    }
-    // 没有 registry 时只有目录，不拿末段目录名冒充工作区名
-    const title = this.host.supportsWorkspaceRegistry() ? basename(workspace) : '';
-    return { title, path: workspace, missing: !isDirectory(workspace) };
+    return this.workspaceInfoOf(this.chatDirectory());
+  }
+
+  /**
+   * 这个聊天当前的工作区（`/status` 的工作区行）。
+   *
+   * 工作区是会话创建时的目录（header.cwd）：工作树里的会话活在树里，工作区仍是
+   * 主仓库，与 `/sessions` 的分组同一来源。没有会话时就是聊天工作目录，也就是
+   * 下一条消息建会话的地方。
+   */
+  async chatWorkspaceInfo(
+    _scope: ChatScope,
+    _peerId: string,
+  ): Promise<{ title: string; path: string; missing: boolean } | undefined> {
+    const record = this.currentRecord();
+    const directory =
+      record === undefined
+        ? this.chatDirectory()
+        : this.headerCwd(record.agent) ??
+          this.host.sessionDirectory(record.agent.session) ??
+          this.chatDirectory();
+    return this.workspaceInfoOf(directory);
+  }
+
+  /** 目录对应的工作区：有 registry 用它的标题，没有就只给路径（不拿末段目录名冒充） */
+  private workspaceInfoOf(directory: string): { title: string; path: string; missing: boolean } {
+    const info = this.host.workspaceList().find((item) => samePath(item.path, directory));
+    if (info) return { title: info.title, path: info.path, missing: !isDirectory(info.path) };
+    const title = this.host.supportsWorkspaceRegistry() ? basename(directory) : '';
+    return { title, path: directory, missing: !isDirectory(directory) };
   }
 
   /**
@@ -2455,7 +2477,9 @@ export class SessionManager {
     this.records.set(sessionId, record);
     this.setCurrent(key, sessionId);
     if (directory) this.setChatDir(directory);
-    if (directory) void this.host.attachSessionToWorkspace(sessionId, directory);
+    // 与 getOrCreate 同一条规则：挂载点用 header.cwd，别把工作树路径当成工作区
+    const attachCwd = this.headerCwd(agent) ?? directory;
+    if (attachCwd) void this.host.attachSessionToWorkspace(sessionId, attachCwd);
 
     this.logger.info(`session switched: key=${key} sessionId=${sessionId} acquired=${handle ? 'owned' : 'borrowed'}`);
     return wasCurrent
