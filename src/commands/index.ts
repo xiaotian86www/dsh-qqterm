@@ -17,6 +17,7 @@ import { costCommand } from './cost.ts';
 import { sessionStatusCommand } from './session-status.ts';
 import { presetCommand } from './preset.ts';
 import { permissionCommand } from './permission.ts';
+import { worktreeCommand } from './worktree.ts';
 import { retryCommand } from './retry.ts';
 import { helpCommand } from './help.ts';
 import { pluginsCommand } from './plugins.ts';
@@ -44,6 +45,9 @@ export function buildCommandList(deps: CommandDeps): SlashCommand[] {
     // 不再额外解释「当前部署没有该能力」。
     ...(deps.manager.presetsAvailable() ? [presetCommand(deps)] : []),
     permissionCommand(deps),
+    // 部署里没有 worktrees 服务（base / headless）时整条命令不注册：
+    // 用户输入 /worktree 按未知指令处理，不解释「当前部署没有该能力」。
+    ...(deps.manager.worktreesAvailable() ? [worktreeCommand(deps)] : []),
     stopCommand(deps),
     retryCommand(deps),
     pluginsCommand(deps),

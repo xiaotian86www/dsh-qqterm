@@ -32,6 +32,8 @@ interface StubOptions {
   title?: string;
   context?: { used?: number; window?: number };
   workspace?: { title: string; path: string; missing: boolean } | undefined;
+  /** 会话所在工作树（默认没有） */
+  worktree?: { branch: string; baseCommit: string; path: string } | undefined;
   /** 思考强度视图：默认支持 high、未显式设置 */
   effort?: { options?: Array<{ id: string; name: string }>; current?: { id: string; name: string }; defaulted: boolean };
   /** 生效 preset（没有会话时是部署默认值） */
@@ -79,6 +81,7 @@ function makeManager(options: StubOptions = {}) {
     currentWorkspaceInfo: vi.fn(async () => ('workspace' in options
       ? options.workspace
       : { title: 'repo', path: 'D:\\repo', missing: false })),
+    worktreeOf: vi.fn(() => options.worktree),
   } as unknown as SessionManager;
 }
 
@@ -124,6 +127,22 @@ describe('/status（有会话）', () => {
     expect(text).toContain('**思考强度**: 高');
     expect(text).toContain('**Preset**: default');
     expect(text).toContain('**权限**: 工作区内修改 (workspace-write)');
+  });
+
+  it('会话在工作树里时多给一行分支与基点', async () => {
+    const text = await run(makeManager({
+      worktree: {
+        branch: 'dsh-1a2b3c4d-9f0e',
+        baseCommit: '6b1f02c0ffee',
+        path: 'D:\\repo\\.agents\\worktrees\\dsh-1a2b3c4d-9f0e',
+      },
+    }));
+    expect(text).toContain('**工作树**: `dsh-1a2b3c4d-9f0e` · 基点 `6b1f02c`');
+  });
+
+  it('没有工作树的会话不出现这一行', async () => {
+    const text = await run(makeManager());
+    expect(text).not.toContain('**工作树**');
   });
 
   it('模型不支持思考时不显示思考强度行', async () => {

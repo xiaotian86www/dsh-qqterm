@@ -77,6 +77,8 @@ function makeManager(over: ManagerStub = {}) {
     directoryForAgent: vi.fn(() => undefined),
     // 默认有 workspaceRegistry；没有的部署由用例显式传 false
     workspaceRegistryAvailable: vi.fn(() => true),
+    // 默认没有工作树；归档回执据此决定要不要交代清理策略
+    hasWorktree: vi.fn(() => false),
     ...over,
   } as unknown as SessionManager;
 }
@@ -825,6 +827,19 @@ describe('/sessions archive', () => {
 
     expect(manager.archiveSession).toHaveBeenCalledWith(heldId);
     expect(text).toContain('持有里的');
+    // 没有工作树就不提清理
+    expect(text).not.toContain('工作树随归档清理');
+  });
+
+  it('归档带工作树的会话：附一行清理策略', async () => {
+    const manager = makeManager({
+      listHeldSessions: vi.fn(async () => [entry({ id: 'session-held01', held: true })]),
+      hasWorktree: vi.fn(() => true),
+    });
+
+    const text = await run(manager, 'archive #held01');
+
+    expect(text).toContain('> 💡 工作树随归档清理：干净则删目录，分支保留。');
   });
 
   it('持有会话不在全量清单里也能按 id 归档', async () => {

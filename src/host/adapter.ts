@@ -104,6 +104,19 @@ export interface HostAdapter {
    * header 的 `cwd`；都拿不到返回 undefined。
    */
   sessionDirectory(session: unknown): string | undefined;
+  /**
+   * 工作树服务（只有 web / Desktop 的 forge 组合包提供）。
+   *
+   * 每次现读、不缓存：组合包的服务注册顺序不保证在插件 apply 之前。
+   */
+  worktrees(): WorktreeServiceLike | undefined;
+  /**
+   * 部署默认的沙箱模式。
+   *
+   * 新会话还没有 `sandbox/mode` 事件，不带 session 解析得到的就是它的初始策略；
+   * 服务缺失或解析失败返回 undefined。
+   */
+  sandboxMode(): string | undefined;
   /** 探测结果摘要（启动契约检查用） */
   readonly capabilities: string[];
 }
@@ -197,6 +210,39 @@ export interface WorkspaceRegistryLike {
   archiveSession(sessionId: string, options?: { stopActivity?: boolean }): Promise<void>;
   /** 取消归档（幂等） */
   unarchiveSession(sessionId: string): Promise<void>;
+}
+
+/** 宿主建出来的检出（对齐 dsh-experimental-worktree 的 CreatedWorktree） */
+export interface CreatedWorktreeLike {
+  readonly path: string;
+  readonly branch: string;
+  readonly baseCommit: string;
+  readonly repositoryRoot: string;
+}
+
+/**
+ * worktrees 服务最小契约（对齐 dsh-experimental-worktree WorktreeService）。
+ *
+ * 只有 web / Desktop 的 forge 组合包提供；插件只用 create 与 restore，删除归
+ * 宿主的归档清理（服务没有公共 remove）。
+ */
+export interface WorktreeServiceLike {
+  create(
+    agent: unknown,
+    request?: { name?: string; from?: string },
+    signal?: AbortSignal,
+    onPhase?: (phase: 'prepare' | 'checkout') => void,
+  ): Promise<CreatedWorktreeLike>;
+  restore(
+    agent: unknown,
+    request: CreatedWorktreeLike,
+    signal?: AbortSignal,
+  ): Promise<{ path: string; branchRecreated: boolean }>;
+}
+
+/** sandboxPolicy 服务最小契约：只读部署默认模式 */
+export interface SandboxPolicyLike {
+  resolve(request?: { session?: unknown; mode?: string }): { mode?: string } | undefined;
 }
 
 /**
@@ -354,10 +400,12 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
   const titleService = host.sessionTitle;
   const registry = optionalWorkspaceRegistry(ctx);
 
-  const capabilities: string[] = [
+  // 现读而不是建表时定死：forge 组合包可能在插件 apply 之后才注册 worktrees
+  const capabilities = (): string[] => [
     'sessionEvents(snapshotEvents)',
     'sessionPersistence.stat',
     ...(registry === undefined ? [] : ['workspaceRegistry']),
+    ...(optionalService<WorktreeServiceLike>(ctx, 'worktrees') === undefined ? [] : ['worktrees']),
     'sessionQuery',
     'sessionTitle.rename',
   ];
@@ -381,7 +429,9 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
   };
 
   return {
-    capabilities,
+    get capabilities() {
+      return capabilities();
+    },
 
     sessionEvents(session) {
       return session.snapshotEvents();
@@ -441,6 +491,21 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
       }
       const header = (session as { header?: { cwd?: unknown } } | null | undefined)?.header;
       return typeof header?.cwd === 'string' && header.cwd !== '' ? header.cwd : undefined;
+    },
+
+    worktrees() {
+      return optionalService<WorktreeServiceLike>(ctx, 'worktrees');
+    },
+
+    sandboxMode() {
+      const policy = optionalService<SandboxPolicyLike>(ctx, 'sandboxPolicy');
+      if (policy === undefined) return undefined;
+      try {
+        return policy.resolve()?.mode;
+      } catch (err) {
+        logger?.debug?.(`host adapter: sandboxPolicy.resolve 失败: ${err instanceof Error ? err.message : String(err)}`);
+        return undefined;
+      }
     },
 
     async listSessions() {

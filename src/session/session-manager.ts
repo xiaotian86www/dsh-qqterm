@@ -21,10 +21,16 @@
  */
 import { mintSessionId } from './session-id.ts';
 import { createQQUserMessage } from './user-message.ts';
+import { mainRepositoryRoot, WORKTREE_TIMEOUT_MS, WorktreeError, worktreeFailureText, worktreeNotice } from './worktree.ts';
 import { SessionId } from '@deepseek-ai/dsh-session';
 import type { Context } from '@deepseek-ai/cordis';
-import { createHostAdapter, type HostAdapter, type HostSessionInfo } from '../host/adapter.ts';
-import { mkdirSync, statSync } from 'node:fs';
+import {
+  createHostAdapter,
+  type CreatedWorktreeLike,
+  type HostAdapter,
+  type HostSessionInfo,
+} from '../host/adapter.ts';
+import { existsSync, mkdirSync, statSync } from 'node:fs';
 import { basename, isAbsolute, resolve } from 'node:path';
 import { resolveAgentCwd } from '../shared/dirs.ts';
 import { optionalService } from '../shared/index.ts';
@@ -71,6 +77,7 @@ import type {
   ArchiveSessionOutcome,
   SendToOutcome,
   RetryPromptOutcome,
+  WorktreeInfo,
 } from './types.ts';
 
 /** 没有活跃会话时，部署默认选择用的串行化键 */
@@ -120,9 +127,20 @@ interface SelectionState {
   pending?: HostSelection | null;
 }
 
-/** 宿主 modelSelection 服务（sessionProjections）最小接口 */
+/** 会话创建过的一棵检出（宿主 worktree 投影的一项） */
+interface WorktreeCreationLike {
+  worktree: CreatedWorktreeLike;
+  owned: boolean;
+}
+
+/** 宿主 worktree projection 的状态（键 'worktree'） */
+interface WorktreeProjectionLike {
+  created?: readonly WorktreeCreationLike[];
+}
+
+/** 宿主 sessionProjections 最小接口（按 key 读任一投影的状态） */
 interface SessionProjectionsLike {
-  stateOf(session: unknown, key: string): SelectionState | undefined;
+  stateOf(session: unknown, key: string): unknown;
 }
 
 /** 宿主命令登记簿最小接口（/compact 的判定与执行都走它） */
@@ -334,6 +352,23 @@ export class SessionManager {
    */
   presetsAvailable(): boolean {
     return this.getPresetsService() !== undefined;
+  }
+
+  /**
+   * 部署里有没有 worktrees 服务（决定 /worktree 是否注册：没有就整条命令不出现）
+   */
+  worktreesAvailable(): boolean {
+    return this.host.worktrees() !== undefined;
+  }
+
+  /** 之后新建的会话是否开工作树（默认开） */
+  worktreeEnabled(): boolean {
+    return this.modelResolver.getWorktreeDefault() ?? true;
+  }
+
+  /** 设置之后新建的会话是否开工作树；已有会话与其树不受影响 */
+  setWorktreeEnabled(enabled: boolean): void {
+    this.modelResolver.setWorktreeDefault(enabled);
   }
 
   /**
@@ -593,7 +628,7 @@ export class SessionManager {
   /** 宿主的 modelSelection projection（未注册时返回 undefined） */
   private selectionState(agent: DshAgent): SelectionState | undefined {
     try {
-      const state = this.sessionProjections.stateOf(agent.session, 'modelSelection');
+      const state = this.sessionProjections.stateOf(agent.session, 'modelSelection') as SelectionState | undefined;
       return state ?? undefined;
     } catch (err) {
       this.logger.debug(
@@ -1380,6 +1415,7 @@ export class SessionManager {
     let agent: DshAgent;
     let handle: DshAgentHandle | undefined;
     let agentPreset: string | undefined;
+    let worktree: CreatedWorktreeLike | undefined;
 
     const live = this.agents.get(sessionId);
     if (live) {
@@ -1404,23 +1440,25 @@ export class SessionManager {
         agent = resumed.agent;
         handle = resumed;
         directory = this.host.sessionDirectory(agent.session) ?? directory;
+        try {
+          directory = await this.restoreWorktree(agent, directory);
+        } catch (err) {
+          // 目录回不来就别把这个 agent 留在宿主里跑：先还句柄再上抛
+          await handle.dispose().catch(() => {});
+          throw err;
+        }
         const resumedRoute = this.hostSelection(agent) ?? this.modelResolver.resolveDefault();
         this.logger.info(`resumed session: key=${key} preset=${agentPreset ?? 'none'} route=${resumedRoute.provider}/${resumedRoute.model}`);
       } catch (err) {
+        // 目录重建失败不是「会话不存在」：换个会话也不能把树找回来，直接上抛
+        if (err instanceof WorktreeError) throw err;
         if (!(await this.mayCreateAfterResumeFailure(key, sessionId, err))) throw err;
         mkdirSync(directory, { recursive: true });
-        const createOptions = this.agentOptionsFor();
-        const created = await this.agents.create({
-          sessionId,
-          meta: {
-            cwd: directory,
-            ...(agentPreset ? { agentPreset } : {}),
-          },
-          agentOptions: createOptions,
-          ...(composed.setup ? { setup: composed.setup } : {}),
-        });
+        const created = await this.spawnSession(key, sessionId, directory, agentPreset, composed.setup);
         agent = created.agent;
-        handle = created;
+        handle = created.handle;
+        directory = created.directory;
+        worktree = created.worktree;
         this.logger.info(`created new session: key=${key} sessionId=${sessionId} preset=${agentPreset ?? 'none'} cwd=${directory}`);
       }
     }
@@ -1438,6 +1476,8 @@ export class SessionManager {
       acquiredAt: Date.now(),
     };
 
+    if (worktree !== undefined) record.worktreeNotice = worktreeNotice(worktree);
+
     this.records.set(sessionId, record);
     this.setCurrent(key, sessionId);
 
@@ -1447,10 +1487,143 @@ export class SessionManager {
     // 挂载到对应工作区（侧边栏可见性）；fail-soft、异步执行，不阻塞消息处理。
     // 宿主只在客户端 session.create RPC 时挂载会话，插件会话不走那条路径，
     // 所以这里补挂一次（幂等，升级后老会话也会补上）。
-    // cwd 必须与 meta.cwd 同源，否则 attachSession 的 header.cwd 校验会失败。
-    if (directory) void this.host.attachSessionToWorkspace(sessionId, directory);
+    // 必须传 header.cwd（建会话时的目录）：attachSession 校验它等于工作区路径，
+    // 传工作树路径会凭空长出一个以树名命名的工作区。
+    const attachCwd = this.headerCwd(agent) ?? directory;
+    if (attachCwd) void this.host.attachSessionToWorkspace(sessionId, attachCwd);
 
     return record;
+  }
+
+
+  /**
+   * 新会话要不要开在工作树里：要就返回建树的基点（主仓库根）。
+   *
+   * 四处不建：部署没有 worktrees 服务、用户用 /worktree off 关掉了、当前目录不是
+   * 主仓库、默认策略只读——宿主每条 git 命令都按会话策略包，只读下建目录、写
+   * .git/worktrees 必然被拒。
+   */
+  private worktreeBase(directory: string): string | undefined {
+    if (this.host.worktrees() === undefined) return undefined;
+    if (!this.worktreeEnabled()) return undefined;
+    if (this.host.sandboxMode() === 'read-only') return undefined;
+    return mainRepositoryRoot(directory);
+  }
+
+  /**
+   * 新建会话：能开工作树就开在树里，否则就地。
+   *
+   * 宿主不回滚建树的半成品（分支与检出可能留下），这里只关掉刚创建的 agent：
+   * 指针与已获取集都不动，用户重发一次就会重新尝试。
+   */
+  private async spawnSession(
+    key: string,
+    sessionId: SessionId,
+    directory: string,
+    agentPreset: string | undefined,
+    setup: PresetComposition['setup'],
+  ): Promise<{
+    agent: DshAgent;
+    handle: DshAgentHandle;
+    directory: string;
+    worktree?: CreatedWorktreeLike;
+  }> {
+    const base = this.worktreeBase(directory);
+    const created = await this.agents.create({
+      sessionId,
+      // 树的池与 .git/worktrees 登记都落在基点下，所以 header.cwd 必须是基点
+      meta: {
+        cwd: base ?? directory,
+        ...(agentPreset ? { agentPreset } : {}),
+      },
+      agentOptions: this.agentOptionsFor(),
+      ...(setup ? { setup } : {}),
+    });
+
+    const worktrees = this.host.worktrees();
+    if (base === undefined || worktrees === undefined) {
+      return { agent: created.agent, handle: created, directory };
+    }
+
+    try {
+      const tree = await worktrees.create(created.agent, {}, AbortSignal.timeout(WORKTREE_TIMEOUT_MS));
+      this.logger.info(`created worktree: key=${key} branch=${tree.branch} path=${tree.path}`);
+      return { agent: created.agent, handle: created, directory: tree.path, worktree: tree };
+    } catch (err) {
+      this.logger.warn(`worktree creation failed: key=${key} ${err instanceof Error ? err.message : String(err)}`);
+      created.agent.cancel({ kind: 'user' });
+      await created.dispose().catch(() => {});
+      throw new WorktreeError('create', worktreeFailureText(err), err);
+    }
+  }
+
+  /**
+   * 恢复会话的工作目录：树被归档清理删掉时就地重建。
+   *
+   * 宿主 restore 只重建检出、不切调用方目录，所以成功后才轮到插件把目录改回树
+   * 路径。目录还在、会话不在树里（非仓库 / headless）时原样返回。
+   */
+  private async restoreWorktree(agent: DshAgent, directory: string): Promise<string> {
+    const worktrees = this.host.worktrees();
+    if (worktrees === undefined) return directory;
+    const creation = this.worktreeCreations(agent).find((entry) => entry.owned)?.worktree;
+    if (creation === undefined || existsSync(creation.path)) return directory;
+    if (!samePath(directory, creation.path)) return directory;
+    try {
+      const restored = await worktrees.restore(agent, creation, AbortSignal.timeout(WORKTREE_TIMEOUT_MS));
+      this.logger.info(`restored worktree: path=${restored.path} branchRecreated=${restored.branchRecreated}`);
+      return restored.path;
+    } catch (err) {
+      this.logger.warn(`worktree restore failed: ${err instanceof Error ? err.message : String(err)}`);
+      throw new WorktreeError('restore', worktreeFailureText(err), err);
+    }
+  }
+
+  /**
+   * 会话创建时的目录（= header.cwd），工作区挂载与建树都按它算。
+   *
+   * 运行期 cd 只改 workingDirectory，不该把工作区挂载点或建树基点带走。
+   */
+  private headerCwd(agent: DshAgent): string | undefined {
+    const header = (agent.session as { header?: { cwd?: unknown } } | undefined)?.header;
+    return typeof header?.cwd === 'string' && header.cwd !== '' ? header.cwd : undefined;
+  }
+
+  /**
+   * 会话日志里的工作树投影（创建顺序）；没有该投影返回空数组。
+   *
+   * 模型自己调 `create_worktree` 建的树也写同一条记录，所以这里不等于「插件建的」。
+   */
+  private worktreeCreations(agent: DshAgent): readonly WorktreeCreationLike[] {
+    try {
+      const state = this.sessionProjections.stateOf(agent.session, 'worktree') as WorktreeProjectionLike | undefined;
+      return Array.isArray(state?.created) ? state.created : [];
+    } catch (err) {
+      this.logger.debug(`worktree projection unavailable: ${err instanceof Error ? err.message : String(err)}`);
+      return [];
+    }
+  }
+
+  /** 当前会话所在的工作树（/status 用）；没有投影返回 undefined */
+  worktreeOf(scope: ChatScope, peerId: string): WorktreeInfo | undefined {
+    const record = this.getSessionRecord(scope, peerId);
+    if (record === undefined) return undefined;
+    const creations = this.worktreeCreations(record.agent);
+    if (creations.length === 0) return undefined;
+    const current = this.host.sessionDirectory(record.agent.session);
+    const match = current === undefined
+      ? undefined
+      : creations.find((entry) => samePath(entry.worktree.path, current));
+    const picked = (match ?? creations[creations.length - 1])?.worktree;
+    return picked === undefined
+      ? undefined
+      : { branch: picked.branch, baseCommit: picked.baseCommit, path: picked.path };
+  }
+
+  /** 已获取会话有没有工作树（归档回执用）；冷会话查不到，按没有处理 */
+  hasWorktree(sessionId: string): boolean {
+    const record = this.records.get(sessionId);
+    return record !== undefined && this.worktreeCreations(record.agent).length > 0;
   }
 
   /**
@@ -2248,6 +2421,13 @@ export class SessionManager {
         });
         agent = resumed.agent;
         handle = resumed;
+        try {
+          // 树被归档清理删掉时在切换阶段就重建，别把会话接回一个不存在的目录
+          await this.restoreWorktree(agent, this.host.sessionDirectory(agent.session) ?? this.chatDirectory());
+        } catch (err) {
+          await handle.dispose().catch(() => {});
+          return { ok: false, reason: 'failed', message: errorText(err) };
+        }
       } catch (err) {
         const raw = errorText(err);
         const locked = (err as { name?: string } | null)?.name === 'SessionAlreadyOwnedError'

@@ -1,5 +1,5 @@
 /**
- * PrefsStore — per-peer 会话偏好持久化（会话映射 + 工作目录 + 回复目标）
+ * PrefsStore — 会话偏好持久化（会话映射 + 工作目录 + 回复目标 + 工作树默认值）
  *
  * 隔离文件 I/O 操作，便于单元测试时 mock。
  * 存储路径：~/.dsh-qqterm/model-prefs.json（全局共享，多实例/多进程共存）。
@@ -27,6 +27,8 @@ interface PrefsFile {
   dirs: Record<string, string>;
   /** sessionKey → 上次和这个聊天交互的 QQ 用户 openid（重启后主动推送用） */
   targets: Record<string, string>;
+  /** 新会话是否开在 Git 工作树里（缺省 = 开） */
+  worktree?: boolean;
 }
 
 /** 各段的删除墓碑（key 集合），合并时用于压住磁盘上的旧值 */
@@ -42,6 +44,8 @@ export class PrefsStore {
   private dirs = new Map<string, string>();
   /** per-peer 上次交互的用户 openid（内存态） */
   private targets = new Map<string, string>();
+  /** 新会话是否开工作树（内存态；undefined = 从未设置） */
+  private worktree?: boolean;
   /** 本进程显式删除的 key（防止并发合并把删除复活） */
   private deleted: Tombstones = {
     sessionIds: new Set(),
@@ -118,6 +122,20 @@ export class PrefsStore {
     this.write();
   }
 
+  // ── 工作树默认值 ──
+
+  /** 新会话是否开工作树；从未设置过返回 undefined（调用方按开处理） */
+  getWorktree(): boolean | undefined {
+    return this.worktree;
+  }
+
+  /** 记下新会话是否开工作树（值不变不写盘） */
+  setWorktree(enabled: boolean): void {
+    if (this.worktree === enabled) return;
+    this.worktree = enabled;
+    this.write();
+  }
+
   // ── 私有方法 ──
 
   private load(): void {
@@ -145,6 +163,9 @@ export class PrefsStore {
             this.targets.set(key, targetId);
           }
         }
+      }
+      if (typeof data.worktree === 'boolean') {
+        this.worktree = data.worktree;
       }
     } catch (err) {
       const msg = `loadPrefs failed: ${err instanceof Error ? err.message : String(err)}`;
@@ -206,11 +227,14 @@ export class PrefsStore {
       }
       return out;
     };
+    // worktree 是标量：本进程没设过就保留磁盘值（另一写者可能设过）
+    const worktree = this.worktree ?? (typeof disk?.worktree === 'boolean' ? disk.worktree : undefined);
     return {
       sessionIds: pick(this.sessionIds, disk?.sessionIds, this.deleted.sessionIds),
       // dirs 只增不删，没有墓碑
       dirs: pick(this.dirs, disk?.dirs),
       targets: pick(this.targets, disk?.targets, this.deleted.targets),
+      ...(worktree === undefined ? {} : { worktree }),
     };
   }
 

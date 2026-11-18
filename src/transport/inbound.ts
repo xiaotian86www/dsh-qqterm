@@ -10,7 +10,7 @@
  * 消息始终落到「当前会话」；其它已获取会话由 `/sessions resume`、`/to` 与
  * 问答通道驱动，不从这条普通消息路径直接写。
  */
-import type { SessionManager } from '../session/index.ts';
+import { WorktreeError, type SessionManager } from '../session/index.ts';
 import { createQQUserMessage } from '../session/user-message.ts';
 import type { ChatScope, Logger, QuotedAttachment, RawAttachment, ReplyTarget } from '../types.ts';
 import {
@@ -99,11 +99,28 @@ export async function handleInbound(
     console.error('[qqterm] getOrCreate failed:', err);
     // 兜底回复：会话创建失败时告知用户，避免静默无响应
     try {
-      await bot.sendMarkdown(replyTarget, '⚠️ 处理消息时出现异常，请稍后重试。');
+      // 工作树失败是最常见的一种：说清「会话没建」或「目录回不来」，别混进通用兜底
+      const text = err instanceof WorktreeError
+        ? (err.kind === 'create'
+          ? `❌ 工作树没建成: ${err.message}\n本次会话没有创建，重发一次会重新尝试。`
+          : `❌ 工作树重建失败: ${err.message} · 用 /new 重新开会话`)
+        : '⚠️ 处理消息时出现异常，请稍后重试。';
+      await bot.sendMarkdown(replyTarget, text);
     } catch (sendErr) {
       logger.error(`fallback reply failed: ${sendErr instanceof Error ? sendErr.message : String(sendErr)}`);
     }
     return;
+  }
+
+  // 新会话开在工作树里是隐式行为：回执只发一次，先把分支与路径交代清楚
+  if (record.worktreeNotice !== undefined) {
+    const notice = record.worktreeNotice;
+    delete record.worktreeNotice;
+    try {
+      await bot.sendMarkdown(replyTarget, notice);
+    } catch (sendErr) {
+      logger.warn(`worktree notice failed: ${sendErr instanceof Error ? sendErr.message : String(sendErr)}`);
+    }
   }
 
   // ── 构建 UserMessage → followup ──

@@ -13,6 +13,7 @@ import type { SessionContextUsage, SessionManager, SessionTurnProgress } from '.
 import type { ChatScope } from '../types.ts';
 import { getScopePeer, sendMarkdownChunked } from '../shared/index.ts';
 import { sessionTargetLabel, sessionTitleOf } from '../transport/session-source.ts';
+import { shortCommit } from '../session/worktree.ts';
 import { effortLabel } from '../model/effort-label.ts';
 import { presetLabel } from './permission.ts';
 
@@ -105,6 +106,12 @@ async function renderStatus(
     // 没有工作区名（没有 registry）时只给路径，不拿末段目录名冒充
     const prefix = workspace.title === '' ? '' : `${workspace.title} · `;
     lines.push(`**工作区**: ${prefix}\`${workspace.path}\`${missing}`);
+  }
+
+  // 工作树：只有会话日志里有建树记录时才出现（路径已在工作区行给出）
+  const worktree = manager.worktreeOf(scope, peerId);
+  if (worktree) {
+    lines.push(`**工作树**: \`${worktree.branch}\` · 基点 \`${shortCommit(worktree.baseCommit)}\``);
   }
 
   // 模型 / 思考强度 / preset / 权限：没有会话时展示部署默认值（新建会话会用它），

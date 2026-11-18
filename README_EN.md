@@ -175,7 +175,7 @@ The menu is bot-wide configuration that every user sees, and changes only show a
 
 | Command | Description |
 |------|------|
-| `/new` | Start a new session (clear context); may take a workspace: `/new <workspace\|path>` |
+| `/new` | Start a new session (clear context); may take a workspace: `/new <workspace\|path>`; inside a Git repository the session first moves into a new worktree |
 | `/clear` (alias `/reset`) | Stop the current session and start a new one in the same workspace; `/clear all` stops every acquired session |
 | `/compact` | Compact session history (replace old records with a summary); success follows the host command and the reply carries the host text |
 | `/goal` | Set or view the long-running goal of the current session; `/goal <objective>` sets it, `edit` / `pause` / `resume` / `clear` manage it; the reply carries the host text |
@@ -188,6 +188,7 @@ The menu is bot-wide configuration that every user sees, and changes only show a
 | `/reasoning` (alias `/think`) | View or switch the current session's reasoning effort (levels depend on the model) |
 | `/preset` | View or switch the current agent preset |
 | `/permission` | View or switch the permission preset (sandbox mode + approval policy, effective immediately; bound user only) |
+| `/worktree` | View or switch whether new sessions start in a worktree (on by default, existing sessions unaffected; bound user only) |
 | `/cost` | View token usage of the current session |
 | `/status` | View session status: session name and short id / workspace / model / reasoning effort / context / tokens |
 | `/stop` | Abort the current generation; `/stop all` aborts every acquired session that is generating |
@@ -215,6 +216,7 @@ A workspace is the host's durable grouping record for "one directory + the sessi
 - **No `cwd` config**: the session's working directory comes from the host.
 - **New sessions land in the host's default workspace** (`Documents/deepseek-harness/default-workspace` on first use); when there is no default workspace it falls back to the dsh launch directory.
 - **The workspace follows the session**: `/sessions resume` moves this chat into that session's directory; a later `/new` stays in the same workspace, and it survives a restart (persisted in the `dirs` section of `~/.dsh-qqterm/model-prefs.json`).
+- **New sessions start in a Git worktree**: inside a Git repository the first message after `/new` first creates a worktree on a `dsh-<short session id>` branch at the current HEAD and the session runs there, matching the web app; `/new <workspace|path>` behaves the same, the directory only decides where the worktree is created. A failed creation means no session that round, with a two-line reason. Deployments without the worktree service, non-Git directories, and a read-only default sandbox create the session in place and never mention worktrees; after `/worktree 关` new sessions run in the main checkout. `/status` gains a worktree line with its base commit; archiving removes a clean worktree and keeps its branch, while a dirty one is retained.
 - **Titles come from directory names**: the host derives the workspace title from the last path segment, and titles you renamed yourself are never overwritten.
 
 ### Switching workspace (`/new <workspace>`)
@@ -256,7 +258,7 @@ Notes:
 - Status words appear only in the working-session list: `生成中` (agent running), `空闲` (held but idle); a current pointer that has not been acquired yet shows `待恢复`. After `/new` there is no current pointer, so no such line is added. Other views only mark acquired sessions with `📌` (QQ holds it), with no current marker and no status.
 - Private chat only, and the operator must be the single bound user (`access.owner`) — titles and archive state touch other chats' data; with no owner configured the command is disabled.
 - Archiving goes through the host `workspaceRegistry.archiveSession` and only writes the registry-global archive set — **no file is deleted**. This plugin offers no hard delete; clean up on disk from the Web side or by hand.
-- `workspaceRegistry` is part of the plugin's `inject`, so a profile missing it keeps the plugin inactive rather than exposing a half-working command.
+- `workspaceRegistry` is optional: a profile without it still groups sessions by directory (path-only headers, no pin / archive), and the archive subcommands are treated as unknown, like any other misspelling.
 - Archiving disposes the session's agent in this process; if it is the current session, the chat mapping is cleared and the next message lands in a brand-new session — an archived session is rejected by the host `agent/pre-step` gate, so a chat left bound to it would stop getting replies.
 - **Several sessions can stay live at once**: a session joins the acquired set when a normal message, `/sessions resume`, or `/to` actually gets its agent. Output, questions, and approvals from every acquired session go back to QQ; the current session is untagged, while messages from other sessions get a separate source line `#shortid · title` before the body and a reply / resume link row on their own line after a blank line. The acquired set is runtime-only — after a restart only the current session is restored from `model-prefs.json`.
 - **Switching does not release**: `/sessions resume` only moves the current pointer; the old session keeps running and its output keeps flowing to QQ. `/new` only clears the current pointer, and the old session keeps running too. On unload the plugin disposes only the agents it created; borrowed Web/TUI agents are just dereferenced.

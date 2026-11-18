@@ -30,6 +30,7 @@ function makeManager(overrides: Record<string, unknown> = {}) {
     sessionTitle: vi.fn(() => '修登录' as string | undefined),
     renameCurrentSession: vi.fn(() => ({ ok: true as const, title: '新名字' })),
     presetsAvailable: vi.fn(() => true),
+    worktreesAvailable: vi.fn(() => true),
     ...overrides,
   };
 }
