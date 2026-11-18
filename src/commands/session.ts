@@ -14,10 +14,10 @@ import { getScopePeer } from '../shared/index.ts';
 /**
  * 有会话时的二次确认。
  *
- * `/clear`、`/clear all`、`/new` 都会停掉或切走会话，先在 QQ 里发一张确认卡，
- * 点「确认」才执行 run。门禁只在真有可能误伤时打开：没有当前会话（且没有已获取
- * 会话）就没什么可停的，直接执行。卡片发不出去时放弃本次动作——退回直接执行
- * 等于没有二次确认。
+ * `/clear`、`/clear all` 会停掉会话，先在 QQ 里发一张确认卡，点「确认」才执行
+ * run。门禁只在真有可能误伤时打开：没有当前会话（且没有已获取会话）就没什么
+ * 可停的，直接执行。卡片发不出去时放弃本次动作——退回直接执行等于没有二次确认。
+ * `/new` 只清当前指针、不停旧会话，不在这里拦。
  */
 async function confirmOrRun(
   cmdCtx: SlashCommandHandlerContext,
@@ -48,6 +48,8 @@ async function confirmOrRun(
  *
  * 参数先解析再动会话：路径写错不该把当前会话弄丢。换工作区等于换 agent 能读写
  * 的目录，所以带参数时只允许唯一绑定用户；不带参数的 `/new` 不受限制。
+ *
+ * 两条路径都不做二次确认：旧会话继续跑，没有可误伤的东西。
  */
 export function newCommand({ manager, config }: CommandDeps): SlashCommand {
   return {
@@ -72,10 +74,8 @@ export function newCommand({ manager, config }: CommandDeps): SlashCommand {
 
       // 不带参数 = 留在当前工作区；异步释放 agent，不阻塞回复
       if (arg === '') {
-        return confirmOrRun(cmdCtx, manager, 'new', async () => {
-          void manager.remove();
-          return '✅ 已开启新会话';
-        });
+        void manager.remove();
+        return '✅ 已开启新会话';
       }
 
       // 带参数 = 换工作区（= 换 agent 能读写的目录）：只允许唯一绑定用户
@@ -92,16 +92,14 @@ export function newCommand({ manager, config }: CommandDeps): SlashCommand {
       const resolved = manager.resolveWorkspace(arg);
       if (!resolved.ok) return describeChangeFailure(resolved);
 
-      return confirmOrRun(cmdCtx, manager, 'new', async () => {
-        await manager.remove();
-        const changed = await manager.changeChatWorkspace(scope, peerId, arg);
-        if (!changed.ok) return describeChangeFailure(changed);
-        // 没有 registry 时 title 只是路径末段，贴出来就是重复；只显示路径
-        const label = manager.workspaceRegistryAvailable()
-          ? `工作区: ${changed.title} · ${changed.path}`
-          : `工作区: ${changed.path}`;
-        return `✅ 已开启新会话\n${label}`;
-      });
+      await manager.remove();
+      const changed = await manager.changeChatWorkspace(scope, peerId, arg);
+      if (!changed.ok) return describeChangeFailure(changed);
+      // 没有 registry 时 title 只是路径末段，贴出来就是重复；只显示路径
+      const label = manager.workspaceRegistryAvailable()
+        ? `工作区: ${changed.title} · ${changed.path}`
+        : `工作区: ${changed.path}`;
+      return `✅ 已开启新会话\n${label}`;
     },
   };
 }

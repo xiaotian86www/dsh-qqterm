@@ -143,8 +143,13 @@ function createRegistry(resumeImpl: ResumeImpl) {
   const registry = {
     get: vi.fn(() => undefined),
     resume: vi.fn(resumeImpl),
-    create: vi.fn(async (options: { sessionId: string }) => {
+    create: vi.fn(async (options: { sessionId: string; meta?: { cwd?: string } }) => {
       const handle = fakeHandle(options.sessionId);
+      const cwd = options.meta?.cwd;
+      if (cwd !== undefined) {
+        // 真实宿主把建会话目录写进 session.header.cwd：工作区挂载与 /status 都按它算
+        (handle.agent.session as { header?: { cwd?: string } }).header = { cwd };
+      }
       handles.push(handle);
       return handle;
     }),
@@ -1345,6 +1350,9 @@ describe('getOrCreate — 新会话开在工作树里', () => {
     const createdWith = registry.create.mock.calls[0]![0] as unknown as { meta?: { cwd?: string } };
     expect(createdWith.meta?.cwd).toBe(repo);
     expect(manager.chatDirectory()).toBe(tree.path);
+    // /status 的工作区仍是主仓库（与 /sessions 分组同源），live 目录只留给 /get、/ls
+    expect((await manager.chatWorkspaceInfo('c2c', PEER))?.path).toBe(repo);
+    expect((await manager.currentWorkspaceInfo('c2c', PEER))?.path).toBe(tree.path);
     expect(record.worktreeNotice).toContain('✅ 已在新工作树 `dsh-1a2b3c4d-9f0e` 里开启会话');
     expect(record.worktreeNotice).toContain('基点 `6b1f02c`');
     expect(manager.worktreeOf('c2c', PEER)).toEqual({
