@@ -10,6 +10,9 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Context } from '@deepseek-ai/cordis';
+import type { SlashCommandHandlerContext } from '@tencent-connect/qqbot-nodejs';
+import { compactCommand } from '../../src/commands/session.ts';
+import type { CommandDeps } from '../../src/commands/types.ts';
 import { ConfigSchema, type QQTermConfig } from '../../src/config.ts';
 import type { Logger, ReplyTarget } from '../../src/types.ts';
 import type { DshAgent, DshAgentHandle, DshAgentRegistry, SessionEventLike } from '../../src/session/types.ts';
@@ -332,65 +335,88 @@ describe('getOrCreate — E2 并发改写映射', () => {
     expect(persistedId()).toBe(candidate); // 只落真实存在的会话
   });
 
-  it('没有 compact 命令时返回 no-compaction', async () => {
-    const { registry } = createRegistry(async () => {
-      throw notFound('missing');
-    });
-    const manager = createManager(registry);
-
-    expect(
-      await manager.compact('c2c', PEER, { senderId: PEER, replyTarget: REPLY }),
-    ).toEqual({ ok: false, reason: 'no-compaction' });
-  });
-
-  it('compact 能力按命令登记簿本地判定：查不到就拒绝，不执行命令', async () => {
-    const { registry } = createRegistry(async () => fakeHandle('s1'));
+  it('登记簿查不到命令 → unsupported，不执行', async () => {
     const execute = vi.fn();
     const ctx = {
-      ...persistenceCtx(async () => undefined),
+      ...absentCtx(),
       commands: { find: () => undefined, execute },
     } as unknown as Context;
+    const { registry } = createRegistry(async () => fakeHandle('s1'));
     const manager = createManagerWithCtx(registry, ctx);
+    const agent = fakeAgent('s1');
 
-    expect(
-      await manager.compact('c2c', PEER, { senderId: PEER, replyTarget: REPLY }),
-    ).toEqual({ ok: false, reason: 'no-compaction' });
+    expect(await manager.runHostCommand(agent, 'compact')).toEqual({ kind: 'unsupported' });
     expect(execute).not.toHaveBeenCalled();
   });
 
-  it('登记簿查得到 compact → 交由宿主命令执行，按结果文案回条数', async () => {
-    const { registry } = createRegistry(async () => fakeHandle('s1'));
+  it('参数拼成一行交给宿主，kind 与文本原样带回', async () => {
     const execute = vi.fn(async () => ({
-      commandId: 'c1',
       result: { kind: 'success' as const, text: 'Compacted 2 history items (~300 tokens).' },
     }));
     const ctx = {
-      ...persistenceCtx(async () => undefined),
+      ...absentCtx(),
       commands: { find: () => ({ definitionId: '@deepseek-ai/dsh-command-compact' }), execute },
     } as unknown as Context;
+    const { registry } = createRegistry(async () => fakeHandle('s1'));
     const manager = createManagerWithCtx(registry, ctx);
+    const agent = fakeAgent('s1');
 
-    expect(
-      await manager.compact('c2c', PEER, { senderId: PEER, replyTarget: REPLY }),
-    ).toEqual({ ok: true, shadowed: 2, tokens: 300 });
-    expect(execute).toHaveBeenCalledWith(expect.anything(), '/compact', [], expect.anything());
+    expect(await manager.runHostCommand(agent, 'compact')).toEqual({
+      kind: 'success',
+      text: 'Compacted 2 history items (~300 tokens).',
+    });
+    expect(execute).toHaveBeenCalledWith(agent, '/compact', [], expect.anything());
+
+    await manager.runHostCommand(agent, 'goal', ['ship it', 'now']);
+    expect(execute).toHaveBeenLastCalledWith(agent, '/goal ship it now', [], expect.anything());
   });
 
-  it('宿主命令的失败文案映射成中文结果', async () => {
-    const { registry } = createRegistry(async () => fakeHandle('s1'));
+  it('error kind 原样带回，插件不翻成败', async () => {
     const execute = vi.fn(async () => ({
-      commandId: 'c2',
       result: { kind: 'error' as const, text: 'Compaction cancelled.' },
     }));
     const ctx = {
-      ...persistenceCtx(async () => undefined),
+      ...absentCtx(),
       commands: { find: () => ({ definitionId: 'x' }), execute },
     } as unknown as Context;
+    const { registry } = createRegistry(async () => fakeHandle('s1'));
     const manager = createManagerWithCtx(registry, ctx);
 
-    expect(
-      await manager.compact('c2c', PEER, { senderId: PEER, replyTarget: REPLY }),
-    ).toEqual({ ok: false, reason: 'failed', message: '压缩已取消' });
+    expect(await manager.runHostCommand(fakeAgent('s1'), 'compact')).toEqual({
+      kind: 'error',
+      text: 'Compaction cancelled.',
+    });
+  });
+
+  it('宿主没给结果（execute 返回 undefined）算 unsupported', async () => {
+    const execute = vi.fn(async () => undefined);
+    const ctx = {
+      ...absentCtx(),
+      commands: { find: () => ({ definitionId: 'x' }), execute },
+    } as unknown as Context;
+    const { registry } = createRegistry(async () => fakeHandle('s1'));
+    const manager = createManagerWithCtx(registry, ctx);
+
+    expect(await manager.runHostCommand(fakeAgent('s1'), 'compact')).toEqual({ kind: 'unsupported' });
+  });
+
+  it('宿主抛错 → threw 带 message，并记 warn', async () => {
+    const execute = vi.fn(async () => {
+      throw new Error('boom');
+    });
+    const ctx = {
+      ...absentCtx(),
+      commands: { find: () => ({ definitionId: 'x' }), execute },
+    } as unknown as Context;
+    const { registry } = createRegistry(async () => fakeHandle('s1'));
+    const logger = createLogger();
+    const manager = createManagerWithCtx(registry, ctx, logger);
+
+    expect(await manager.runHostCommand(fakeAgent('s1'), 'compact')).toEqual({
+      kind: 'threw',
+      message: 'boom',
+    });
+    expect(allLogText(logger)).toContain('host command failed: name=compact err=boom');
   });
 
   it('E2-2 /compact 拉起与普通消息并发 getOrCreate → singleflight 合并为一次 resume/create，无 agent 泄漏', async () => {
@@ -403,7 +429,10 @@ describe('getOrCreate — E2 并发改写映射', () => {
     const manager = createManager(registry);
 
     // /compact 走 slashCommand（在 concurrencyGuard 之前），与普通消息不串行
-    const compacting = manager.compact('c2c', PEER, { senderId: PEER, replyTarget: REPLY });
+    const compacting = compactCommand({ manager } as unknown as CommandDeps).handler({
+      message: { senderId: PEER, kind: 'c2c', messageId: 'm1' },
+      command: { raw: '' },
+    } as unknown as SlashCommandHandlerContext);
     const messaging = manager.getOrCreate('c2c', PEER, PEER, REPLY);
     await vi.waitFor(() => expect(resumes).toHaveLength(1));
     const candidate = registry.resume.mock.calls[0]![0].resumeSessionId;

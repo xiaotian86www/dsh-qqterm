@@ -347,7 +347,10 @@ describe('有会话时的二次确认', () => {
 
 describe('/compact 缺少 preset 压缩能力', () => {
   it('只回一行，不点名具体 preset', async () => {
-    const manager = { compact: vi.fn(async () => ({ ok: false, reason: 'no-compaction' })) };
+    const manager = {
+      getOrCreate: vi.fn(async () => ({ agent: { id: 's1' } })),
+      runHostCommand: vi.fn(async () => ({ kind: 'unsupported' as const })),
+    };
     const command = compactCommand({ manager } as unknown as CommandDeps);
     const result = await command.handler(makeCtx('', 'user1', 'compact'));
 

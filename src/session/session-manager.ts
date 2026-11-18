@@ -60,7 +60,7 @@ import type {
   TokenUsageStats,
   SessionContextUsage,
   SessionTurnProgress,
-  CompactOutcome,
+  HostCommandRun,
   WorkspaceSession,
   WorkspaceGroup,
   WorkspaceInfo,
@@ -81,32 +81,6 @@ const PRESET_SETTINGS_NS = 'agent-preset-registry';
 
 /** 权限预设默认值所在的配置条目（与设置页写的是同一个 namespace） */
 const PERMISSION_SETTINGS_NS = 'permission';
-
-/**
- * 宿主 /compact 的结果只有文案、没有结构化数据，这里按文案片段映射成 QQ 侧结果。
- * 宿主改文案时退化为通用成功 / 未知失败，不影响压缩本身。
- */
-const COMPACTION_TEXT_HINTS: ReadonlyArray<readonly [string, CompactOutcome]> = [
-  ['active compaction', { ok: false, reason: 'failed', message: '压缩进行中，稍后再试' }],
-  ['Compaction cancelled', { ok: false, reason: 'failed', message: '压缩已取消' }],
-  ['changed before it could be replaced', { ok: false, reason: 'failed', message: '压缩期间历史发生变化，重试一次' }],
-  // summary = 摘要没有更小 = 历史不足以压缩，属正常结果而非失败
-  ['could not produce a useful summary', { ok: true, shadowed: 0, tokens: 0 }],
-  ['did not finish cleanly', { ok: false, reason: 'failed', message: '压缩未完整结束，先确认当前会话' }],
-  ['could not be saved', { ok: false, reason: 'failed', message: '压缩完成但会话保存失败' }],
-];
-
-/** 宿主 /compact 的 CommandResult → QQ 侧结果（成功文案里带条数与 token） */
-function compactOutcomeOf(result: { kind: 'success' | 'error'; text?: string }): CompactOutcome {
-  const text = result.text ?? '';
-  if (result.kind === 'success') {
-    const counted = /(\d+) history items \(~(\d+) tokens\)/.exec(text);
-    if (counted) return { ok: true, shadowed: Number(counted[1]), tokens: Number(counted[2]) };
-    // 「No compactable history yet.」及其他成功文案
-    return { ok: true, shadowed: 0, tokens: 0 };
-  }
-  return COMPACTION_TEXT_HINTS.find(([needle]) => text.includes(needle))?.[1] ?? { ok: false, reason: 'failed' };
-}
 
 /** 会话列表最多为多少条会话读取标题（每条都要读一遍日志，是列表的耗时大头） */
 const TITLE_FETCH_LIMIT = 10;
@@ -2424,40 +2398,31 @@ export class SessionManager {
   }
 
   /**
-   * 原地压缩当前会话历史（保留 sessionId，用摘要替换旧历史）。
+   * 执行宿主斜杠命令。
    *
-   * 判定与执行都走 base 的命令登记簿：宿主 /compact 在自己的 preset 作用域里
-   * 取压缩引擎并写 command/run、command/done，qqterm 不解析 preset 服务，
-   * 也就完全不碰 web 组件。preset 没挂压缩组时命令查不到，本地拒绝。
+   * 只做机械部分：查登记簿确认命令可见、参数拼成一行、把 { kind, text } 原样交回。
+   * 成败判定、文案主题、要不要先判 idle 都留给宿主与调用方——例如 /compact 的
+   * "busy" 由宿主压缩锁自己判，插件不再前置检查 status（既假阳性又 TOCTOU，
+   * 还与 Web 端行为不一致）。
    */
-  async compact(
-    scope: ChatScope,
-    peerId: string,
-    revive?: { senderId: string; replyTarget: ReplyTarget },
-  ): Promise<CompactOutcome> {
-    const key = this.sessionKey();
-    let record = this.currentRecord(key);
-    if (!record) {
-      // 无活跃会话（重启后尚未打开）时从磁盘拉起，历史在磁盘上仍可压缩
-      if (!revive) return { ok: false, reason: 'no-session' };
-      record = await this.getOrCreate(scope, peerId, revive.senderId, revive.replyTarget);
-    }
-    if (record.agent.status !== 'idle') return { ok: false, reason: 'busy' };
-
-    if (this.commands.find(record.agent, 'compact') === undefined) {
-      return { ok: false, reason: 'no-compaction' };
-    }
+  async runHostCommand(
+    agent: DshAgent,
+    name: string,
+    args: readonly string[] = [],
+  ): Promise<HostCommandRun> {
+    const commands = this.commands;
+    if (commands.find(agent, name) === undefined) return { kind: 'unsupported' };
+    const line = args.length === 0 ? `/${name}` : `/${name} ${args.join(' ')}`;
 
     try {
-      const executed = await this.commands.execute(record.agent, '/compact', [], new AbortController().signal);
-      if (executed === undefined) return { ok: false, reason: 'no-compaction' };
-      const outcome = compactOutcomeOf(executed.result);
-      if (!outcome.ok) this.logger.debug(`compact declined: key=${key} text=${executed.result.text ?? ''}`);
-      return outcome;
+      const executed = await commands.execute(agent, line, [], new AbortController().signal);
+      if (executed === undefined) return { kind: 'unsupported' };
+      const { kind, text } = executed.result;
+      return text === undefined ? { kind } : { kind, text };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      this.logger.warn(`compact failed: key=${key} err=${message}`);
-      return { ok: false, reason: 'failed', message };
+      this.logger.warn(`host command failed: name=${name} err=${message}`);
+      return { kind: 'threw', message };
     }
   }
 

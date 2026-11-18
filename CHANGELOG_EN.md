@@ -9,6 +9,7 @@ This file records product-level changes to QQ SuperTerm. The format follows [Kee
 ### Changed
 
 - **Second confirmation for reset / new session**: while a session is live, `/reset` (alias `/clear`), `/clear all`, and `/new` first send a card with "✅ Confirm / ❌ Cancel" buttons; the action runs only after the confirm button is tapped within 5 minutes. If the card cannot be sent the action is dropped rather than executed unconfirmed, and switching sessions before the tap voids the confirmation.
+- **`/compact` no longer pre-checks the busy state**: the local `agent.status !== 'idle'` gate is gone — the host's compaction lock decides, so running sessions can be compacted too. Command execution is now a reusable `runHostCommand`, ready for `/goal` and other host commands.
 
 ## [0.0.1] - 2026-11-14
 
