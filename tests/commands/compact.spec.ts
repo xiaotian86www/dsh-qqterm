@@ -1,8 +1,8 @@
 /**
- * /compact：只报压缩结果，不估算压缩后的上下文占比
+ * /compact：成败看命令 kind，宿主文本原样带出
  *
- * 压缩后的真实占用要等下一轮请求才更新，估算值会和菜单里的实际值打架，
- * 所以回复里只给「压缩了多少条 / 多少 token」。
+ * 宿主只返回 kind + text，插件不做文案映射：kind 决定图标与结论，text 跟在后面。
+ * 压缩后的真实占用要等下一轮请求才更新，所以不估算占比。
  */
 import { describe, it, expect, vi } from 'vitest';
 import type { SlashCommandHandlerContext } from '@tencent-connect/qqbot-nodejs';
@@ -32,17 +32,29 @@ async function run(manager: ReturnType<typeof makeManager>): Promise<string> {
 }
 
 describe('/compact', () => {
-  it('压出历史时只报条数与 token', async () => {
-    await expect(run(makeManager({ ok: true, shadowed: 12, tokens: 8432 })))
-      .resolves.toBe('✅ 已压缩 12 条历史记录（约 8,432 tokens）');
+  it('成功时原样带出宿主文本', async () => {
+    await expect(run(makeManager({ ok: true, message: 'Compacted 2 history items (~300 tokens).' })))
+      .resolves.toBe('✅ 压缩完成: Compacted 2 history items (~300 tokens).');
   });
 
-  it('没有可压缩的历史', async () => {
-    await expect(run(makeManager({ ok: true, shadowed: 0, tokens: 0 }))).resolves.toBe('⚠️ 没有可压缩的历史');
+  it('success 且文案说没有可压缩历史，也是成功', async () => {
+    await expect(run(makeManager({ ok: true, message: 'No compactable history yet.' })))
+      .resolves.toBe('✅ 压缩完成: No compactable history yet.');
   });
 
-  it('失败时按原因给文案', async () => {
+  it('失败时在结论后给宿主原文', async () => {
+    await expect(run(makeManager({ ok: false, message: 'Compaction cancelled.' })))
+      .resolves.toBe('❌ 压缩失败: Compaction cancelled.');
+  });
+
+  it('本地前置条件按原因给文案', async () => {
     await expect(run(makeManager({ ok: false, reason: 'busy' }))).resolves.toBe('⚠️ 正在生成中，无法压缩');
     await expect(run(makeManager({ ok: false, reason: 'no-session' }))).resolves.toBe('⚠️ 当前没有会话');
+    await expect(run(makeManager({ ok: false, reason: 'no-compaction' }))).resolves.toBe('⚠️ 当前 preset 没有压缩能力');
+  });
+
+  it('宿主没给文本时只给结论', async () => {
+    await expect(run(makeManager({ ok: true }))).resolves.toBe('✅ 压缩完成');
+    await expect(run(makeManager({ ok: false }))).resolves.toBe('❌ 压缩失败');
   });
 });

@@ -82,12 +82,12 @@ export interface DshAgent {
   };
 }
 
-/** compact 操作结果 */
+/** compact 操作结果：宿主只给 kind + 文本，这里原样带回，不做映射 */
 export interface CompactOutcome {
   ok: boolean;
-  reason?: 'no-session' | 'busy' | 'no-compaction' | 'failed';
-  shadowed?: number;
-  tokens?: number;
+  /** 插件本地判定的前置条件（与宿主文本无关） */
+  reason?: 'no-session' | 'busy' | 'no-compaction';
+  /** 宿主命令的原始文本，原样透传给 QQ */
   message?: string;
 }
 

@@ -358,7 +358,7 @@ describe('getOrCreate — E2 并发改写映射', () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
-  it('登记簿查得到 compact → 交由宿主命令执行，按结果文案回条数', async () => {
+  it('登记簿查得到 compact → 交由宿主命令执行，文本原样带回', async () => {
     const { registry } = createRegistry(async () => fakeHandle('s1'));
     const execute = vi.fn(async () => ({
       commandId: 'c1',
@@ -372,14 +372,31 @@ describe('getOrCreate — E2 并发改写映射', () => {
 
     expect(
       await manager.compact('c2c', PEER, { senderId: PEER, replyTarget: REPLY }),
-    ).toEqual({ ok: true, shadowed: 2, tokens: 300 });
+    ).toEqual({ ok: true, message: 'Compacted 2 history items (~300 tokens).' });
     expect(execute).toHaveBeenCalledWith(expect.anything(), '/compact', [], expect.anything());
   });
 
-  it('宿主命令的失败文案映射成中文结果', async () => {
+  it('success 但文案说没有可压缩历史，仍算成功', async () => {
     const { registry } = createRegistry(async () => fakeHandle('s1'));
     const execute = vi.fn(async () => ({
       commandId: 'c2',
+      result: { kind: 'success' as const, text: 'No compactable history yet.' },
+    }));
+    const ctx = {
+      ...persistenceCtx(async () => undefined),
+      commands: { find: () => ({ definitionId: 'x' }), execute },
+    } as unknown as Context;
+    const manager = createManagerWithCtx(registry, ctx);
+
+    expect(
+      await manager.compact('c2c', PEER, { senderId: PEER, replyTarget: REPLY }),
+    ).toEqual({ ok: true, message: 'No compactable history yet.' });
+  });
+
+  it('宿主命令报错时成败看 kind，文本原样带回', async () => {
+    const { registry } = createRegistry(async () => fakeHandle('s1'));
+    const execute = vi.fn(async () => ({
+      commandId: 'c3',
       result: { kind: 'error' as const, text: 'Compaction cancelled.' },
     }));
     const ctx = {
@@ -390,7 +407,7 @@ describe('getOrCreate — E2 并发改写映射', () => {
 
     expect(
       await manager.compact('c2c', PEER, { senderId: PEER, replyTarget: REPLY }),
-    ).toEqual({ ok: false, reason: 'failed', message: '压缩已取消' });
+    ).toEqual({ ok: false, message: 'Compaction cancelled.' });
   });
 
   it('E2-2 /compact 拉起与普通消息并发 getOrCreate → singleflight 合并为一次 resume/create，无 agent 泄漏', async () => {

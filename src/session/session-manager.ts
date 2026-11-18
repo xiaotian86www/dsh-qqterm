@@ -82,32 +82,6 @@ const PRESET_SETTINGS_NS = 'agent-preset-registry';
 /** 权限预设默认值所在的配置条目（与设置页写的是同一个 namespace） */
 const PERMISSION_SETTINGS_NS = 'permission';
 
-/**
- * 宿主 /compact 的结果只有文案、没有结构化数据，这里按文案片段映射成 QQ 侧结果。
- * 宿主改文案时退化为通用成功 / 未知失败，不影响压缩本身。
- */
-const COMPACTION_TEXT_HINTS: ReadonlyArray<readonly [string, CompactOutcome]> = [
-  ['active compaction', { ok: false, reason: 'failed', message: '压缩进行中，稍后再试' }],
-  ['Compaction cancelled', { ok: false, reason: 'failed', message: '压缩已取消' }],
-  ['changed before it could be replaced', { ok: false, reason: 'failed', message: '压缩期间历史发生变化，重试一次' }],
-  // summary = 摘要没有更小 = 历史不足以压缩，属正常结果而非失败
-  ['could not produce a useful summary', { ok: true, shadowed: 0, tokens: 0 }],
-  ['did not finish cleanly', { ok: false, reason: 'failed', message: '压缩未完整结束，先确认当前会话' }],
-  ['could not be saved', { ok: false, reason: 'failed', message: '压缩完成但会话保存失败' }],
-];
-
-/** 宿主 /compact 的 CommandResult → QQ 侧结果（成功文案里带条数与 token） */
-function compactOutcomeOf(result: { kind: 'success' | 'error'; text?: string }): CompactOutcome {
-  const text = result.text ?? '';
-  if (result.kind === 'success') {
-    const counted = /(\d+) history items \(~(\d+) tokens\)/.exec(text);
-    if (counted) return { ok: true, shadowed: Number(counted[1]), tokens: Number(counted[2]) };
-    // 「No compactable history yet.」及其他成功文案
-    return { ok: true, shadowed: 0, tokens: 0 };
-  }
-  return COMPACTION_TEXT_HINTS.find(([needle]) => text.includes(needle))?.[1] ?? { ok: false, reason: 'failed' };
-}
-
 /** 会话列表最多为多少条会话读取标题（每条都要读一遍日志，是列表的耗时大头） */
 const TITLE_FETCH_LIMIT = 10;
 
@@ -2451,13 +2425,12 @@ export class SessionManager {
     try {
       const executed = await this.commands.execute(record.agent, '/compact', [], new AbortController().signal);
       if (executed === undefined) return { ok: false, reason: 'no-compaction' };
-      const outcome = compactOutcomeOf(executed.result);
-      if (!outcome.ok) this.logger.debug(`compact declined: key=${key} text=${executed.result.text ?? ''}`);
-      return outcome;
+      // 只看 kind：success 即使文案是「没有可压缩历史」也算成功，文本原样带回 QQ
+      return { ok: executed.result.kind === 'success', message: executed.result.text };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.warn(`compact failed: key=${key} err=${message}`);
-      return { ok: false, reason: 'failed', message };
+      return { ok: false, message };
     }
   }
 
