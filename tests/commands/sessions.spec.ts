@@ -433,7 +433,7 @@ describe('/sessions workspace（已移除）', () => {
 });
 
 describe('/sessions archived', () => {
-  it('只列已归档会话：不编号，按钮带短 id，并标出所属工作区', async () => {
+  it('只列已归档会话：按工作区分组，按钮带短 id', async () => {
     const archivedId = 'session-22222222-2222-2222-2222-222222222222';
     const manager = makeManager({
       listWorkspaceSessions: vi.fn(async () => [
@@ -444,16 +444,56 @@ describe('/sessions archived', () => {
 
     const text = await run(manager, 'archived');
 
-    expect(text.startsWith('### 🗄 已归档（共 1 个')).toBe(true);
+    expect(text.startsWith('### 🗄 已归档（1 个工作区 · 1 个会话）')).toBe(true);
     expect(text).toContain('旧需求');
-    // 归档页只用短 id；行尾补工作区
+    // 组标题与 /sessions all 同写法，按钮排在组标题之后
+    expect(text).toContain('**repo** · `/repo`');
+    expect(text.indexOf('**repo**')).toBeLessThan(text.indexOf('text="/sessions unarchive #22222222"'));
     expect(text).toContain(`<qqbot-cmd-input text="/sessions unarchive #22222222" show="#22222222 · 旧需求`);
-    expect(text).toContain('· repo');
+    // 行里不再重复工作区
+    expect(text).not.toContain('旧需求 · repo');
     expect(text).not.toMatch(/^1\. /m);
     // 默认列表里的会话不该出现在归档页
     expect(text).not.toContain('cccc1111');
     // 底部的返回入口也是链接
     expect(text).toContain('<qqbot-cmd-input text="/sessions" show="工作中会话"/>');
+  });
+
+  it('多个工作区各自成组：组标题带路径，目录不存在时提示', async () => {
+    const manager = makeManager({
+      listWorkspaceGroups: vi.fn(async () => [
+        {
+          id: 'ws-1',
+          title: 'alpha',
+          path: '/alpha',
+          missing: false,
+          sessions: [
+            entry({ id: 'session-aaaa1111', title: '甲的归档', archived: true, workspace: 'alpha' }),
+            entry({ id: 'session-live1111', title: '甲的工作中', workspace: 'alpha' }),
+          ],
+        },
+        {
+          id: 'ws-2',
+          title: 'beta',
+          path: '/beta',
+          missing: true,
+          sessions: [entry({ id: 'session-bbbb2222', title: '乙的归档', archived: true, workspace: 'beta' })],
+        },
+      ]),
+    });
+
+    const text = await run(manager, 'archived');
+
+    expect(text.startsWith('### 🗄 已归档（2 个工作区 · 2 个会话）')).toBe(true);
+    expect(text).toContain('**alpha** · `/alpha`');
+    expect(text).toContain('**beta** · `/beta`');
+    expect(text).toContain('⚠️ 目录不存在');
+    // 未归档的会话不出现
+    expect(text).not.toContain('甲的工作中');
+    // 组与组之间空一行
+    expect(text).toMatch(/\n\n\*\*beta\*\*/);
+    expect(text).toContain('<qqbot-cmd-input text="/sessions unarchive #aaaa1111"');
+    expect(text).toContain('<qqbot-cmd-input text="/sessions unarchive #bbbb2222"');
   });
 
   it('归档超过一页时给出下一页链接', async () => {
@@ -474,6 +514,7 @@ describe('/sessions archived', () => {
   it('没有归档时说明用法', async () => {
     const manager = makeManager();
     const text = await run(manager, 'archived');
+    expect(text).toContain('### 🗄 已归档（0 个工作区 · 0 个会话）');
     expect(text).toContain('没有已归档的会话');
     expect(text).toContain('/sessions archive');
   });
@@ -959,7 +1000,8 @@ describe('/sessions archive', () => {
     expect(manager.archiveSession).toHaveBeenCalledWith(entry().id);
     expect(text).toContain('已归档「修复登录 bug」');
     expect(text).toContain('`#11111111`');
-    expect(text).toContain('<qqbot-cmd-input text="/sessions unarchive #11111111" show="取消归档"/>');
+    // 按钮自成一块：与 /status 的停止入口一致，回执与按钮之间空一行
+    expect(text).toContain('`#11111111`\n\n<qqbot-cmd-input text="/sessions unarchive #11111111" show="取消归档"/>');
   });
 
   it('归档当前会话时提示已切到新会话', async () => {
@@ -1102,7 +1144,7 @@ describe('/sessions unarchive', () => {
 
     expect(manager.unarchiveSession).toHaveBeenCalledWith('session-22222222');
     expect(text).toContain('已取消归档');
-    expect(text).toContain('<qqbot-cmd-input text="/sessions resume #22222222" show="继续会话"/>');
+    expect(text).toContain('\n\n<qqbot-cmd-input text="/sessions resume #22222222" show="继续会话"/>');
   });
 
   it('序号已移除，纯短数字直接拒绝', async () => {
