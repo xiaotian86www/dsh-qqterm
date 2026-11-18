@@ -15,27 +15,89 @@ permissions:
   contents: read
 
 jobs:
+  # 纯文档改动不必跑构建 / 测试 / 打包。判断放在这个独立 job 里，下面三个门禁 job
+  # 照常出现、只在内部跳过步骤，分支保护的 required checks 因此总会被报出来
+  # （job 级 if 跳过会让 required check 停在「Expected」，PR 反而合不了）。
+  changes:
+    name: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.classify.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: classify
+        name: 区分纯文档改动
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          base="${PR_BASE:-${PUSH_BEFORE:-}}"
+          # 基线不确定（首次推送 / 手动触发 / 旧提交已被回收）一律按改代码处理：
+          # 判不出来时宁可多跑，不能漏跑。
+          if [ -z "$base" ] || ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            echo "基线无法确定，跑完整 CI" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          # 构建、测试、打包都不读仓库里的 markdown（tests/ 与 scripts/ 已确认无引用），
+          # 所以「改动全是 .md」即可跳过；出现任何非 md 路径就整轮照跑。
+          doc_re='\.md$'
+          code=false
+          files=0
+          while IFS= read -r -d '' file; do
+            files=$((files + 1))
+            if ! printf '%s\n' "$file" | grep -qE "$doc_re"; then
+              code=true
+              break
+            fi
+          done < <(git diff --name-only -z "$base"...HEAD)
+          # 空 diff（空提交 / 重跑）也算有代码改动。
+          [ "$files" -gt 0 ] || code=true
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          if [ "$code" = true ]; then
+            echo "有非文档改动，跑完整 CI" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "只改了 $files 个文档，跳过构建 / 测试 / 打包" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
   verify:
     name: verify
+    needs: changes
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      CODE: ${{ needs.changes.outputs.code }}
     steps:
       - uses: actions/checkout@v4
 
+      - name: 只改文档，跳过 verify
+        if: env.CODE != 'true'
+        run: echo "只改了文档，跳过构建 · lib/ 同步校验 · 客户端类型检查" >> "$GITHUB_STEP_SUMMARY"
+
       - uses: pnpm/action-setup@v4
+        if: env.CODE == 'true'
         with:
           version: 12.4.2
 
       # 最低支持版本：验证源码没有用 22.12 之后才有的 API
       - uses: actions/setup-node@v4
+        if: env.CODE == 'true'
         with:
           node-version: 22
           cache: pnpm
 
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm build
+      - if: env.CODE == 'true'
+        run: pnpm install --frozen-lockfile
+      - if: env.CODE == 'true'
+        run: pnpm build
 
       - name: 校验 lib/ 与 src/ 同步
+        if: env.CODE == 'true'
         run: |
           if [ -n "$(git status --porcelain -- lib)" ]; then
             echo "::error::lib/ 与 src/ 不一致，本地执行 pnpm build 并提交 lib/ 的 js"
@@ -44,12 +106,16 @@ jobs:
             exit 1
           fi
 
-      - run: pnpm typecheck:client
+      - if: env.CODE == 'true'
+        run: pnpm typecheck:client
 
   test:
     name: test (${{ matrix.os }}, node ${{ matrix.node }})
+    needs: changes
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
+    env:
+      CODE: ${{ needs.changes.outputs.code }}
     strategy:
       fail-fast: false
       matrix:
@@ -66,34 +132,57 @@ jobs:
             node: 26
     steps:
       - uses: actions/checkout@v4
+
+      - name: 只改文档，跳过测试
+        if: env.CODE != 'true'
+        run: echo "只改了文档，跳过 pnpm test" >> "$GITHUB_STEP_SUMMARY"
+
       - uses: pnpm/action-setup@v4
+        if: env.CODE == 'true'
         with:
           version: 12.4.2
       - uses: actions/setup-node@v4
+        if: env.CODE == 'true'
         with:
           node-version: ${{ matrix.node }}
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm test
+      - if: env.CODE == 'true'
+        run: pnpm install --frozen-lockfile
+      - if: env.CODE == 'true'
+        run: pnpm test
 
   package:
     name: package
+    needs: changes
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      CODE: ${{ needs.changes.outputs.code }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: 只改文档，跳过打包
+        if: env.CODE != 'true'
+        run: echo "只改了文档，跳过 pnpm pack 与包内容校验" >> "$GITHUB_STEP_SUMMARY"
+
       - uses: pnpm/action-setup@v4
+        if: env.CODE == 'true'
         with:
           version: 12.4.2
       - uses: actions/setup-node@v4
+        if: env.CODE == 'true'
         with:
           node-version: 26
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm build
-      - run: mkdir -p .artifacts && pnpm pack --pack-destination .artifacts
+      - if: env.CODE == 'true'
+        run: pnpm install --frozen-lockfile
+      - if: env.CODE == 'true'
+        run: pnpm build
+      - if: env.CODE == 'true'
+        run: mkdir -p .artifacts && pnpm pack --pack-destination .artifacts
 
       - name: 校验包内容
+        if: env.CODE == 'true'
         run: |
           tgz=$(ls .artifacts/*.tgz)
           tar -tzf "$tgz" | tr -d '\r' | sort > .artifacts/files.txt

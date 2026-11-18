@@ -236,7 +236,7 @@ QQ 只有一个窗口，多个已获取会话的输出、提问、审批都回�
 
 - [ ] `pnpm build` 通过，`lib/` 的 js 已更新并提交
 - [ ] `pnpm test` 全绿；新逻辑有对应 `tests/**/*.spec.ts`
-- [ ] CI 的 verify / test（三平台）/ package 全绿
+- [ ] CI 的 verify / test（三平台）/ package 全绿（只改 `.md` 时 `changes` 判定为纯文档，三处实际步骤跳过但仍报绿）
 - [ ] 未新增 `@deepseek-ai/*` 运行期依赖；`inject` 与实际依赖一致
 - [ ] `apply()` 没有阻塞式 await；异步错误都有 catch
 - [ ] 客户端改动已 typecheck，并在 C2C 验证一次按钮回退
