@@ -1,5 +1,5 @@
 /**
- * 「重置 / 新建会话」的二次确认卡片。
+ * 「重置会话」的二次确认卡片。
  *
  * 命令层把动作包成闭包交给这里，只有点了「确认」才执行；卡片过期、旧卡片、
  * 会话在点击前被换掉，都不能把动作跑掉。
@@ -88,7 +88,7 @@ describe('buildConfirmKeyboard', () => {
     expect(buttons[1]!.render_data.style).toBe(0);
   });
 
-  it('按钮只写「确认」，具体是重置还是新建由正文交代', () => {
+  it('按钮只写「确认」，重置范围由正文交代', () => {
     expect(buildConfirmKeyboard('n2').content.rows[0]!.buttons[0]!.render_data.label).toBe('✅ 确认');
   });
 });
@@ -112,18 +112,15 @@ describe('SessionConfirmChannel.offer', () => {
     expect(sent[0]!.opts?.keyboard).toBeDefined();
   });
 
-  it('/clear all 说全部，/new 说当前会话还在', async () => {
+  it('/clear all 的正文点明全部会话都会停止', async () => {
     const sent: SentMessage[] = [];
     const { channel } = createChannel(sent);
 
     await channel.offer(request('reset-all'));
-    await channel.offer(request('new'));
 
     expect(sent[0]!.text).toContain('**⚠️ 确认重置全部会话**');
     expect(sent[0]!.text).toContain('全部会话都会停止，下一条消息开新会话。');
-    expect(sent[1]!.text).toContain('**⚠️ 确认新建会话**');
-    expect(sent[1]!.text).toContain('当前会话继续运行，下一条消息开新会话。');
-    expect(sent[1]!.text).toContain('> 👇 点「确认」继续');
+    expect(sent[0]!.text).toContain('> 👇 点「确认」继续');
   });
 
   it('发送失败返回 false，调用方应放弃本次动作', async () => {
