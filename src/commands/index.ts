@@ -5,6 +5,7 @@
  */
 import type { CommandDeps, SlashCommand } from './types.ts';
 import { newCommand, resetCommand, compactCommand } from './session.ts';
+import { goalCommand } from './goal.ts';
 import { sessionsCommand } from './sessions.ts';
 import { renameCommand } from './rename.ts';
 import { toCommand } from './to.ts';
@@ -29,6 +30,7 @@ export function buildCommandList(deps: CommandDeps): SlashCommand[] {
     newCommand(deps),
     resetCommand(deps),
     compactCommand(deps),
+    goalCommand(deps),
     sessionsCommand(deps),
     renameCommand(deps),
     toCommand(deps),

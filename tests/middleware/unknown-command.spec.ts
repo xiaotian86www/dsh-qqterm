@@ -19,6 +19,7 @@ const COMMANDS = [
   'reset',
   'clear',
   'compact',
+  'goal',
   'sessions',
   'session',
   'rename',

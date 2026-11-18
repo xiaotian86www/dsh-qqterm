@@ -167,7 +167,7 @@ The command panel is the list that pops up in mobile QQ when you type `/`. With 
 |------|------|--------|------|
 | `menu.autoSync` | boolean | `true` | Sync the private-chat custom menu when the bot is ready |
 
-The menu holds the six fixed entries at the **bottom of a private chat**: `会话状态` (`/status`), `会话列表` (`/sessions`), `重置会话` (`/reset`), `压缩会话` (`/compact`), plus two collapsible items that carry submenus — `权限预设` (`查看权限` / `仅可查看` / `工作区内修改` / `完全权限` / `自动审查`) and `思考强度` (`查看强度` / `关闭` / `低` / `高` / `最高`). Clicking any entry fills the matching command into the input box; permission and the current session are still validated by the command itself.
+The menu holds the seven fixed entries at the **bottom of a private chat**: `会话状态` (`/status`), `会话列表` (`/sessions`), `重置会话` (`/reset`), `压缩会话` (`/compact`), `长期目标` (`/goal`), plus two collapsible items that carry submenus — `权限预设` (`查看权限` / `仅可查看` / `工作区内修改` / `完全权限` / `自动审查`) and `思考强度` (`查看强度` / `关闭` / `低` / `高` / `最高`). Clicking any entry fills the matching command into the input box; permission and the current session are still validated by the command itself.
 
 The menu is bot-wide configuration that every user sees, and changes only show after leaving and re-entering the chat — so it only carries static actions, never per-session dynamic text (check `/status` for context usage). It syncs once when the bot is ready and skips identical content; `menu.autoSync=false` disables the automatic sync. The menu API replaces the whole thing: every sync writes this plugin's fixed entries and keeps no other buttons.
 
@@ -177,7 +177,8 @@ The menu is bot-wide configuration that every user sees, and changes only show a
 |------|------|
 | `/new` | Start a new session (clear context); may take a workspace: `/new <workspace\|path>` |
 | `/clear` (alias `/reset`) | Stop the current session and start a new one in the same workspace; `/clear all` stops every acquired session |
-| `/compact` | Compact session history (replace old records with a summary); the reply reports only counts and tokens |
+| `/compact` | Compact session history (replace old records with a summary); success follows the host command and the reply carries the host text |
+| `/goal` | Set or view the long-running goal of the current session; `/goal <objective>` sets it, `edit` / `pause` / `resume` / `clear` manage it; the reply carries the host text |
 | `/sessions` (alias `/session`) | Session management: group working sessions by workspace (status and current marker included); `all` for every session |
 | `/rename` | Rename the current session (the title is pinned against automatic titles) |
 | `/to` | Send a message to a specific session, or answer its question |
