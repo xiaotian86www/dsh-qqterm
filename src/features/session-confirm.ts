@@ -1,7 +1,7 @@
 /**
- * SessionConfirmChannel — 「重置 / 新建会话」的二次确认卡片。
+ * SessionConfirmChannel — 「重置会话」的二次确认卡片。
  *
- * `/clear`、`/clear all`、`/new` 在有会话时会停掉或切走它，误触代价高。
+ * `/clear`、`/clear all` 在有会话时会停掉它，误触代价高。
  * 命令层不直接执行，而是把动作包成闭包交给这里：先发一张确认卡，点「确认」
  * 才执行闭包，点「取消」什么都不做。卡片 5 分钟过期，发新命令 / 会话被释放
  * 都会作废旧卡片。
@@ -16,7 +16,7 @@ import { buttonLabel, decodeButtonData, encodeButtonData } from './button-utils.
 /** 确认卡有效期：过期的按钮点了没有任何反应 */
 const CONFIRM_TTL_MS = 5 * 60_000;
 
-export type SessionConfirmAction = 'reset' | 'reset-all' | 'new';
+export type SessionConfirmAction = 'reset' | 'reset-all';
 
 export interface SessionConfirmRequest {
   action: SessionConfirmAction;
@@ -49,15 +49,12 @@ interface PendingConfirm {
  * 一句正文（会发生什么）+ 空行 + 引用块（怎么操作）。
  *
  * 标题不用 markdown 标题：QQ 端 `###` 会放大字号，整条消息更像模型正文。
- * 三种动作各给一句后果，`/new` 与 `/clear` 的差别正在这里：前者旧会话
- * 继续跑，后者会把它停掉。
+ * 两种范围各给一句后果：停当前还是停全部。
  */
 function confirmText(action: SessionConfirmAction): string {
-  const [title, body] = action === 'new'
-    ? ['**⚠️ 确认新建会话**', '当前会话继续运行，下一条消息开新会话。']
-    : action === 'reset-all'
-      ? ['**⚠️ 确认重置全部会话**', '全部会话都会停止，下一条消息开新会话。']
-      : ['**⚠️ 确认重置会话**', '当前会话会停止，下一条消息开新会话。'];
+  const [title, body] = action === 'reset-all'
+    ? ['**⚠️ 确认重置全部会话**', '全部会话都会停止，下一条消息开新会话。']
+    : ['**⚠️ 确认重置会话**', '当前会话会停止，下一条消息开新会话。'];
   return [title, '', body, '', '> 👇 点「确认」继续'].join('\n');
 }
 

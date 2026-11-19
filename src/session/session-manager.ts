@@ -10,7 +10,8 @@
  *     `/sessions resume` / `/to` 实际拿到 agent 的那些），所有已获取会话的
  *     输出、提问、审批都会回到 QQ；
  *   - `currentByKey: Map<chatKey, sessionId>`：每个聊天当前接的是哪个会话。
- * 已获取集合不落盘，重启后只有 current 从 prefs 恢复。
+ * 已获取集合不落盘，但 prefs 里另存一份会话名册（`held`）：重启后 `/sessions`
+ * 把名册里的会话当冷行列出来，current 仍从指针恢复。
  *
  * sessionKey → sessionId 的映射存于 prefs（`model-prefs.json`），新会话 id 由
  * `mintSessionId()` 铸造（`session-` + UUID，与宿主一致）。没有映射即视为全新会话：
@@ -242,7 +243,7 @@ export class SessionManager {
   public approvalChannel?: ApprovalChannel;
   /** 由 bootstrap 注入的重发通道（失败卡片 → 「重发 / 放弃」），会话释放时清理其待确认卡片 */
   public retryChannel?: RetryChannel;
-  /** 由 bootstrap 注入的会话确认通道（`/clear`、`/new` 的二次确认） */
+  /** 由 bootstrap 注入的会话确认通道（`/clear`、`/clear all` 的二次确认） */
   public sessionConfirmChannel?: SessionConfirmChannel;
   /** 最近一次读到的有效部署默认权限预设（部署默认被写坏时用它回正） */
   private lastKnownDefaultPermission?: string;
@@ -1513,6 +1514,7 @@ export class SessionManager {
     }
 
     this.records.set(sessionId, record);
+    this.rememberHeld(sessionId);
     this.setCurrent(key, sessionId);
 
     // 工作区跟着会话走：这个聊天当前目录以会话为准
@@ -1812,6 +1814,8 @@ export class SessionManager {
     for (const record of records) {
       await this.dropRecord(record, { cancel: true, dispose: true });
     }
+    // 名册里可能还有重启前的冷会话：/clear all 之后列表也得是真的空
+    this.modelResolver.setHeldSessionIds(key, []);
 
     this.logger.info(`all sessions reset: key=${key} (stopped=${records.length})`);
     return records.length;
@@ -1874,6 +1878,7 @@ export class SessionManager {
         acquiredAt: Date.now(),
       };
       this.records.set(sessionId, record);
+      this.rememberHeld(sessionId);
       this.logger.info(`session acquired via /to: sessionId=${sessionId}`);
     }
 
@@ -2035,9 +2040,11 @@ export class SessionManager {
   /**
    * 列出 QQ 已获取的会话（跨工作区，`/sessions` 默认视图）。
    *
-   * 顺序是「当前 → 其它持有」，同组按获取时间倒序；宿主列表暂时没有返回的
-   * 持有会话也保留（用 agent 的目录与获取时间兜底），避免刚切过去就从列表消失。
-   * 标题读取失败不影响列表本身，取不到就显示「未命名会话」。
+   * 顺序是「当前 → 活记录按获取时间倒序 → 冷行（名册顺序）」；宿主列表暂时
+   * 没有返回的持有会话也保留（用 agent 的目录与获取时间兜底），避免刚切过去就
+   * 从列表消失。冷行是重启前获取过、这次还没打开的会话：标题 / 时间 / 目录都
+   * 取宿主快照，没有运行状态。标题读取失败不影响列表本身，取不到就显示
+   * 「未命名会话」。
    *
    * @param scope 当前 chat 作用域（用于标记 current）
    * @param peerId 当前 chat 的 peer id
@@ -2046,15 +2053,34 @@ export class SessionManager {
     const key = this.sessionKey();
     const currentId = this.currentSessionId(key);
     const archived = this.host.archivedSessionIds();
-    const records = [...this.records.values()].filter((record) => !archived.has(record.sessionId));
-    if (records.length === 0) return [];
+    const ordered = [...this.records.values()]
+      .filter((record) => !archived.has(record.sessionId))
+      .sort((left, right) => {
+        const currentDiff = Number(right.sessionId === currentId) - Number(left.sessionId === currentId);
+        return currentDiff !== 0 ? currentDiff : right.acquiredAt - left.acquiredAt;
+      });
+
+    // 重启后已获取集合是空的：名册里剩下的会话当冷行列出，用户能看到、能 resume。
+    // 盘上已经明确不存在的摘掉；读不出来就留着——一次读失败不能当「会话没了」。
+    const roster = this.modelResolver.getHeldSessionIds(key);
+    const known = new Set(ordered.map((record) => record.sessionId));
+    const coldIds = roster.filter((id) => !known.has(id));
+    const gone = new Set<string>();
+    await Promise.all(coldIds.map(async (id) => {
+      try {
+        if ((await this.host.sessionExists(id)) === false) gone.add(id);
+      } catch {
+        // 宿主临时读不到：保留这一行，下次列表再问
+      }
+    }));
+    const cold = coldIds.filter((id) => !gone.has(id) && !archived.has(id));
+    if (cold.length !== coldIds.length) {
+      this.modelResolver.setHeldSessionIds(key, [...known, ...cold]);
+    }
+    if (ordered.length === 0 && cold.length === 0) return [];
 
     const hostSessions = await this.host.listSessions().catch(() => []);
     const byId = new Map(hostSessions.map((session) => [session.id, session]));
-    const ordered = records.sort((left, right) => {
-      const currentDiff = Number(right.sessionId === currentId) - Number(left.sessionId === currentId);
-      return currentDiff !== 0 ? currentDiff : right.acquiredAt - left.acquiredAt;
-    });
 
     // 子代理会话：宿主只把子会话的 parentSession 指向父会话。运行中的子会话
     // （origin 为 subagent 且 live）挂到父条目下，隔代（子代理再起子代理）也收；
@@ -2089,8 +2115,9 @@ export class SessionManager {
       ordered.map((record) => [record.sessionId, descendantsOf(record.sessionId)]),
     );
 
-    // 标题读取有上限：先给持有会话，再用剩余名额补子会话
-    const titleIds = ordered.slice(0, TITLE_FETCH_LIMIT_HELD).map((record) => record.sessionId);
+    // 标题读取有上限：先给持有会话与冷行，再用剩余名额补子会话
+    const titleIds = [...ordered.map((record) => record.sessionId), ...cold]
+      .slice(0, TITLE_FETCH_LIMIT_HELD);
     for (const record of ordered) {
       for (const child of childrenById.get(record.sessionId) ?? []) {
         if (titleIds.length >= TITLE_FETCH_LIMIT_HELD) break;
@@ -2102,7 +2129,7 @@ export class SessionManager {
       .catch(() => new Map<string, string>());
     const workspaces = this.host.workspaceList();
 
-    return ordered.map((record) => {
+    const rows: WorkspaceSession[] = ordered.map((record) => {
       const info = byId.get(record.sessionId);
       const directory = info?.cwd ?? this.host.sessionDirectory(record.agent.session);
       const workspace = directory === undefined
@@ -2143,26 +2170,79 @@ export class SessionManager {
         ...(children.length > 0 ? { children } : {}),
       };
     });
+
+    // 冷行：没有运行状态可报，held / live / running 全 false，标题与时间取宿主快照
+    for (const id of cold) {
+      const info = byId.get(id);
+      const directory = info?.cwd;
+      const workspace = directory === undefined
+        ? undefined
+        : workspaces.find((item) => samePath(item.path, directory));
+      const workspacePath = workspace?.path ?? directory;
+      const workspaceTitle = workspace?.title
+        ?? (this.host.supportsWorkspaceRegistry() && directory !== undefined ? basename(directory) : undefined);
+      rows.push({
+        id,
+        ...(titles.has(id) ? { title: titles.get(id) } : {}),
+        createdAt: info?.createdAt ?? 0,
+        updatedAt: info?.updatedAt ?? info?.createdAt ?? 0,
+        current: id === currentId,
+        live: false,
+        held: false,
+        running: false,
+        isSeeded: info?.isSeeded ?? false,
+        archived: false,
+        ...(workspaceTitle !== undefined ? { workspace: workspaceTitle } : {}),
+        ...(workspacePath !== undefined
+          ? { workspacePath, workspaceMissing: !isDirectory(workspacePath) }
+          : {}),
+      });
+    }
+
+    // 当前项排最前（冷当前行同样适用）；其余保持「活记录按获取时间倒序、冷行按名册顺序」
+    return rows.sort((left, right) => Number(right.current) - Number(left.current));
   }
 
   /**
-   * 这个聊天当前所在的工作区（标题 / 路径 / 目录是否还在）。
+   * 这个聊天当前的工作目录（`/get`、`/ls` 的相对路径基准）。
    *
-   * @param scope 当前 chat 作用域
-   * @param peerId 当前 chat 的 peer id
+   * 取会话的 live 目录：工作树里的会话就是树路径，运行期 cd 也跟着变。
+   * `/status` 要的是工作区，见 {@link chatWorkspaceInfo}。
    */
   async currentWorkspaceInfo(
     _scope: ChatScope,
     _peerId: string,
   ): Promise<{ title: string; path: string; missing: boolean } | undefined> {
-    const workspace = this.chatDirectory();
-    const info = this.host.workspaceList().find((item) => samePath(item.path, workspace));
-    if (info) {
-      return { title: info.title, path: info.path, missing: !isDirectory(info.path) };
-    }
-    // 没有 registry 时只有目录，不拿末段目录名冒充工作区名
-    const title = this.host.supportsWorkspaceRegistry() ? basename(workspace) : '';
-    return { title, path: workspace, missing: !isDirectory(workspace) };
+    return this.workspaceInfoOf(this.chatDirectory());
+  }
+
+  /**
+   * 这个聊天当前的工作区（`/status` 的工作区行）。
+   *
+   * 工作区是会话创建时的目录（header.cwd）：工作树里的会话活在树里，工作区仍是
+   * 主仓库，与 `/sessions` 的分组同一来源。没有会话时就是聊天工作目录，也就是
+   * 下一条消息建会话的地方。
+   */
+  async chatWorkspaceInfo(
+    _scope: ChatScope,
+    _peerId: string,
+  ): Promise<{ title: string; path: string; missing: boolean } | undefined> {
+    const record = this.currentRecord();
+    const directory =
+      record === undefined
+        ? this.chatDirectory()
+        : this.headerCwd(record.agent) ??
+          this.host.sessionDirectory(record.agent.session) ??
+          this.chatDirectory();
+    return this.workspaceInfoOf(directory);
+  }
+
+  /** 目录对应的工作区：有 registry 用它的标题，没有就只给路径（不拿末段目录名冒充） */
+  private workspaceInfoOf(directory: string): { title: string; path: string; missing: boolean } {
+    const info = this.host.workspaceList().find((item) => samePath(item.path, directory));
+    if (info) return { title: info.title, path: info.path, missing: !isDirectory(info.path) };
+    const title = this.host.supportsWorkspaceRegistry() ? basename(directory) : '';
+    return { title, path: directory, missing: !isDirectory(directory) };
   }
 
   /**
@@ -2389,7 +2469,7 @@ export class SessionManager {
     if (sessionId === undefined) return { kind: 'none' };
 
     // 盘上已经没有了就别试：resume 失败后宿主也不会允许重建，白跑一趟。
-    // 指针一并清掉：留着会让 `/sessions` 把死会话显示成「待恢复」，
+    // 指针一并清掉：留着会让 `/sessions` 把死会话当冷行列出来，
     // 点「恢复当前」又只会报没有匹配的会话。目录保留，下一条消息仍落在上次工作区。
     if ((await this.host.sessionExists(sessionId).catch(() => undefined)) === false) {
       this.modelResolver.clearSessionId(key);
@@ -2525,9 +2605,12 @@ export class SessionManager {
       acquiredAt: Date.now(),
     };
     this.records.set(sessionId, record);
+    this.rememberHeld(sessionId);
     this.setCurrent(key, sessionId);
     if (directory) this.setChatDir(directory);
-    if (directory) void this.host.attachSessionToWorkspace(sessionId, directory);
+    // 与 getOrCreate 同一条规则：挂载点用 header.cwd，别把工作树路径当成工作区
+    const attachCwd = this.headerCwd(agent) ?? directory;
+    if (attachCwd) void this.host.attachSessionToWorkspace(sessionId, attachCwd);
 
     this.logger.info(`session switched: key=${key} sessionId=${sessionId} acquired=${handle ? 'owned' : 'borrowed'}`);
     return wasCurrent
@@ -2563,6 +2646,9 @@ export class SessionManager {
       return outcome;
     }
 
+    // 没有活记录（重启后只在名册里的冷会话）：归档成功即从名册摘掉
+    if (!record) this.modelResolver.forgetHeldSession(this.sessionKey(), sessionId);
+
     // 3) 清掉指向归档会话的映射，下一条消息落到全新会话
     let remapped = 0;
     const key = this.sessionKey();
@@ -2593,6 +2679,11 @@ export class SessionManager {
     return outcome;
   }
 
+  /** 记下这次获取（重启后列表靠名册；写盘失败只影响列表，不打断消息路径） */
+  private rememberHeld(sessionId: string): void {
+    this.modelResolver.rememberHeldSession(this.sessionKey(), sessionId);
+  }
+
   /**
    * 摘掉一条已获取记录。
    *
@@ -2604,6 +2695,7 @@ export class SessionManager {
     options: { cancel?: boolean; dispose?: boolean } = {},
   ): Promise<void> {
     if (this.records.get(record.sessionId) === record) this.records.delete(record.sessionId);
+    this.modelResolver.forgetHeldSession(record.sessionKey, record.sessionId);
     if (options.cancel) record.agent.cancel({ kind: 'user' });
     this.cancelPendingFor(record.sessionId);
     if (options.dispose && record.handle) {
