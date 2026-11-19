@@ -110,16 +110,13 @@ export function newCommand({ manager, config }: CommandDeps): SlashCommand {
       return [
         '### 📖 /new 用法',
         '',
-        '`/new` 在当前工作区新建会话',
+        '`/new` 在当前工作区新建会话，旧会话继续跑',
         '`/new <提示词>` 新建会话并把提示词发出去',
-        named ? '`/new --dir <工作区>` 在指定工作区新建会话' : '`/new --dir <路径>` 在指定目录新建会话',
-        '`-d` 是 `--dir` 的简写，路径带空格就加引号',
-        ...(manager.worktreesAvailable() ? ['`/new --worktree` 在当前分支上拉出独立工作树'] : []),
-        ...(named ? ['工作区认标题、目录名或绝对路径'] : []),
-        '`/new --background <提示词>`（`-b`）另开一条会话在后台跑，不切走当前会话',
-        '空格分隔参数，带空格的路径或提示词加引号',
-        '参数位置随意；`--` 之后一律当提示词',
-        '不给提示词就只清指针；`--background` 必须带提示词',
+        named ? '`/new --dir <工作区>` 在指定工作区新建（`-d`）' : '`/new --dir <路径>` 在指定目录新建（`-d`）',
+        ...(manager.worktreesAvailable() ? ['`/new --worktree` 新会话开在独立工作树（`-w`）'] : []),
+        '`/new --background <提示词>` 后台另开一条，不切走当前会话（`-b`）',
+        named ? '工作区认标题、目录名或绝对路径，路径带空格加引号' : '路径带空格就加引号',
+        '参数位置随意，`--` 之后一律当提示词',
       ].join('\n');
     },
     handler: async (cmdCtx) => {

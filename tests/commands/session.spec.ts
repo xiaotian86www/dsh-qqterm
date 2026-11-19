@@ -488,7 +488,7 @@ describe('/new --dir 参数', () => {
   it('用法页列出 --dir 写法', () => {
     const command = newCommand({ manager: makeManager() as unknown as SessionManager, config, logger });
     expect(command.usage).toContain('`/new --dir <工作区>`');
-    expect(command.usage).toContain('`-d` 是 `--dir` 的简写');
+    expect(command.usage).toContain('（`-d`）');
   });
 });
 
@@ -696,6 +696,6 @@ describe('/new --background', () => {
   it('用法页列出 --background', () => {
     const command = newCommand({ manager: makeManager() as unknown as SessionManager, config, logger });
     expect(command.usage).toContain('`/new --background <提示词>`');
-    expect(command.usage).toContain('`--background` 必须带提示词');
+    expect(command.usage).toContain('（`-b`）');
   });
 });
