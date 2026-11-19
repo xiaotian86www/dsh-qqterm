@@ -14,7 +14,7 @@
  * 条目的命令文本一律用**绝对路径**：相对路径的基准会随「当前工作区」变化，点进
  * 第二层就会跑偏，而绝对路径点进任何一层都稳。
  *
- * 与 `/new <工作区>` 同一权限面：列目录等于让人看见 agent 能碰的文件系统，只允许
+ * 与 `/new --dir <工作区>` 同一权限面：列目录等于让人看见 agent 能碰的文件系统，只允许
  * 唯一绑定用户（`access.owner`）。
  */
 import type { CommandDeps, SlashCommand } from './types.ts';
@@ -44,7 +44,7 @@ type Listing =
 export function lsCommand({ manager, config, logger }: CommandDeps): SlashCommand {
   return {
     name: 'ls',
-    // 列目录 = 暴露文件系统结构：与 /new <工作区> 同一权限面
+    // 列目录 = 暴露文件系统结构：与 /new --dir <工作区> 同一权限面
     scope: 'c2c',
     authorized: sessionAdminAuth(config, logger),
     description: '列出子目录',

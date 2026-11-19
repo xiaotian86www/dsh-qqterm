@@ -7,7 +7,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { SlashCommandHandlerContext } from '@tencent-connect/qqbot-nodejs';
 import { ConfigSchema, type QQTermConfig } from '../../src/config.ts';
-import type { SessionManager } from '../../src/session/index.ts';
+import { WorktreeError, type SessionManager } from '../../src/session/index.ts';
 import type { Logger } from '../../src/types.ts';
 import type { CommandDeps } from '../../src/commands/types.ts';
 import { compactCommand, newCommand, parseNewArgs, resetCommand } from '../../src/commands/session.ts';
@@ -24,6 +24,7 @@ const config = ConfigSchema({
 function makeManager() {
   return {
     remove: vi.fn(async () => {}),
+    promptNewSession: vi.fn(async () => ({ sessionId: 's1' })),
     workspaceRegistryAvailable: vi.fn(() => true),
     worktreesAvailable: vi.fn(() => true),
     readOnlySandbox: vi.fn(() => false),
@@ -104,7 +105,7 @@ describe('/reset /clear', () => {
 
     const text = await runReset(manager, 'repo', 'clear');
 
-    expect(text).toBe('⚠️ /clear 不支持指定工作区\n换工作区用 /new <工作区|路径>。');
+    expect(text).toBe('⚠️ /clear 不支持指定工作区\n换工作区用 /new --dir <工作区|路径>。');
     expect(manager.resetCurrentSession).not.toHaveBeenCalled();
     expect(manager.resetAllSessions).not.toHaveBeenCalled();
   });
@@ -178,19 +179,71 @@ describe('/new（不带参数）', () => {
 });
 
 describe('parseNewArgs', () => {
-  it('只剥完整 token，路径原样保留', () => {
-    expect(parseNewArgs('--worktree')).toEqual({ arg: '', worktree: true });
-    expect(parseNewArgs('-w D:\\My Repo')).toEqual({ arg: 'D:\\My Repo', worktree: true });
-    expect(parseNewArgs('repo -w')).toEqual({ arg: 'repo', worktree: true });
-    expect(parseNewArgs('-worktree-x')).toEqual({ arg: '-worktree-x', worktree: false });
-    expect(parseNewArgs('')).toEqual({ arg: '', worktree: false });
+  it('裸文字是提示词，不再当工作区', () => {
+    expect(parseNewArgs('修一下')).toEqual({ arg: '', worktree: false, prompt: '修一下', error: undefined });
+    expect(parseNewArgs('看下这个 bug')).toEqual({ arg: '', worktree: false, prompt: '看下这个 bug', error: undefined });
+    expect(parseNewArgs('')).toEqual({ arg: '', worktree: false, prompt: undefined, error: undefined });
+  });
+
+  it('--dir 与 -d 取后一个 token 作工作区，其余是提示词', () => {
+    expect(parseNewArgs('--dir repo')).toEqual({ arg: 'repo', worktree: false, prompt: undefined, error: undefined });
+    expect(parseNewArgs('-d repo 修一下')).toEqual({ arg: 'repo', worktree: false, prompt: '修一下', error: undefined });
+    expect(parseNewArgs('-w --dir repo 修一下')).toEqual({ arg: 'repo', worktree: true, prompt: '修一下', error: undefined });
+    expect(parseNewArgs('--worktree')).toEqual({ arg: '', worktree: true, prompt: undefined, error: undefined });
+  });
+
+  it('成对引号里的空格算同一个 token', () => {
+    expect(parseNewArgs('--dir "D:\\My Repo"')).toEqual({ arg: 'D:\\My Repo', worktree: false, prompt: undefined, error: undefined });
+    expect(parseNewArgs("-d 'D:\\My Repo' -w")).toEqual({ arg: 'D:\\My Repo', worktree: true, prompt: undefined, error: undefined });
+  });
+
+  it('参数写在提示词前后都生效，其余词按顺序连成提示词', () => {
+    expect(parseNewArgs('修一下 --dir repo 再跑测试')).toEqual({ arg: 'repo', worktree: false, prompt: '修一下 再跑测试', error: undefined });
+    expect(parseNewArgs('修一下 -w')).toEqual({ arg: '', worktree: true, prompt: '修一下', error: undefined });
+  });
+
+  it('引号包着的词是提示词或值，不当参数', () => {
+    expect(parseNewArgs('看下 "-w" 这个参数')).toEqual({ arg: '', worktree: false, prompt: '看下 -w 这个参数', error: undefined });
+    expect(parseNewArgs('-d "-w"')).toEqual({ arg: '-w', worktree: false, prompt: undefined, error: undefined });
+  });
+
+  it('--dir=值 与 --dir 值等价', () => {
+    expect(parseNewArgs('--dir=repo 修一下')).toEqual({ arg: 'repo', worktree: false, prompt: '修一下', error: undefined });
+    expect(parseNewArgs('--dir="D:\\My Repo"')).toEqual({ arg: 'D:\\My Repo', worktree: false, prompt: undefined, error: undefined });
+    expect(parseNewArgs('--dir=')).toEqual({ arg: '', worktree: false, prompt: undefined, error: '⚠️ --dir 后要跟工作区 · 用法: /help new' });
+  });
+
+  it('-- 之后一律当提示词', () => {
+    expect(parseNewArgs('--dir repo -- 看下 --prompt 这个参数')).toEqual({ arg: 'repo', worktree: false, prompt: '看下 --prompt 这个参数', error: undefined });
+  });
+
+  it('不认识的参数与已删除的 --prompt 都回未知参数', () => {
+    expect(parseNewArgs('--prompt 修一下')).toEqual({ arg: '', worktree: false, prompt: undefined, error: '⚠️ 未知参数: --prompt · 用法: /help new' });
+    expect(parseNewArgs('-p 修一下')).toEqual({ arg: '', worktree: false, prompt: undefined, error: '⚠️ 未知参数: -p · 用法: /help new' });
+    expect(parseNewArgs('--nope 修一下')).toEqual({ arg: '', worktree: false, prompt: undefined, error: '⚠️ 未知参数: --nope · 用法: /help new' });
+  });
+
+  it('引号没闭合只回错误', () => {
+    expect(parseNewArgs('--dir "D:\\My Repo')).toEqual({ arg: '', worktree: false, prompt: undefined, error: '⚠️ 引号没有闭合 · 用法: /help new' });
+  });
+
+  it('--dir 缺值时只回参数错', () => {
+    expect(parseNewArgs('--dir')).toEqual({ arg: '', worktree: false, prompt: undefined, error: '⚠️ --dir 后要跟工作区 · 用法: /help new' });
+    expect(parseNewArgs('-w -d')).toEqual({ arg: '', worktree: true, prompt: undefined, error: '⚠️ --dir 后要跟工作区 · 用法: /help new' });
+    expect(parseNewArgs('--dir -w')).toEqual({ arg: '', worktree: false, prompt: undefined, error: '⚠️ --dir 后要跟工作区 · 用法: /help new' });
+    expect(parseNewArgs('--dir ""')).toEqual({ arg: '', worktree: false, prompt: undefined, error: '⚠️ --dir 后要跟工作区 · 用法: /help new' });
+  });
+
+  it('--prompt / -p 按未知参数回绝', () => {
+    expect(parseNewArgs('--prompt 修一下')).toEqual({ arg: '', worktree: false, prompt: undefined, error: '⚠️ 未知参数: --prompt · 用法: /help new' });
+    expect(parseNewArgs('-p 修一下')).toEqual({ arg: '', worktree: false, prompt: undefined, error: '⚠️ 未知参数: -p · 用法: /help new' });
   });
 });
 
-describe('/new <工作区>', () => {
+describe('/new --dir', () => {
   it('先开新会话再换工作区，回复里带上工作区', async () => {
     const manager = makeManager();
-    const text = await run(manager, 'repo');
+    const text = await run(manager, '--dir repo');
 
     expect(manager.remove).toHaveBeenCalledWith();
     expect(manager.changeChatWorkspace).toHaveBeenCalledWith('c2c', 'user1', 'repo');
@@ -210,7 +263,7 @@ describe('/new <工作区>', () => {
       changeChatWorkspace: vi.fn(async () => ({ ok: true as const, title: 'x', path: 'x', isNew: false })),
     };
 
-    const text = await run(manager, 'D:\\nope');
+    const text = await run(manager, '--dir D:\\nope');
 
     expect(manager.remove).not.toHaveBeenCalled();
     expect(manager.changeChatWorkspace).not.toHaveBeenCalled();
@@ -225,10 +278,10 @@ describe('/new <工作区>', () => {
       changeChatWorkspace: vi.fn(async () => ({ ok: true as const, title: 'x', path: 'x', isNew: false })),
     };
 
-    const text = await run(manager, 'repo');
+    const text = await run(manager, '--dir repo');
 
     expect(text).toContain('只支持绝对路径');
-    expect(text).toContain('/new D:\\项目\\目录');
+    expect(text).toContain('/new --dir D:\\项目\\目录');
     expect(manager.remove).not.toHaveBeenCalled();
   });
 
@@ -242,14 +295,14 @@ describe('/new <工作区>', () => {
       size: 0,
     };
 
-    const text = await run(manager, 'repo');
+    const text = await run(manager, '--dir repo');
     expect(text).toContain('目录不存在');
     expect(text).not.toContain('已开启新会话');
   });
 
   it('没有 registry 时用法页只列路径写法', () => {
     const named = newCommand({ manager: makeManager() as unknown as SessionManager, config, logger });
-    expect(named.usage).toContain('`/new <工作区>`');
+    expect(named.usage).toContain('`/new --dir <工作区>`');
     expect(named.usage).toContain('工作区认标题、目录名或绝对路径');
 
     const pathOnly = newCommand({
@@ -257,7 +310,7 @@ describe('/new <工作区>', () => {
       config,
       logger,
     });
-    expect(pathOnly.usage).toContain('`/new <路径>`');
+    expect(pathOnly.usage).toContain('`/new --dir <路径>`');
     expect(pathOnly.usage).not.toContain('工作区认标题');
   });
 
@@ -271,14 +324,14 @@ describe('/new <工作区>', () => {
       size: 0,
     };
 
-    const text = await run(manager, 'D:\\repo');
+    const text = await run(manager, '--dir D:\\repo');
 
     expect(text).toBe('✅ 已开启新会话\n工作区: D:\\repo');
   });
 
   it('非绑定用户不能改工作区，且不动会话', async () => {
     const manager = makeManager();
-    const text = await run(manager, 'repo', 'stranger');
+    const text = await run(manager, '--dir repo', 'stranger');
 
     expect(manager.remove).not.toHaveBeenCalled();
     expect(manager.changeChatWorkspace).not.toHaveBeenCalled();
@@ -288,7 +341,7 @@ describe('/new <工作区>', () => {
   it('--worktree 与路径同时给：换完工作区再交出意图，回执三行', async () => {
     const manager = makeManager();
 
-    const text = await run(manager, '-w D:\\My Repo');
+    const text = await run(manager, '-w --dir "D:\\My Repo"');
 
     expect(manager.resolveWorkspace).toHaveBeenCalledWith('D:\\My Repo');
     expect(manager.changeChatWorkspace).toHaveBeenCalledWith('c2c', 'user1', 'D:\\My Repo');
@@ -317,6 +370,115 @@ describe('/new <工作区>', () => {
       logger,
     });
     expect(noService.usage).not.toContain('--worktree');
+  });
+});
+
+describe('/new <提示词>', () => {
+  it('立刻开会话并把提示词发出去，先清指针再发', async () => {
+    const manager = makeManager();
+
+    expect(await run(manager, '修复登录页闪退')).toBe('✅ 已开启新会话，提示词已发出');
+    expect(manager.promptNewSession).toHaveBeenCalledWith('c2c', 'user1', 'user1', '修复登录页闪退', { scope: 'c2c', targetId: 'user1' });
+    const removeAt = manager.remove.mock.invocationCallOrder[0] ?? 0;
+    const promptAt = manager.promptNewSession.mock.invocationCallOrder[0] ?? 0;
+    expect(removeAt).toBeLessThan(promptAt);
+  });
+
+  it('--worktree 写在提示词后面也生效', async () => {
+    const manager = makeManager();
+
+    expect(await run(manager, '看下这个参数 -w')).toBe('✅ 已开启新会话，提示词已发出');
+    expect(manager.armWorktree).toHaveBeenCalledTimes(1);
+    expect(manager.promptNewSession).toHaveBeenCalledWith('c2c', 'user1', 'user1', '看下这个参数', { scope: 'c2c', targetId: 'user1' });
+  });
+
+  it('带 --dir 时先换目录再发提示词，回执带上工作区', async () => {
+    const manager = makeManager();
+
+    const text = await run(manager, '--dir repo 修一下');
+
+    expect(manager.changeChatWorkspace).toHaveBeenCalledWith('c2c', 'user1', 'repo');
+    expect(manager.promptNewSession).toHaveBeenCalledWith('c2c', 'user1', 'user1', '修一下', { scope: 'c2c', targetId: 'user1' });
+    expect(text).toBe('✅ 已开启新会话，提示词已发出\n工作区: repo · D:\\repo');
+  });
+
+  it('--worktree 与提示词同时给：建树回执代替「已开启」首行', async () => {
+    const manager = {
+      ...makeManager(),
+      promptNewSession: vi.fn(async () => ({ sessionId: 's2', worktreeNotice: '✅ 已在新工作树 `feat` 里开启会话 · 从 `main` 拉出\n路径: `D:\\wt\\feat`' })),
+    };
+
+    const text = await run(manager, '--worktree 查一下为什么启动慢');
+
+    expect(manager.armWorktree).toHaveBeenCalledTimes(1);
+    expect(text.startsWith('✅ 已在新工作树')).toBe(true);
+    expect(text).toContain('路径:');
+    expect(text).not.toContain('已开启新会话');
+  });
+
+  it('--prompt 按未知参数回绝，不动会话', async () => {
+    const manager = makeManager();
+
+    expect(await run(manager, '--prompt 修一下')).toBe('⚠️ 未知参数: --prompt · 用法: /help new');
+    expect(manager.remove).not.toHaveBeenCalled();
+    expect(manager.promptNewSession).not.toHaveBeenCalled();
+  });
+
+  it('带工作区时仍只允许绑定用户', async () => {
+    const manager = makeManager();
+
+    const text = await run(manager, '--dir repo 修一下', 'stranger');
+
+    expect(text).toContain('仅限绑定用户可用');
+    expect(manager.remove).not.toHaveBeenCalled();
+    expect(manager.promptNewSession).not.toHaveBeenCalled();
+  });
+
+  it('工作树建不出来时用同一份失败文案', async () => {
+    const manager = {
+      ...makeManager(),
+      promptNewSession: vi.fn(async () => {
+        throw new WorktreeError('create', 'fatal: not a git repository', undefined, 'main');
+      }),
+    };
+
+    const text = await run(manager, '--worktree 修一下');
+
+    expect(text).toContain('没能从 `main` 建工作树');
+    expect(text).toContain('本次会话没有创建');
+  });
+
+  it('用法页列出提示词写法', () => {
+    const command = newCommand({ manager: makeManager() as unknown as SessionManager, config, logger });
+    expect(command.usage).toContain('`/new <提示词>`');
+    expect(command.usage).toContain('参数位置随意');
+  });
+});
+
+describe('/new --dir 参数', () => {
+  it('-d 指定工作区，回执照旧', async () => {
+    const manager = makeManager();
+
+    const text = await run(manager, '-d repo');
+
+    expect(manager.changeChatWorkspace).toHaveBeenCalledWith('c2c', 'user1', 'repo');
+    expect(manager.promptNewSession).not.toHaveBeenCalled();
+    expect(text).toContain('✅ 已开启新会话');
+    expect(text).toContain('工作区: repo · D:\\repo');
+  });
+
+  it('--dir 缺值：报参数错，不动会话', async () => {
+    const manager = makeManager();
+
+    expect(await run(manager, '--dir')).toBe('⚠️ --dir 后要跟工作区 · 用法: /help new');
+    expect(manager.remove).not.toHaveBeenCalled();
+    expect(manager.changeChatWorkspace).not.toHaveBeenCalled();
+  });
+
+  it('用法页列出 --dir 写法', () => {
+    const command = newCommand({ manager: makeManager() as unknown as SessionManager, config, logger });
+    expect(command.usage).toContain('`/new --dir <工作区>`');
+    expect(command.usage).toContain('`-d` 是 `--dir` 的简写');
   });
 });
 
@@ -353,11 +515,11 @@ describe('有会话时的二次确认', () => {
     expect(channel.offer).not.toHaveBeenCalled();
   });
 
-  it('/new <路径> 直接换工作区，不发卡片', async () => {
+  it('/new --dir <路径> 直接换工作区，不发卡片', async () => {
     const channel = makeChannel();
     const manager = { ...makeManager(), currentSessionId: vi.fn(() => 'sess-1'), sessionConfirmChannel: channel };
 
-    expect(await runNew(manager, 'D:\\repo')).toBe('✅ 已开启新会话\n工作区: repo · D:\\repo');
+    expect(await runNew(manager, '--dir D:\\repo')).toBe('✅ 已开启新会话\n工作区: repo · D:\\repo');
     expect(manager.remove).toHaveBeenCalledWith();
     expect(manager.changeChatWorkspace).toHaveBeenCalledWith('c2c', 'user1', 'D:\\repo');
     expect(channel.offer).not.toHaveBeenCalled();
@@ -402,7 +564,7 @@ describe('有会话时的二次确认', () => {
     expect(manager.resetCurrentSession).not.toHaveBeenCalled();
   });
 
-  it('/new <路径> 解析失败时不动会话', async () => {
+  it('/new --dir <路径> 解析失败时不动会话', async () => {
     const channel = makeChannel();
     const manager = {
       ...makeManager(),
@@ -411,7 +573,7 @@ describe('有会话时的二次确认', () => {
       sessionConfirmChannel: channel,
     };
 
-    const text = await runNew(manager, 'D:\\nope');
+    const text = await runNew(manager, '--dir D:\\nope');
 
     expect(String(text)).toContain('目录不存在');
     expect(channel.offer).not.toHaveBeenCalled();

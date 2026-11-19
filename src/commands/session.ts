@@ -1,14 +1,14 @@
 /**
  * 会话相关命令
  *
- * - /new：清空当前会话（下一条消息新建），可顺带指定工作区
+ * - /new：清空当前会话（下一条消息新建），可顺带指定工作区、直接带提示词
  * - /reset（别名 /clear）：停掉当前会话，再在原工作区重新开始
  * - /compact：原地压缩会话历史（保留 sessionId，摘要替换旧历史）
  */
 import type { SlashCommandHandlerContext } from '@tencent-connect/qqbot-nodejs';
 import type { CommandDeps, SlashCommand } from './types.ts';
 import type { SessionConfirmAction } from '../features/session-confirm.ts';
-import type { ChangeWorkspaceOutcome } from '../session/index.ts';
+import { WorktreeError, worktreeErrorText, type ChangeWorkspaceOutcome } from '../session/index.ts';
 import { getScopePeer } from '../shared/index.ts';
 
 /**
@@ -43,24 +43,133 @@ async function confirmOrRun(
 /** 只读沙箱下开不了工作树：建树前唯一要先解决的约束 */
 const READ_ONLY_WORKTREE = '⚠️ 只读沙箱开不了工作树 · 用 /permission 换成可写再试';
 
+/** `--dir` 后面没跟工作区 */
+const DIR_MISSING = '⚠️ --dir 后要跟工作区 · 用法: /help new';
+
+/** 引号没闭合：按空格切词时引号必须成对 */
+const QUOTE_OPEN = '⚠️ 引号没有闭合 · 用法: /help new';
+
+/** 切出来的一个词；`quoted` 表示它整个被引号包着，不参与参数识别 */
+interface RawToken {
+  value: string;
+  quoted: boolean;
+}
+
 /**
- * `/new` 的参数：剥掉 `--worktree` / `-w`，剩下原样作为工作区参数。
- *
- * 只认完整 token（前后是空白或首尾），所以带空格的路径原样保留，`-w` 也不会
- * 从路径中段被误剥。
+ * 按空格切词：成对 `"` / `'` 里的空白留在同一个词里，引号本身去掉。整个被引号
+ * 包着的词（`"-w"`）不当参数，这样提示词里的 `-w` 能原样发出去。
  */
-export function parseNewArgs(raw: string): { arg: string; worktree: boolean } {
-  const worktree = /(^|\s)(?:--worktree|-w)(?=\s|$)/.test(raw);
-  const arg = raw.replace(/(^|\s)(?:--worktree|-w)(?=\s|$)/g, '$1').trim();
-  return { arg, worktree };
+function tokenize(raw: string): { tokens: RawToken[]; error?: string } {
+  const tokens: RawToken[] = [];
+  let current = '';
+  let quote: string | undefined;
+  let quoted = false;
+  let started = false;
+  for (const ch of raw) {
+    if (quote !== undefined) {
+      if (ch === quote) quote = undefined;
+      else current += ch;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      if (!started) quoted = true;
+      quote = ch;
+      started = true;
+      continue;
+    }
+    if (/\s/.test(ch)) {
+      if (started) {
+        tokens.push({ value: current, quoted });
+        current = '';
+        quoted = false;
+        started = false;
+      }
+      continue;
+    }
+    current += ch;
+    started = true;
+  }
+  if (quote !== undefined) return { tokens, error: QUOTE_OPEN };
+  if (started) tokens.push({ value: current, quoted });
+  return { tokens };
+}
+
+/** 参数样子的词：`-` 开头的非空词，被引号包着的除外 */
+function looksLikeParam(token: RawToken): boolean {
+  return !token.quoted && token.value.startsWith('-') && token.value !== '-';
+}
+
+/**
+ * `/new` 的参数：`--dir`（`-d`）指定工作区，`--worktree`（`-w`）要求下一条
+ * 消息先建树，剩下的文字整体是提示词（直接写；`--prompt` 已删除，写了按未知参数处理）。
+ *
+ * 切词按约定俗成的规则：空格分隔，带空格的路径或提示词用引号包起来；`--dir`
+ * 取它后面那个词，`--` 之后一律当提示词，参数位置随意。不认识的参数不猜，只回
+ * error，不动会话。
+ */
+export function parseNewArgs(raw: string): {
+  arg: string;
+  worktree: boolean;
+  prompt: string | undefined;
+  error: string | undefined;
+} {
+  const { tokens, error } = tokenize(raw);
+  if (error !== undefined) return { arg: '', worktree: false, prompt: undefined, error };
+  let worktree = false;
+  let dir: string | undefined;
+  const words: string[] = [];
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i] as RawToken;
+    if (token.quoted) {
+      if (token.value !== '') words.push(token.value);
+      continue;
+    }
+    // `--` 之后不再识别参数：提示词里要出现 -w、--dir 这类字面量时这样写
+    if (token.value === '--') {
+      for (const rest of tokens.slice(i + 1)) {
+        if (rest.value !== '') words.push(rest.value);
+      }
+      break;
+    }
+    if (token.value === '--worktree' || token.value === '-w') {
+      worktree = true;
+      continue;
+    }
+    if (token.value === '--dir' || token.value === '-d') {
+      const value = tokens[i + 1];
+      // 值不能缺，也不能紧跟另一个参数（那种情况写 `--dir -- 值` 也救不了，直接报缺值）
+      if (value === undefined || value.value === '' || looksLikeParam(value)) {
+        return { arg: '', worktree, prompt: undefined, error: DIR_MISSING };
+      }
+      dir = value.value;
+      i += 1;
+      continue;
+    }
+    // `--dir=值` 的写法（值带空格时写成 `--dir="D:\\My Repo"`，引号在切词时已去掉）
+    if (token.value.startsWith('--dir=') || token.value.startsWith('-d=')) {
+      const value = token.value.slice(token.value.indexOf('=') + 1);
+      if (value === '') return { arg: '', worktree, prompt: undefined, error: DIR_MISSING };
+      dir = value;
+      continue;
+    }
+    // 不认识的参数（含已删除的 --prompt / -p）不猜，也不当成提示词
+    if (looksLikeParam(token)) {
+      return { arg: '', worktree, prompt: undefined, error: `⚠️ 未知参数: ${token.value} · 用法: /help new` };
+    }
+    if (token.value !== '') words.push(token.value);
+  }
+  const prompt = words.length === 0 ? undefined : words.join(' ');
+  return { arg: dir ?? '', worktree, prompt, error: undefined };
 }
 
 /**
  * /new — 开始新会话
  *
  * 不带参数：在当前工作区开新会话（旧会话继续在后台跑，与 `/reset` 不同）。
- * 带参数：在指定工作区开新会话。带 `--worktree`（`-w`）：下一个会话开在工作
- * 树里，基线是第一条消息到达时工作区的 HEAD；默认就地。
+ * 带 `--dir`（`-d`）在指定工作区开新会话。带 `--worktree`（`-w`）：下一个
+ * 会话开在工作树里，基线是第一条消息到达时工作区的 HEAD；默认就地。其余文字
+ * （位置随意）整体是提示词：立刻作为新会话的第一条消息发出，`--worktree` 的树
+ * 也在这条上建；不给提示词就只清指针，等下一条消息再建会话。
  *
  * 参数先解析再动会话：路径写错不该把当前会话弄丢。换工作区等于换 agent 能读写
  * 的目录，所以带参数时只允许唯一绑定用户；不带参数的 `/new` 不受限制。
@@ -80,58 +189,89 @@ export function newCommand({ manager, config }: CommandDeps): SlashCommand {
         '### 📖 /new 用法',
         '',
         '`/new` 在当前工作区新建会话',
-        named ? '`/new <工作区>` 在指定工作区新建会话' : '`/new <路径>` 在指定目录新建会话',
+        '`/new <提示词>` 新建会话并把提示词发出去',
+        named ? '`/new --dir <工作区>` 在指定工作区新建会话' : '`/new --dir <路径>` 在指定目录新建会话',
+        '`-d` 是 `--dir` 的简写，路径带空格就加引号',
         ...(manager.worktreesAvailable() ? ['`/new --worktree` 在当前分支上拉出独立工作树'] : []),
         ...(named ? ['工作区认标题、目录名或绝对路径'] : []),
+        '空格分隔参数，带空格的路径或提示词加引号',
+        '参数位置随意；`--` 之后一律当提示词；不给提示词就只清指针',
       ].join('\n');
     },
     handler: async (cmdCtx) => {
       const { scope, peerId } = getScopePeer(cmdCtx);
-      const { arg, worktree } = parseNewArgs((cmdCtx.command?.raw ?? '').trim());
+      const senderId = cmdCtx.message.senderId;
+      const { arg, worktree, prompt, error } = parseNewArgs((cmdCtx.command?.raw ?? '').trim());
+
+      if (error !== undefined) return error;
 
       // 没有 worktrees 服务时按未知参数处理：不解释部署差异（同 /preset 缺服务）
       if (worktree && !manager.worktreesAvailable()) {
         return '⚠️ 未知参数: --worktree · 用法: /help new';
       }
 
-      // 不带参数 = 留在当前工作区；异步释放 agent，不阻塞回复
-      if (arg === '') {
-        if (worktree && manager.readOnlySandbox()) return READ_ONLY_WORKTREE;
-        void manager.remove();
-        if (worktree) manager.armWorktree();
-        return worktree ? '✅ 已开启新会话\n🌿 下一条消息开新工作树' : '✅ 已开启新会话';
-      }
-
-      // 带参数 = 换工作区（= 换 agent 能读写的目录）：只允许唯一绑定用户
-      const senderId = cmdCtx.message.senderId;
-      const owner = config.access.owner.trim();
-      const allowed = scope === 'c2c'
-        && owner !== ''
-        && senderId === owner;
-      if (!allowed) {
-        return '⚠️ `/new` 带参数仅限绑定用户可用；直接 `/new` 不受限制。';
+      // 带工作区参数 = 换 agent 能读写的目录：只允许唯一绑定用户
+      if (arg !== '') {
+        const owner = config.access.owner.trim();
+        const allowed = scope === 'c2c'
+          && owner !== ''
+          && senderId === owner;
+        if (!allowed) {
+          return '⚠️ `/new` 带参数仅限绑定用户可用；直接 `/new` 不受限制。';
+        }
       }
 
       if (worktree && manager.readOnlySandbox()) return READ_ONLY_WORKTREE;
 
       // 先解析目标再动会话：路径写错不该把当前会话弄丢
-      const resolved = manager.resolveWorkspace(arg);
-      if (!resolved.ok) return describeChangeFailure(resolved);
+      if (arg !== '') {
+        const resolved = manager.resolveWorkspace(arg);
+        if (!resolved.ok) return describeChangeFailure(resolved);
+      }
 
+      // 先清指针：带提示词时紧接着建会话，不带时等下一条消息再建
       await manager.remove();
-      const changed = await manager.changeChatWorkspace(scope, peerId, arg);
-      if (!changed.ok) return describeChangeFailure(changed);
+      let label: string | undefined;
+      if (arg !== '') {
+        const changed = await manager.changeChatWorkspace(scope, peerId, arg);
+        if (!changed.ok) return describeChangeFailure(changed);
+        // 没有 registry 时 title 只是路径末段，贴出来就是重复；只显示路径
+        label = manager.workspaceRegistryAvailable()
+          ? `工作区: ${changed.title} · ${changed.path}`
+          : `工作区: ${changed.path}`;
+      }
       if (worktree) manager.armWorktree();
-      // 没有 registry 时 title 只是路径末段，贴出来就是重复；只显示路径
-      const label = manager.workspaceRegistryAvailable()
-        ? `工作区: ${changed.title} · ${changed.path}`
-        : `工作区: ${changed.path}`;
-      return worktree ? `✅ 已开启新会话\n${label}\n🌿 下一条消息开新工作树` : `✅ 已开启新会话\n${label}`;
+
+      // 带提示词：立刻开会话，把提示词作为第一条消息发出（--worktree 的树也在这条上建）
+      if (prompt !== undefined) {
+        let notice: string | undefined;
+        try {
+          const started = await manager.promptNewSession(
+            scope,
+            peerId,
+            senderId,
+            prompt,
+            { scope, targetId: peerId },
+          );
+          notice = started.worktreeNotice;
+        } catch (err) {
+          if (err instanceof WorktreeError) return worktreeErrorText(err);
+          const message = err instanceof Error ? err.message : String(err);
+          return `❌ 没能开启会话: ${message}\n稍后再试一次。`;
+        }
+        const lines = notice === undefined ? ['✅ 已开启新会话，提示词已发出'] : [notice];
+        if (label !== undefined) lines.push(label);
+        return lines.join('\n');
+      }
+
+      const head = '✅ 已开启新会话';
+      const pending = worktree ? '\n🌿 下一条消息开新工作树' : '';
+      return label === undefined ? `${head}${pending}` : `${head}\n${label}${pending}`;
     },
   };
 }
 
-/** 换工作区失败文案（`/new <工作区>` 用，措辞与成功结果的第二行对应） */
+/** 换工作区失败文案（`/new --dir <工作区>` 用，措辞与成功结果的第二行对应） */
 function describeChangeFailure(outcome: ChangeWorkspaceOutcome): string {
   if (outcome.ok) return '';
   switch (outcome.reason) {
@@ -140,12 +280,12 @@ function describeChangeFailure(outcome: ChangeWorkspaceOutcome): string {
     case 'ambiguous':
       return [
         `⚠️ 有 ${outcome.matches.length} 个工作区匹配: ${outcome.matches.join('、')}`,
-        '用绝对路径: `/new D:\\项目\\目录`',
+        '用绝对路径: `/new --dir D:\\项目\\目录`',
       ].join('\n');
     case 'not-found':
       return `⚠️ 没有叫 \`${outcome.arg}\` 的工作区。\`/sessions all\` 看全部会话`;
     case 'unavailable':
-      return '⚠️ 只支持绝对路径: `/new D:\\项目\\目录`';
+      return '⚠️ 只支持绝对路径: `/new --dir D:\\项目\\目录`';
     default:
       return '⚠️ 工作区切换失败。';
   }
@@ -160,7 +300,7 @@ function describeChangeFailure(outcome: ChangeWorkspaceOutcome): string {
  * 与 `/new` 的区别：`/new` 只清掉当前指针，旧会话继续在后台跑；
  * `/clear` 会 cancel 并释放当前会话，旧会话不再回 QQ。`/clear all` 停掉所有
  * 已获取会话。其它已获取会话不受影响（不带 all 时）。不支持工作区参数，
- * 换工作区用 `/new <工作区|路径>`。
+ * 换工作区用 `/new --dir <工作区|路径>`。
  */
 export function resetCommand({ manager }: CommandDeps): SlashCommand {
   return {
@@ -179,7 +319,7 @@ export function resetCommand({ manager }: CommandDeps): SlashCommand {
 
       if (arg !== '') {
         if (arg.toLowerCase() !== 'all') {
-          return `⚠️ /${name} 不支持指定工作区\n换工作区用 /new <工作区|路径>。`;
+          return `⚠️ /${name} 不支持指定工作区\n换工作区用 /new --dir <工作区|路径>。`;
         }
 
         return confirmOrRun(cmdCtx, manager, 'reset-all', async () => {

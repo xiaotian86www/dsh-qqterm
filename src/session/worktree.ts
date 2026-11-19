@@ -71,6 +71,23 @@ export function worktreeSkipNotice(reason: 'not-repo' | 'read-only'): string {
     : '⚠️ 沙箱已是只读，本次就地开会话';
 }
 
+/**
+ * 建树失败给用户看的收尾文案（入站消息与 `/new <提示词>` 共用）。
+ *
+ * `create` / `base` 意味着会话根本没有建起来，给「重发」与「就地开」两条路；
+ * `restore` 只丢了目录，会话还在，指回 `/new`。
+ */
+export function worktreeErrorText(err: WorktreeError): string {
+  if (err.kind === 'create') {
+    const head = err.base === undefined ? '❌ 没能建工作树' : `❌ 没能从 \`${err.base}\` 建工作树`;
+    return `${head}: ${err.message}\n本次会话没有创建，重发一次可重试，或再发一条 /new 就地开始。`;
+  }
+  if (err.kind === 'base') {
+    return '❌ 没能读到当前分支的提交\n本次会话没有创建，重发一次可重试，或再发一条 /new 就地开始。';
+  }
+  return `❌ 工作树重建失败: ${err.message} · 用 /new 重新开会话`;
+}
+
 /** 提交短号：回执与 /status 同一口径 */
 export function shortCommit(commit: string): string {
   return commit.slice(0, 7);

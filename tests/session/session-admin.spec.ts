@@ -124,7 +124,7 @@ function createCtx(options: {
   archiveThrows?: 'WorkspaceUnknownSessionError' | 'WorkspaceActiveSessionError';
   /** 模拟宿主 workingDirectory 服务（默认工作目录 / 会话生效目录） */
   workingDirectory?: { defaultDirectory?: string; get?: (session: unknown) => string };
-  /** registry 里的工作区（`/new <工作区>` 按标题匹配、`/sessions all` 分组用） */
+  /** registry 里的工作区（`/new --dir <工作区>` 按标题匹配、`/sessions all` 分组用） */
   workspaces?: Array<{ id: string; path: string; title: string; sessionIds?: string[] }>;
   resume?: (sessionId: string) => Promise<DshAgentHandle>;
   /** 模拟宿主 sessionTitle 服务（/rename 用） */
