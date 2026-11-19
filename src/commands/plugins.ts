@@ -11,7 +11,7 @@ import { errorText, sendMarkdownChunked } from '../shared/index.ts';
 import { renderPluginList } from '../plugins/format.ts';
 import type { PluginInstaller } from '../plugins/index.ts';
 import { ownerOnlyAuth } from './auth.ts';
-import { QUOTE_OPEN_TEXT, tokenize, type RawToken } from './args.ts';
+import { parseArgs } from './args.ts';
 
 /** 用法页：没有 hmr 服务时 `reload` 整条不出现，免得用户看到一条注定回「不支持」的子命令 */
 function usageFor(reloadable: boolean): string {
@@ -27,27 +27,6 @@ function usageFor(reloadable: boolean): string {
 
 /** `--allow-builds` 没给包名 */
 const ALLOW_BUILDS_MISSING = '⚠️ --allow-builds 后要跟包名 · 用法: /help plugins';
-
-/**
- * 安装的附加参数：只认 `--allow-builds=a,b`（用户看到「构建脚本被拦下」之后才会带）。
- *
- * 认不出的参数不猜：原先静默跳过，把 `--allow-builds` 拼错就成了「不带审批安装」，
- * 用户以为放行了，插件又被拦在构建脚本上。
- */
-function parseInstallFlags(tokens: readonly RawToken[]): { approved?: string[]; error?: string } {
-  const approved: string[] = [];
-  for (const token of tokens) {
-    if (!token.value.startsWith('--allow-builds')) {
-      return { error: `⚠️ 未知参数: ${token.value} · 用法: /help plugins` };
-    }
-    const value = token.value.slice('--allow-builds'.length);
-    if (!value.startsWith('=')) return { error: ALLOW_BUILDS_MISSING };
-    const names = value.slice(1).split(',').map((name) => name.trim()).filter((name) => name !== '');
-    if (names.length === 0) return { error: ALLOW_BUILDS_MISSING };
-    approved.push(...names);
-  }
-  return approved.length === 0 ? {} : { approved };
-}
 
 /** /plugins — 插件安装 / 更新 / 列表 / 热重载 */
 export function pluginsCommand({ config, logger, installer, reloader }: CommandDeps): SlashCommand {
@@ -67,10 +46,13 @@ export function pluginsCommand({ config, logger, installer, reloader }: CommandD
       };
       const bot = extras.bot;
       const targetId = extras.replyTarget?.targetId;
-      // 切词按约定俗成：空格分隔，带空格的值用引号包起来
-      const { tokens, error } = tokenize((cmdCtx.command?.raw ?? '').trim());
-      if (error !== undefined) return `${QUOTE_OPEN_TEXT} · 用法: /help plugins`;
-      const words = tokens.map((token) => token.value);
+      // 切词按约定俗成：空格分隔，带空格的值用引号包起来；认不出的参数直接回绝
+      const parsed = parseArgs((cmdCtx.command?.raw ?? '').trim(), {
+        command: 'plugins',
+        flags: [{ name: 'allow-builds', value: true, list: true, missing: ALLOW_BUILDS_MISSING }],
+      });
+      if (parsed.error !== undefined) return parsed.error;
+      const { words } = parsed;
       const sub = words[0] ?? '';
       const notify = targetId === undefined || targetId === '' ? undefined : { targetId };
 
@@ -89,16 +71,12 @@ export function pluginsCommand({ config, logger, installer, reloader }: CommandD
           const target = words[1];
           if (target === undefined) return '⚠️ 缺少包名 · 用法: /help plugins';
 
-          // 参数先校验再动手：认不出的参数回绝，不静默丢掉审批
+          // 参数先校验再动手：多给的位置参数回绝，不静默丢掉（拼错的 --allow-builds
+          // 已在 parseArgs 里当未知参数挡掉）
           const version = sub === 'update' ? words[2] : undefined;
-          let approved: string[] | undefined;
-          if (sub === 'install') {
-            const flags = parseInstallFlags(tokens.slice(2));
-            if (flags.error !== undefined) return flags.error;
-            approved = flags.approved;
-          } else if (tokens[3] !== undefined) {
-            return `⚠️ 未知参数: ${tokens[3].value} · 用法: /help plugins`;
-          }
+          const extra = sub === 'install' ? words[2] : words[3];
+          if (extra !== undefined) return `⚠️ 未知参数: ${extra} · 用法: /help plugins`;
+          const approved = sub === 'install' ? parsed.lists.get('allow-builds') : undefined;
 
           if (sub === 'update') {
             const info = await installer.find(target);

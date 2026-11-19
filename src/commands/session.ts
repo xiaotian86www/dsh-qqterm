@@ -7,7 +7,7 @@
  */
 import type { SlashCommandHandlerContext } from '@tencent-connect/qqbot-nodejs';
 import type { CommandDeps, SlashCommand } from './types.ts';
-import { looksLikeParam, QUOTE_OPEN_TEXT, tokenize, type RawToken } from './args.ts';
+import { parseArgs } from './args.ts';
 import type { SessionConfirmAction } from '../features/session-confirm.ts';
 import { WorktreeError, worktreeErrorText, type ChangeWorkspaceOutcome } from '../session/index.ts';
 import { getScopePeer } from '../shared/index.ts';
@@ -47,15 +47,13 @@ const READ_ONLY_WORKTREE = '⚠️ 只读沙箱开不了工作树 · 用 /permis
 /** `--dir` 后面没跟工作区 */
 const DIR_MISSING = '⚠️ --dir 后要跟工作区 · 用法: /help new';
 
-/** 引号没闭合：按空格切词时引号必须成对 */
-const QUOTE_OPEN = `${QUOTE_OPEN_TEXT} · 用法: /help new`;
 
 /**
  * `/new` 的参数：`--dir`（`-d`）指定工作区，`--worktree`（`-w`）要求下一条
  * 消息先建树，剩下的文字整体是提示词（直接写；`--prompt` 已删除，写了按未知参数处理）。
  *
- * 切词按约定俗成的规则：空格分隔，带空格的路径或提示词用引号包起来；`--dir`
- * 取它后面那个词，`--` 之后一律当提示词，参数位置随意。不认识的参数不猜，只回
+ * 规则与其它命令同一份（args.ts 的 parseArgs）：空格分隔，带空格的路径或提示词用
+ * 引号包起来；`--` 之后一律当提示词，参数位置随意。不认识的参数不猜，只回
  * error，不动会话。
  */
 export function parseNewArgs(raw: string): {
@@ -64,53 +62,18 @@ export function parseNewArgs(raw: string): {
   prompt: string | undefined;
   error: string | undefined;
 } {
-  const { tokens, error } = tokenize(raw);
-  if (error !== undefined) return { arg: '', worktree: false, prompt: undefined, error: QUOTE_OPEN };
-  let worktree = false;
-  let dir: string | undefined;
-  const words: string[] = [];
-  for (let i = 0; i < tokens.length; i += 1) {
-    const token = tokens[i] as RawToken;
-    if (token.quoted) {
-      if (token.value !== '') words.push(token.value);
-      continue;
-    }
-    // `--` 之后不再识别参数：提示词里要出现 -w、--dir 这类字面量时这样写
-    if (token.value === '--') {
-      for (const rest of tokens.slice(i + 1)) {
-        if (rest.value !== '') words.push(rest.value);
-      }
-      break;
-    }
-    if (token.value === '--worktree' || token.value === '-w') {
-      worktree = true;
-      continue;
-    }
-    if (token.value === '--dir' || token.value === '-d') {
-      const value = tokens[i + 1];
-      // 值不能缺，也不能紧跟另一个参数（那种情况写 `--dir -- 值` 也救不了，直接报缺值）
-      if (value === undefined || value.value === '' || looksLikeParam(value)) {
-        return { arg: '', worktree, prompt: undefined, error: DIR_MISSING };
-      }
-      dir = value.value;
-      i += 1;
-      continue;
-    }
-    // `--dir=值` 的写法（值带空格时写成 `--dir="D:\\My Repo"`，引号在切词时已去掉）
-    if (token.value.startsWith('--dir=') || token.value.startsWith('-d=')) {
-      const value = token.value.slice(token.value.indexOf('=') + 1);
-      if (value === '') return { arg: '', worktree, prompt: undefined, error: DIR_MISSING };
-      dir = value;
-      continue;
-    }
-    // 不认识的参数（含已删除的 --prompt / -p）不猜，也不当成提示词
-    if (looksLikeParam(token)) {
-      return { arg: '', worktree, prompt: undefined, error: `⚠️ 未知参数: ${token.value} · 用法: /help new` };
-    }
-    if (token.value !== '') words.push(token.value);
-  }
-  const prompt = words.length === 0 ? undefined : words.join(' ');
-  return { arg: dir ?? '', worktree, prompt, error: undefined };
+  const parsed = parseArgs(raw, {
+    command: 'new',
+    terminator: true,
+    flags: [
+      { name: 'dir', alias: 'd', value: true, missing: DIR_MISSING },
+      { name: 'worktree', alias: 'w' },
+    ],
+  });
+  const worktree = parsed.flags.has('worktree');
+  if (parsed.error !== undefined) return { arg: '', worktree, prompt: undefined, error: parsed.error };
+  const prompt = parsed.words.length === 0 ? undefined : parsed.words.join(' ');
+  return { arg: parsed.values.get('dir') ?? '', worktree, prompt, error: undefined };
 }
 
 /**

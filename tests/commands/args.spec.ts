@@ -2,7 +2,7 @@
  * 命令参数切词的共用规则：空格分隔、成对引号包住一个值、\`--\` 与参数识别交给各命令
  */
 import { describe, expect, it } from 'vitest';
-import { looksLikeParam, parseRest, tokenize } from '../../src/commands/args.ts';
+import { looksLikeParam, parseArgs, parseRest, tokenize } from '../../src/commands/args.ts';
 
 describe('tokenize', () => {
   it('按空格切词，连续空白不产生空词', () => {
@@ -62,5 +62,70 @@ describe('parseRest', () => {
     expect(parseRest('"没闭合')).toBe('"没闭合');
     expect(parseRest('"a" b')).toBe('"a" b');
     expect(parseRest('')).toBe('');
+  });
+});
+
+describe('parseArgs', () => {
+  const spec = {
+    command: 'demo',
+    flags: [
+      { name: 'dir', alias: 'd', value: true },
+      { name: 'worktree', alias: 'w' },
+      { name: 'allow-builds', value: true, list: true },
+    ],
+    terminator: true,
+  };
+
+  it('开关进 flags，其余是位置参数', () => {
+    const parsed = parseArgs('修一下 -w 再跑', spec);
+    expect(parsed.words).toEqual(['修一下', '再跑']);
+    expect(parsed.flags.has('worktree')).toBe(true);
+    expect(parsed.error).toBeUndefined();
+  });
+
+  it('带值参数 `--dir 值` 与 `--dir=值` 等价，重复给取最后一次', () => {
+    expect(parseArgs('--dir repo', spec).values.get('dir')).toBe('repo');
+    expect(parseArgs('--dir=repo', spec).values.get('dir')).toBe('repo');
+    expect(parseArgs('-d a --dir b', spec).values.get('dir')).toBe('b');
+  });
+
+  it('列表参数按逗号拆开、多次出现累积', () => {
+    const parsed = parseArgs('--allow-builds a,b --allow-builds=c', spec);
+    expect(parsed.lists.get('allow-builds')).toEqual(['a', 'b', 'c']);
+  });
+
+  it('缺值回声明里的整句', () => {
+    const strict = {
+      command: 'demo',
+      flags: [{ name: 'dir', alias: 'd', value: true, missing: '⚠️ --dir 后要跟工作区' }],
+    };
+    expect(parseArgs('--dir', strict).error).toBe('⚠️ --dir 后要跟工作区');
+    expect(parseArgs('--dir=', strict).error).toBe('⚠️ --dir 后要跟工作区');
+    expect(parseArgs('--dir -w', strict).error).toBe('⚠️ --dir 后要跟工作区');
+  });
+
+  it('没声明 missing 时用通用文案', () => {
+    expect(parseArgs('--dir', spec).error).toBe('⚠️ --dir 后要跟值 · 用法: /help demo');
+  });
+
+  it('认不出的参数与开关带值都回未知参数', () => {
+    expect(parseArgs('--nope x', spec).error).toBe('⚠️ 未知参数: --nope · 用法: /help demo');
+    expect(parseArgs('--worktree=1', spec).error).toBe('⚠️ 未知参数: --worktree=1 · 用法: /help demo');
+  });
+
+  it('引号包着的参数名是位置参数', () => {
+    const parsed = parseArgs('看下 "-w" 这个参数', spec);
+    expect(parsed.words).toEqual(['看下', '-w', '这个参数']);
+    expect(parsed.flags.size).toBe(0);
+  });
+
+  it('`--` 之后的词一律是位置参数', () => {
+    const parsed = parseArgs('--dir repo -- -w --dir', spec);
+    expect(parsed.values.get('dir')).toBe('repo');
+    expect(parsed.words).toEqual(['-w', '--dir']);
+  });
+
+  it('引号没闭合时回命令名对应的用法', () => {
+    expect(parseArgs('--dir "D:\\My Repo', spec).error).toBe('⚠️ 引号没有闭合 · 用法: /help demo');
   });
 });
