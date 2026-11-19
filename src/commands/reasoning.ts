@@ -5,6 +5,7 @@
  * 读与写都交给宿主（`agent.model.select` / `agentDefaultModel`），插件不存偏好。
  */
 import type { CommandDeps, SlashCommand } from './types.ts';
+import { parseRest } from './args.ts';
 import { ownerOnlyAuth } from './auth.ts';
 import { getScopePeer, sendMarkdownChunked } from '../shared/index.ts';
 import { effortLabel } from '../model/effort-label.ts';
@@ -28,7 +29,7 @@ export function reasoningCommand({ manager, config, logger }: CommandDeps): Slas
     ].join('\n'),
     handler: async (cmdCtx) => {
       const { scope, peerId } = getScopePeer(cmdCtx);
-      const args = (cmdCtx.command?.raw ?? '').trim().toLowerCase();
+      const args = parseRest(cmdCtx.command?.raw ?? '').toLowerCase();
 
       const view = await manager.getEffortView(scope, peerId);
 

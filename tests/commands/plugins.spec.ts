@@ -170,6 +170,23 @@ describe('/plugins install', () => {
     }), h.bot);
   });
 
+  it('--allow-builds 拼错时回绝，不能静默丢掉审批', async () => {
+    const h = harness();
+    const result = await h.command.handler(makeCtx('install dsh-x --allow-build=esbuild', h.bot));
+
+    expect(String(result)).toContain('未知参数');
+    expect(h.run).not.toHaveBeenCalled();
+  });
+
+  it('--allow-builds 没给包名时回缺值', async () => {
+    const h = harness();
+    expect(String(await h.command.handler(makeCtx('install dsh-x --allow-builds', h.bot))))
+      .toBe('⚠️ --allow-builds 后要跟包名 · 用法: /help plugins');
+    expect(String(await h.command.handler(makeCtx('install dsh-x --allow-builds=', h.bot))))
+      .toBe('⚠️ --allow-builds 后要跟包名 · 用法: /help plugins');
+    expect(h.run).not.toHaveBeenCalled();
+  });
+
   it('缺包名时只给用法，不调度', async () => {
     const h = harness();
     const result = await h.command.handler(makeCtx('install', h.bot));

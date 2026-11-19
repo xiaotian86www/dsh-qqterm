@@ -12,6 +12,7 @@ import type { SlashCommandHandlerContext } from '@tencent-connect/qqbot-nodejs';
 import { statSync } from 'node:fs';
 import { basename } from 'node:path';
 import type { CommandDeps, SlashCommand } from './types.ts';
+import { parseRest } from './args.ts';
 import type { ReplyTarget } from '../types.ts';
 import { getScopePeer } from '../shared/index.ts';
 import { sessionAdminAuth } from './sessions.ts';
@@ -40,7 +41,8 @@ export function getCommand({ manager, config, bot, logger }: CommandDeps): Slash
     description: '发送本地文件',
     usage: USAGE,
     handler: async (cmdCtx) => {
-      const raw = (cmdCtx.command?.raw ?? '').trim();
+      // 整行都是路径：带空格的路径不用引号也对，写了引号就去掉
+      const raw = parseRest(cmdCtx.command?.raw ?? '');
       if (raw === '') return '⚠️ 缺少文件路径 · 用法: /help get';
 
       const sender = bot as unknown as MediaSenderLike | undefined;

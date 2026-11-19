@@ -194,7 +194,7 @@ describe('/sessions 持有视图', () => {
     const text = await run(manager, '');
 
     expect(text).toContain('### 🗂 工作中会话（1 个工作区 · 2 个会话）');
-    expect(text).toContain('**repo** · <qqbot-cmd-input text="/new /repo" show="/repo"/>');
+    expect(text).toContain('**repo** · <qqbot-cmd-input text="/new --dir /repo" show="/repo"/>');
     expect(text).not.toContain('未分组');
     expect(text).toContain('#cccc1111 · 当前会话 · 生成中');
     expect(text).toContain('#dddd2222 · 旧会话 · 空闲');
@@ -293,8 +293,8 @@ describe('/sessions 持有视图', () => {
     const text = await run(manager, '');
 
     // 组标题与 /sessions all 同一写法，组之间空行；行内不再重复工作区后缀
-    expect(text).toContain('**repo** · <qqbot-cmd-input text="/new /repo" show="/repo"/>');
-    expect(text).toContain('**docs** · <qqbot-cmd-input text="/new /docs" show="/docs"/>');
+    expect(text).toContain('**repo** · <qqbot-cmd-input text="/new --dir /repo" show="/repo"/>');
+    expect(text).toContain('**docs** · <qqbot-cmd-input text="/new --dir /docs" show="/docs"/>');
     expect(text).toContain('show="#aaaa1111 · 本区会话 · 空闲');
     expect(text).toContain('show="#bbbb2222 · 别的项目 · 空闲');
     expect(text.indexOf('**repo**')).toBeLessThan(text.indexOf('**docs**'));
@@ -327,7 +327,7 @@ describe('/sessions 持有视图', () => {
 
     // 名字不参与链接；路径原样保留 `_`，属性里的 `&` 转义
     expect(text).toContain(
-      '**repo** · <qqbot-cmd-input text="/new D:\\my_ws &amp; co" show="D:\\my_ws &amp; co"/>',
+      '**repo** · <qqbot-cmd-input text="/new --dir D:\\my_ws &amp; co" show="D:\\my_ws &amp; co"/>',
     );
   });
 
@@ -586,10 +586,10 @@ describe('/sessions all', () => {
     expect(text).toContain('**dsh-qqterm**');
     expect(text).toContain('**default-workspace**');
     expect(text).toContain(
-      '**dsh-qqterm** · <qqbot-cmd-input text="/new D:\\thirdparty\\dsh-qqterm" show="D:\\thirdparty\\dsh-qqterm"/>',
+      '**dsh-qqterm** · <qqbot-cmd-input text="/new --dir D:\\thirdparty\\dsh-qqterm" show="D:\\thirdparty\\dsh-qqterm"/>',
     );
     // 目录不存在时不给「新会话」入口
-    expect(text).not.toContain('text="/new C:');
+    expect(text).not.toContain('text="/new --dir C:');
     expect(text).toContain('⚠️ 目录不存在');
     // 所有视图都只用短 id，不编号
     expect(text).not.toMatch(/^\d+\. /m);
@@ -813,6 +813,22 @@ describe('/sessions rename', () => {
 
     expect(manager.renameSession).toHaveBeenCalledWith('session-held01', '新的 会话名');
     expect(text).toBe('✅ 会话名已改为「改好的名字」 · `#held01`');
+  });
+
+  it('标题带空格时加引号也照收，引号不进标题', async () => {
+    const manager = makeManager({
+      listHeldSessions: vi.fn(async () => [entry({ id: 'session-held01', held: true })]),
+    });
+
+    await run(manager, 'rename #held01 "新的 会话名"');
+
+    expect(manager.renameSession).toHaveBeenCalledWith('session-held01', '新的 会话名');
+  });
+
+  it('认不出的参数回绝，不当目标也不当标题', async () => {
+    const manager = makeManager();
+    expect(await run(manager, 'rename #held01 --title 新名字')).toBe('⚠️ 未知参数: --title · 用法: /help sessions');
+    expect(manager.renameSession).not.toHaveBeenCalled();
   });
 
   it('id 可以从全量清单解析（目标还没打开时提示先恢复）', async () => {

@@ -6,6 +6,7 @@
  * session，所以当前会话还没打开时只如实拒绝，不在改名里偷偷拉起会话。
  */
 import type { CommandDeps, SlashCommand } from './types.ts';
+import { parseRest } from './args.ts';
 
 /** 回复里展示标题的上限（宿主标题上限 80 字节，这里只防一行过长） */
 const TITLE_MAX = 40;
@@ -37,7 +38,8 @@ export function renameCommand({ manager }: CommandDeps): SlashCommand {
       '改别的会话用 `/sessions rename <id> <标题>`',
     ].join('\n'),
     handler: (cmdCtx) => {
-      const raw = (cmdCtx.command?.raw ?? '').trim();
+      // 整行都是标题：带空格的标题不用引号也对，写了引号就去掉
+      const raw = parseRest(cmdCtx.command?.raw ?? '');
       const currentId = manager.currentSessionId();
 
       // 不带参数 = 看一下现在叫什么，顺带给出下一步

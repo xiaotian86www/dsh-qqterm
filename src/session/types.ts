@@ -489,7 +489,7 @@ export interface ArchiveSessionOutcome {
   alreadyArchived?: boolean;
 }
 
-/** 一个工作区的展示信息（`/new <工作区>` 按标题 / 路径匹配用） */
+/** 一个工作区的展示信息（`/new --dir <工作区>` 按标题 / 路径匹配用） */
 export interface WorkspaceInfo {
   /** 显示标题（宿主自动标题 = 目录名） */
   title: string;

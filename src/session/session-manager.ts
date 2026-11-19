@@ -220,7 +220,7 @@ export class SessionManager {
   /**
    * 当前这个聊天的工作目录（内存态，唯一读写来源）。
    *
-   * 只记下一会话的落点（工作区目录）：建会话、切换会话、`/new <工作区>` 写它；
+   * 只记下一会话的落点（工作区目录）：建会话、切换会话、`/new --dir <工作区>` 写它；
    * 运行期 `cd` 不写（那是会话的运行目录，宿主记在会话里、重启回放恢复）。
    * 构造时优先读回上次记下的目录，没有或已不存在才取宿主默认工作区；读取不回退。
    */
@@ -1491,7 +1491,14 @@ export class SessionManager {
         if (err instanceof WorktreeError) throw err;
         if (!(await this.mayCreateAfterResumeFailure(key, sessionId, err))) throw err;
         mkdirSync(directory, { recursive: true });
-        const created = await this.spawnSession(key, sessionId, directory, agentPreset, composed.setup);
+        const created = await this.spawnSession(
+          key,
+          sessionId,
+          directory,
+          agentPreset,
+          composed.setup,
+          this.pendingWorktree,
+        );
         agent = created.agent;
         handle = created.handle;
         directory = created.directory;
@@ -1547,15 +1554,18 @@ export class SessionManager {
    * 默认策略只读、当前目录不是主仓库——后两种由调用方就地开会话并说明原因，
    * 服务缺失不提（部署差异）。
    */
-  private worktreeBase(directory: string): string | undefined {
-    if (!this.pendingWorktree) return undefined;
+  private worktreeBase(directory: string, wanted: boolean): string | undefined {
+    if (!wanted) return undefined;
     if (this.host.worktrees() === undefined) return undefined;
     if (this.host.sandboxMode() === 'read-only') return undefined;
     return mainRepositoryRoot(directory);
   }
 
   /**
-   * 新建会话：`/new --worktree` 要求开树就开在树里，否则就地。
+   * 新建会话：要求开树（`/new --worktree`、`/new --background -w`）就开在树里，否则就地。
+   *
+   * `wanted` 由调用方传入（当前指针的意图，或后台启动自带的要求），这里不读也不清
+   * `pendingWorktree`：清意图只发生在 `setCurrent`（成功接上当前会话）那一步。
    *
    * 宿主不回滚建树的半成品（分支与检出可能留下），这里只关掉刚创建的 agent：
    * 指针与已获取集都不动；意图保留，用户重发一次就会重新尝试。
@@ -1567,6 +1577,7 @@ export class SessionManager {
     directory: string,
     agentPreset: string | undefined,
     setup: PresetComposition['setup'],
+    wanted: boolean,
   ): Promise<{
     agent: DshAgent;
     handle: DshAgentHandle;
@@ -1574,8 +1585,7 @@ export class SessionManager {
     worktree?: SpawnedWorktree;
     worktreeSkipped?: 'not-repo' | 'read-only';
   }> {
-    const wanted = this.pendingWorktree;
-    const base = this.worktreeBase(directory);
+    const base = this.worktreeBase(directory, wanted);
     // 基点按 chatDir 的 HEAD 算：宿主默认取 repository root 的 HEAD，在树里再开会话
     // 会从主检出而不是当前分支拉出。读不到 HEAD 就不建会话——不降级到主检出。
     const plan = base === undefined
@@ -1596,7 +1606,6 @@ export class SessionManager {
     if (plan === undefined || worktrees === undefined) {
       // 明确要求过却没开成：意图用完即弃，并把原因带回回执
       if (!wanted) return { agent: created.agent, handle: created, directory };
-      this.pendingWorktree = false;
       if (worktrees === undefined) return { agent: created.agent, handle: created, directory };
       const reason = this.host.sandboxMode() === 'read-only' ? 'read-only' as const : 'not-repo' as const;
       return { agent: created.agent, handle: created, directory, worktreeSkipped: reason };
@@ -1608,7 +1617,6 @@ export class SessionManager {
         { from: plan.head.commit },
         AbortSignal.timeout(WORKTREE_TIMEOUT_MS),
       );
-      this.pendingWorktree = false;
       this.logger.info(`created worktree: key=${key} branch=${tree.branch} path=${tree.path}`);
       return {
         agent: created.agent,
@@ -1938,9 +1946,100 @@ export class SessionManager {
   }
 
   /**
+   * `/new <提示词>`：开新会话并把提示词作为第一条消息发出去。
+   *
+   * 走普通入站消息同一条路：原文留在 `lastPrompt`（轮次失败后的「重发」要用），
+   * `followup` 写进宿主的 next-turn inbox。建树回执不在这里发——命令层要把它
+   * 并进同一条回执，所以取走并从记录上摘掉，免得下一条普通消息再发一次。
+   */
+  async promptNewSession(
+    scope: ChatScope,
+    peerId: string,
+    senderId: string,
+    prompt: string,
+    replyTarget: ReplyTarget,
+  ): Promise<{ sessionId: string; worktreeNotice?: string }> {
+    const record = await this.getOrCreate(scope, peerId, senderId, replyTarget);
+    const body = prompt.trim();
+    record.lastPrompt = body;
+    record.agent.followup(createQQUserMessage(body));
+    const notice = record.worktreeNotice;
+    if (notice !== undefined) delete record.worktreeNotice;
+    this.logger.info(`prompt sent with /new: sessionId=${record.sessionId}`);
+    return notice === undefined
+      ? { sessionId: record.sessionId }
+      : { sessionId: record.sessionId, worktreeNotice: notice };
+  }
+
+  /**
+   * `/new --background`：另开一条会话并把提示词发出去，不接管当前聊天。
+   *
+   * 与 `/new <提示词>` 的唯一区别是不动当前指针与聊天工作区：这条会话只进已获取
+   * 集合，输出、提问、审批照样回 QQ（带 `#短id` 署名），切过去用 `/sessions resume`。
+   * `--worktree` 的建树要求从参数进来，不经过 `pendingWorktree`，回执同样交给命令层。
+   */
+  async startBackgroundSession(input: {
+    directory: string;
+    worktree: boolean;
+    prompt: string;
+    scope: ChatScope;
+    peerId: string;
+    senderId: string;
+    replyTarget: ReplyTarget;
+  }): Promise<{ sessionId: string; worktreeNotice?: string }> {
+    const key = this.sessionKey();
+    const sessionId = SessionId(mintSessionId());
+    const presetId = await this.resolvePersistedPreset(sessionId);
+    const composed = await this.composePreset(presetId);
+    const directory = input.directory;
+    mkdirSync(directory, { recursive: true });
+    const created = await this.spawnSession(
+      key,
+      sessionId,
+      directory,
+      composed.agentPreset,
+      composed.setup,
+      input.worktree,
+    );
+
+    const record: SessionRecord = {
+      sessionKey: key,
+      sessionId,
+      agent: created.agent,
+      handle: created.handle,
+      replyTarget: input.replyTarget,
+      scope: input.scope,
+      peerId: input.peerId,
+      senderId: input.senderId,
+      ...(composed.agentPreset ? { agentPreset: composed.agentPreset } : {}),
+      acquiredAt: Date.now(),
+    };
+    this.records.set(sessionId, record);
+    this.rememberHeld(sessionId);
+
+    // 挂到工作区以便侧栏可见；指针与聊天工作区都不动，切过去才成为当前会话
+    const attachCwd = this.headerCwd(created.agent) ?? directory;
+    if (attachCwd) void this.host.attachSessionToWorkspace(sessionId, attachCwd);
+
+    const body = input.prompt.trim();
+    record.lastPrompt = body;
+    created.agent.followup(createQQUserMessage(body));
+    this.logger.info(
+      `background session started: sessionId=${sessionId} dir=${created.directory} worktree=${input.worktree}`,
+    );
+
+    const notice = created.worktree !== undefined
+      ? worktreeNotice(created.worktree.tree, created.worktree.parent)
+      : created.worktreeSkipped === undefined
+        ? undefined
+        : worktreeSkipNotice(created.worktreeSkipped);
+    return notice === undefined ? { sessionId } : { sessionId, worktreeNotice: notice };
+  }
+
+  /**
    * 该聊天当前所在的工作目录（内存态，唯一来源）。
    *
-   * 初值在构造时取宿主默认工作区；建会话、切换会话、`/new <工作区>` 会覆盖它。
+   * 初值在构造时取宿主默认工作区；建会话、切换会话、`/new --dir <工作区>` 会覆盖它。
    * 运行期 `cd` 不改它（那只动会话的运行目录）。这里不回退会话 header /
    * 持久化记录 / 默认工作区。
    */
@@ -1951,7 +2050,7 @@ export class SessionManager {
   /**
    * 工作区的归属目录：链接工作树里的路径取主仓库根，其它原样返回。
    *
-   * 只在写落点前用一次（读回旧 prefs、`/new <路径>`），以及 `/sessions` 比会话用。
+   * 只在写落点前用一次（读回旧 prefs、`/new --dir <路径>`），以及 `/sessions` 比会话用。
    * 树是会话的运行目录，不是工作区：一旦写进落点，新会话的 header.cwd 就变成
    * 树路径，凭空长出一个以树名命名的工作区。
    */
@@ -2218,7 +2317,7 @@ export class SessionManager {
     _peerId: string,
   ): Promise<{ title: string; path: string; missing: boolean } | undefined> {
     // 运行目录偏离会话自己的工作区（cd、或会话落在树里）时按运行目录算，树里的
-    // `/get a.txt` 才不会指到主仓库去；没偏离就以落点为准——`/new <工作区>` 之后、
+    // `/get a.txt` 才不会指到主仓库去；没偏离就以落点为准——`/new --dir <工作区>` 之后、
     // 下一条消息之前，基准已经是新工作区
     const record = this.currentRecord();
     const live = record === undefined ? undefined : this.host.sessionDirectory(record.agent.session);
@@ -2266,7 +2365,7 @@ export class SessionManager {
     return this.host.supportsWorkspaceRegistry();
   }
 
-  /** 宿主工作区清单（`/new <工作区>` 匹配用） */
+  /** 宿主工作区清单（`/new --dir <工作区>` 匹配用） */
   listWorkspaceInfos(): WorkspaceInfo[] {
     return this.host.workspaceList().map((item) => ({
       title: item.title,
@@ -2279,7 +2378,7 @@ export class SessionManager {
    * 解析工作区参数：宿主工作区的标题、目录名（大小写不敏感，支持唯一前缀）
    * 或绝对路径。
    *
-   * 只做解析与目录校验，不看会话状态、不写任何记录。`/new <工作区>` 要先用它
+   * 只做解析与目录校验，不看会话状态、不写任何记录。`/new --dir <工作区>` 要先用它
    * 验一遍：路径写错不该把当前会话弄丢。
    *
    * @param arg 工作区标题 / 目录名 / 绝对路径

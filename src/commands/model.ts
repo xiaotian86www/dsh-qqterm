@@ -2,6 +2,7 @@
  * 模型命令：/model — 查看或切换模型
  */
 import type { CommandDeps, SlashCommand } from './types.ts';
+import { parseRest } from './args.ts';
 import { ownerOnlyAuth } from './auth.ts';
 import { getScopePeer, sendMarkdownChunked } from '../shared/index.ts';
 import { effortLabel } from '../model/effort-label.ts';
@@ -21,7 +22,7 @@ export function modelCommand({ manager, config, logger }: CommandDeps): SlashCom
     ].join('\n'),
     handler: async (cmdCtx) => {
       const { scope, peerId } = getScopePeer(cmdCtx);
-      const args = (cmdCtx.command?.raw ?? '').trim();
+      const args = parseRest(cmdCtx.command?.raw ?? '');
 
       // 无参数：显示当前模型 + 可用模型列表（可点击）
       if (!args) {

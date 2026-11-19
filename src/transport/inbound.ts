@@ -10,7 +10,7 @@
  * 消息始终落到「当前会话」；其它已获取会话由 `/sessions resume`、`/to` 与
  * 问答通道驱动，不从这条普通消息路径直接写。
  */
-import { WorktreeError, type SessionManager } from '../session/index.ts';
+import { WorktreeError, worktreeErrorText, type SessionManager } from '../session/index.ts';
 import { createQQUserMessage } from '../session/user-message.ts';
 import type { ChatScope, Logger, QuotedAttachment, RawAttachment, ReplyTarget } from '../types.ts';
 import {
@@ -101,11 +101,7 @@ export async function handleInbound(
     try {
       // 工作树失败是最常见的一种：说清「会话没建」或「目录回不来」，别混进通用兜底
       const text = err instanceof WorktreeError
-        ? (err.kind === 'create'
-          ? `${err.base === undefined ? '❌ 没能建工作树' : `❌ 没能从 \`${err.base}\` 建工作树`}: ${err.message}\n本次会话没有创建，重发一次可重试，或再发一条 /new 就地开始。`
-          : err.kind === 'base'
-            ? '❌ 没能读到当前分支的提交\n本次会话没有创建，重发一次可重试，或再发一条 /new 就地开始。'
-            : `❌ 工作树重建失败: ${err.message} · 用 /new 重新开会话`)
+        ? worktreeErrorText(err)
         : '⚠️ 处理消息时出现异常，请稍后重试。';
       await bot.sendMarkdown(replyTarget, text);
     } catch (sendErr) {

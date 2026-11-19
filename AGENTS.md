@@ -51,7 +51,7 @@ qqterm 是通道，不是能力所有者：目标是从 QQ 接入的超级终端
   - `webServer`：只有 web / Desktop 组合包提供。绑定页经 `mountBindRoutes`（`src/setup/bind-routes.ts`）用 `ctx.inject(['webServer'], …)` 订阅，到位时注册、离开或替换时由 Cordis 注销；缺服务时扫码只走终端 / 浏览器降级通道。
   - `sessionController`：只软读 `list()`，取 `/sessions` 排序用的 `updatedAt`（`max(createdAt, lastPromptAt)`）与 `blank`；缺服务只丢排序与空白会话过滤。
   - `workspaceRegistry`：缺服务时 `/sessions` 仍按目录分组，但组标题只给路径、不标 `📌`、不给归档入口；归档类子命令（无 `hmr` 时的 `/plugins reload` 同理）按未知子命令处理，`/new <名字>` 回不支持（绝对路径照常）。
-  - `worktrees`：缺服务时 `/new --worktree` 按未知参数处理。建会话时目录不是 Git 仓库、或沙箱已只读，就地开会话并提示；只读沙箱下 `/new --worktree` 当场拒绝。`--worktree`（`-w`）要求下一条消息先建树再开会话，基点是第一条消息到达时目录的 HEAD（`from: <完整 sha>`），读不到就不建会话（回落主检出也算错）；意图只在内存里按 sessionKey 记，`/to`、`/sessions resume`、`/clear` 与不带参数的 `/new` 清掉，建树失败保留（重发即重试）。`/status` 不出工作树行，`/sessions archive` 不提清理。
+  - `worktrees`：缺服务时 `/new --worktree` 按未知参数处理。建会话时目录不是 Git 仓库、或沙箱已只读，就地开会话并提示；只读沙箱下 `/new --worktree` 当场拒绝。`--worktree`（`-w`）要求下一条消息先建树再开会话，基点是第一条消息到达时目录的 HEAD（`from: <完整 sha>`），读不到就不建会话（回落主检出也算错）；意图只在内存里按 sessionKey 记，`/to`、`/sessions resume`、`/clear` 与不带参数的 `/new` 清掉，建树失败保留（重发即重试）。`/new --worktree <提示词>` 在发这条提示词时建树，`--background -w` 同样（要求从参数进来，不经过 `pendingWorktree`）。`/status` 不出工作树行，`/sessions archive` 不提清理。
 - 只软读 `sandboxPolicy.resolve()` 判只读，不写进 `inject`。`compaction` 也不进 `inject`：它挂在 preset 作用域，`/compact` 的判定与执行全走宿主 `commands` 登记簿。
 - 因可选服务缺失而不可用的能力**不解释、不提示**：命令不注册，或按未知子命令 / 未知参数处理，用法页不列，聊天里不出现部署差异。
 
@@ -75,9 +75,11 @@ qqterm 是通道，不是能力所有者：目标是从 QQ 接入的超级终端
 - `ask_user_question` / `approval` 走宿主 waterfall，不退回 `userQuestions.ask` 探测。投递失败按键盘 → 纯文本降级；仍失败按「暂不可用」挂起，等 `ready` / `resumed` 或新入站消息后重发，不判成 `unavailable`。插件卸载或渠道失效时把挂起项 `handoffPending` 交还宿主；借来的会话不 cancel、不 dispose。
 - 聊天会话 key 固定 `qqterm:${appId}:chat`，全 bot 只有一个「当前会话」；已获取会话可以有多份，输出全部回 QQ。非当前会话的署名见 §4.9。
 - `/sessions` 默认按工作区分组列工作中会话（重启后尚未打开的也在列），`all` 看全部、只标 `📌`。`resume` 只改指针；`/new` 清指针、不停旧会话；`/clear`（别名 `/reset`）停当前再开新，`/clear all` 停全部；`/stop` 停当前，`/stop all` 停全部生成中。`/clear` 与 `/clear all` 先发确认卡（5 分钟过期，卡片发不出去就放弃动作），`/new` 直接执行。
+- `/new` 的参数：工作区用 `--dir`（`-d`），其余非参数词按顺序连成提示词直接发出去；`--worktree`（`-w`）让这条提示词先建树，`--background`（`-b`）另开一条会话、不动当前指针与聊天工作区且必须带提示词。
 - 启动恢复：QQ `ready` 后按 prefs 指针 `getOrCreate`（singleflight）；盘上已无则跳过并清指针，**恢复失败绝不新建**；占用 / 后端故障时指针保持原样。回复目标存 `model-prefs.json` 的 `targets`，值变化才写；恢复失败（locked / 宿主报错）用它推 `⚠️ 上次的会话没能恢复` + `/sessions resume` 按钮，`not-found` 静默。持久化写在消息路径上，不写卸载钩子（强杀不执行）。
 - 模型 / 思考强度 / preset 沿用宿主核心行为，插件不另立配置：`/model`、`/reasoning` 有活跃会话时调 `agent.model.select` 写进该会话（不 fork 不重建，下轮生效），同时把同一份选择写成部署默认值；无会话只写默认值（`agentDefaultModel.saveSelection`，`/permission` 走 `settings.update`）。整段读改写走 `serializeSelection`，同一会话的 QQ 侧写入串行，不为切换拉起会话。`/preset` 写 `agent-preset-registry.selectedDefault`，对新建会话生效，插件不存 preset。查看视图显示当前值并标 `✅`，不造「全局」标签。
 - 插件只在 `~/.dsh-qqterm/model-prefs.json` 存 `sessionIds` / `dirs` / `targets` / `held`。`dirs` 是「下一条消息建会话的落点」，只由建会话、切换会话与 `/new <工作区|路径>` 写，运行期 `cd` 只改会话运行目录、不写。工作区一律按会话 `header.cwd` 算：`/sessions` 分组、建会话落点、`/status` 同一来源；树会话的工作区是主仓库根，树只作运行目录；`/get`、`/ls` 的相对路径按运行目录算。
+- 命令参数统一走 `src/commands/args.ts`，不要自己写 `raw.split(/\s+/)`。带参数的命令（`/new`、`/sessions`、`/plugins`）走 `parseArgs(raw, { command, flags, terminator })`：`FlagSpec` 声明 `name` / `alias` / `value` / `list` / `missing`，出口是 `words` / `flags` / `values` / `lists`；引号成对包住的值留在同一个词里、引号本身去掉，引号包着的词不当参数，`--dir=值` 等价于 `--dir 值`，未闭合回 `⚠️ 引号没有闭合 · 用法: /help <命令>`，认不出回 `⚠️ 未知参数: x · 用法: /help <命令>`。整行就是一个值的命令（`/ls`、`/get`、`/rename`、`/goal`、`/model`、`/reasoning`、`/preset`、`/permission`、`/to` 的正文）走 `parseRest()`。禁止静默跳过认不出的参数（`/plugins install` 的 `--allow-builds` 拼错不得回退成不带审批安装）。
 - 会话标题由 `sessionTitle.rename` 写入 `session/title`，写完即固定。`/rename` 只改当前会话，`/sessions rename <id>` 改已打开会话；两者只接受 live session，冷会话提示先 `/sessions resume`。
 - 入站 `source.kind` 必须是 `user`（`src/session/user-message.ts`）：标题、最近提问时间、轮次大纲、replay 断点都以人类消息为触发条件，自造 kind 会让新会话停在「未命名会话」。
 - Markdown 按 `textChunkLimit` 分片，代码块 / 表格感知切分在 `src/transport/chunker.ts`，不要绕过。

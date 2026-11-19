@@ -6,6 +6,7 @@
  * 所以只在第一行加状态图标，不再叠一句中文结论。
  */
 import type { CommandDeps, SlashCommand } from './types.ts';
+import { parseRest } from './args.ts';
 import { getScopePeer } from '../shared/index.ts';
 
 /** /goal — 转发宿主的长期目标命令 */
@@ -25,7 +26,8 @@ export function goalCommand({ manager }: CommandDeps): SlashCommand {
     handler: async (cmdCtx) => {
       const msg = cmdCtx.message;
       const { scope, peerId } = getScopePeer(cmdCtx);
-      const raw = (cmdCtx.command?.raw ?? '').trim();
+      // 整行都是目标参数：带空格的写法不用引号也对，写了引号就去掉
+      const raw = parseRest(cmdCtx.command?.raw ?? '');
       // 没有活跃会话时从磁盘拉起：目标挂在会话上，新建会话与其它命令一致
       const record = await manager.getOrCreate(scope, peerId, msg.senderId, {
         scope,

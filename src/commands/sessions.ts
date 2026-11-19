@@ -20,7 +20,7 @@
  * 输出统一走 sendMarkdownChunked（与 /model、/preset 一致）：普通字符串回复
  * 不会按 markdown 渲染，`###` 和 `<qqbot-cmd-input>` 会原样显示成文本。
  * 列表里每条会话渲染成可点击命令，点一下就把对应子命令填进输入框；
- * 工作区组标题只把路径做成这样的命令（填入 `/new <路径>`），名字保持纯文本。
+ * 工作区组标题只把路径做成这样的命令（填入 `/new --dir <路径>`），名字保持纯文本。
  *
  * 归档走宿主 `workspaceRegistry.archiveSession`：只往 registry 的全局归档集里
  * 加一个 id，Web 侧栏与本命令都不再列出它，磁盘日志原样保留，随时可取消归档。
@@ -35,6 +35,7 @@
 import { isAbsolute } from 'node:path';
 import type { CommandDeps, SlashCommand } from './types.ts';
 import { ownerOnlyAuth } from './auth.ts';
+import { parseArgs } from './args.ts';
 import { getScopePeer, formatRelativeTime, sendMarkdownChunked, shortSessionId } from '../shared/index.ts';
 import type { ArchiveSessionOutcome, WorkspaceGroup, WorkspaceSession } from '../session/index.ts';
 
@@ -225,20 +226,20 @@ function shortTitle(entry: WorkspaceSession): string {
 }
 
 /**
- * 工作区路径做成可点击命令：点一下把 `/new <绝对路径>` 填进输入框。
+ * 工作区路径做成可点击命令：点一下把 `/new --dir <绝对路径>` 填进输入框。
  *
  * 路径不走 cleanInline——它会把 `_` `*` `~` 之类删掉，按钮上的地址就和
  * 真实目录对不上；这里只去换行，再按属性值转义。
  */
 function workspaceLink(path: string): string {
   const label = path.replace(/[\r\n]+/g, ' ').trim();
-  return `<qqbot-cmd-input text="${attrValue(`/new ${label}`)}" show="${attrValue(label)}"/>`;
+  return `<qqbot-cmd-input text="${attrValue(`/new --dir ${label}`)}" show="${attrValue(label)}"/>`;
 }
 
 /**
  * 工作区标题行。
  *
- * `linkable` 只在浏览视图里开：目录存在时把路径渲染成 `/new <路径>` 命令，
+ * `linkable` 只在浏览视图里开：目录存在时把路径渲染成 `/new --dir <路径>` 命令，
  * 工作区名保持纯文本。未分组、目录不存在、不是绝对路径时保持纯文本——
  * 点了也到不了那个目录。目录不存在时单独一行：状态图标只能放行首。
  */
@@ -369,8 +370,10 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Slash
       return usageFor(manager.workspaceRegistryAvailable());
     },
     handler: async (cmdCtx) => {
-      const raw = (cmdCtx.command?.raw ?? '').trim();
-      const words = raw.split(/\s+/).filter(Boolean);
+      // 切词按约定俗成：空格分隔，带空格的目标或标题用引号包起来；认不出的参数
+      // 由 parseArgs 直接回绝
+      const parsed = parseArgs((cmdCtx.command?.raw ?? '').trim(), { command: 'sessions' });
+      const words = [...parsed.words];
       let sub = words[0] ?? '';
       const rest = words.slice(1);
       const { scope, peerId } = getScopePeer(cmdCtx);
@@ -391,6 +394,9 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Slash
         rest.shift();
       }
 
+      // 认不出的参数不当目标（旧写法会得到「没有匹配的会话」，等于静默丢弃）。
+      // 错误统一在 render 里回，走同一条 markdown 通道
+      const invalid = parsed.error;
       const loadHeld = async (): Promise<WorkspaceSession[] | string> => {
         try {
           const entries = await manager.listHeldSessions(scope, peerId);
@@ -444,6 +450,8 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Slash
       };
 
       const render = async (): Promise<string> => {
+        if (invalid !== undefined) return invalid;
+
         // 没有 registry 时归档子命令按未知子命令处理，与其它拼错的子命令同一句话
         if (!archivable && (sub === 'archive' || sub === 'a'
           || sub === 'archived' || sub === 'unarchive' || sub === 'u' || sub === 'restore')) {
@@ -554,7 +562,7 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Slash
             let pickerPage = 1;
             let listing = rest.length === 0;
             if (rest.length === 1 && /^\d{1,3}$/.test(rest[0]!)) {
-              pickerPage = Number(rest[0]);
+              pickerPage = Number(rest[0]!);
               listing = true;
             }
             // 不带目标 = 页脚「归档」链接的落地页：列所有工作区的候选，与

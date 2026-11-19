@@ -9,6 +9,7 @@
  * 排在问题后面——否则永远答不上。空文本进入「下一条消息作为回答」模式。
  */
 import type { CommandDeps, SlashCommand } from './types.ts';
+import { parseRest } from './args.ts';
 import { getScopePeer, shortSessionId } from '../shared/index.ts';
 import { sessionTargetLabel, sessionTitleOf } from '../transport/session-source.ts';
 import { resolveSessionTarget } from './sessions.ts';
@@ -53,7 +54,7 @@ export function toCommand({ manager, logger }: CommandDeps): SlashCommand {
       // 第一个 token 是会话，其余整体是文本（允许空格、换行）
       const match = /^(\S+)(?:\s+([\s\S]*))?$/.exec(raw);
       const targetArg = match?.[1] ?? '';
-      const text = (match?.[2] ?? '').trim();
+      const text = parseRest(match?.[2] ?? '');
       if (targetArg === '') {
         return '⚠️ 缺少会话 · 用法: /help to';
       }
