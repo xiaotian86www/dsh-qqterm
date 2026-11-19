@@ -8,6 +8,7 @@
  * 因此和其他管理命令一样只允许唯一绑定用户执行（见 auth.ts 的 ownerOnlyAuth）。
  */
 import type { CommandDeps, SlashCommand } from './types.ts';
+import { parseRest } from './args.ts';
 import { ownerOnlyAuth } from './auth.ts';
 import { getScopePeer, sendMarkdownChunked } from '../shared/index.ts';
 import type { PermissionPresetEntry } from '../session/index.ts';
@@ -47,7 +48,7 @@ export function permissionCommand({ manager, config, logger }: CommandDeps): Sla
     ].join('\n'),
     handler: async (cmdCtx) => {
       const { scope, peerId } = getScopePeer(cmdCtx);
-      const args = (cmdCtx.command?.raw ?? '').trim();
+      const args = parseRest(cmdCtx.command?.raw ?? '');
 
       const entries = manager.listPermissionPresets();
       if (entries.length === 0) {

@@ -18,6 +18,7 @@
  * 唯一绑定用户（`access.owner`）。
  */
 import type { CommandDeps, SlashCommand } from './types.ts';
+import { parseRest } from './args.ts';
 import type { ChatScope } from '../types.ts';
 import { getScopePeer, sendMarkdownChunked } from '../shared/index.ts';
 import { sessionAdminAuth } from './sessions.ts';
@@ -51,7 +52,8 @@ export function lsCommand({ manager, config, logger }: CommandDeps): SlashComman
     usage: USAGE,
     handler: async (cmdCtx) => {
       const { scope, peerId } = getScopePeer(cmdCtx);
-      const arg = (cmdCtx.command?.raw ?? '').trim();
+      // 整行都是路径：带空格的路径不用引号也对，写了引号就去掉
+      const arg = parseRest(cmdCtx.command?.raw ?? '');
 
       let text: string;
       try {

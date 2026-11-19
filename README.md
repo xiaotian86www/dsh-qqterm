@@ -193,6 +193,8 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqterm/cordis.dev.yml
 | `/help` | 查看所有指令；`/help <命令>` 查看该命令的参数与用法 |
 | `/plugins` | 插件管理：不带参数列出已安装插件，`install <包名>` / `update <包名> [版本]` 走 registry，`reload` 应用磁盘上的插件变更（仅绑定用户可用） |
 
+> 参数按命令行习惯写：空格分隔，值里要有空格就用成对的 `"` 或 `'` 包起来（`/ls "D:\My Repo"`、`/rename "新的 标题"`、`/to #短id "看下这段"`）。整行就是一个值的命令（`/ls`、`/get`、`/rename`、`/goal`、`/model`、`/reasoning`、`/preset`、`/permission`）写不写引号都行；`-` 开头的词一律当参数，认不出的回「未知参数」并给用法，不会被静默忽略或当成正文。
+
 > 指令名拼错（如 `/modle`、`/sesions`）不会被当作提问转发给大模型：机器人直接回「没有这个指令」，能猜到意图时给出可点击的正确指令。只有「斜杠 + ASCII 指令名」算指令，`/usr/local/bin`、`/今天` 这类文本照旧交给模型；全角 `／` 与半角 `/` 等价，中文输入法下可以直接敲。
 
 ### 插件安装、更新与热重载（`/plugins`）

@@ -5,6 +5,7 @@
  * 同一个入口），对之后新建的会话生效；已经开始的会话保持自己的 preset。
  */
 import type { CommandDeps, SlashCommand } from './types.ts';
+import { parseRest } from './args.ts';
 import { ownerOnlyAuth } from './auth.ts';
 import { getScopePeer, sendMarkdownChunked } from '../shared/index.ts';
 
@@ -23,7 +24,7 @@ export function presetCommand({ manager, config, logger }: CommandDeps): SlashCo
     ].join('\n'),
     handler: async (cmdCtx) => {
       const { scope, peerId } = getScopePeer(cmdCtx);
-      const args = (cmdCtx.command?.raw ?? '').trim();
+      const args = parseRest(cmdCtx.command?.raw ?? '');
 
       // 无参数：列出可用 preset + 默认项
       if (!args) {

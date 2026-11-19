@@ -7,6 +7,7 @@
  */
 import type { SlashCommandHandlerContext } from '@tencent-connect/qqbot-nodejs';
 import type { CommandDeps, SlashCommand } from './types.ts';
+import { looksLikeParam, QUOTE_OPEN_TEXT, tokenize, type RawToken } from './args.ts';
 import type { SessionConfirmAction } from '../features/session-confirm.ts';
 import { WorktreeError, worktreeErrorText, type ChangeWorkspaceOutcome } from '../session/index.ts';
 import { getScopePeer } from '../shared/index.ts';
@@ -47,57 +48,7 @@ const READ_ONLY_WORKTREE = '⚠️ 只读沙箱开不了工作树 · 用 /permis
 const DIR_MISSING = '⚠️ --dir 后要跟工作区 · 用法: /help new';
 
 /** 引号没闭合：按空格切词时引号必须成对 */
-const QUOTE_OPEN = '⚠️ 引号没有闭合 · 用法: /help new';
-
-/** 切出来的一个词；`quoted` 表示它整个被引号包着，不参与参数识别 */
-interface RawToken {
-  value: string;
-  quoted: boolean;
-}
-
-/**
- * 按空格切词：成对 `"` / `'` 里的空白留在同一个词里，引号本身去掉。整个被引号
- * 包着的词（`"-w"`）不当参数，这样提示词里的 `-w` 能原样发出去。
- */
-function tokenize(raw: string): { tokens: RawToken[]; error?: string } {
-  const tokens: RawToken[] = [];
-  let current = '';
-  let quote: string | undefined;
-  let quoted = false;
-  let started = false;
-  for (const ch of raw) {
-    if (quote !== undefined) {
-      if (ch === quote) quote = undefined;
-      else current += ch;
-      continue;
-    }
-    if (ch === '"' || ch === "'") {
-      if (!started) quoted = true;
-      quote = ch;
-      started = true;
-      continue;
-    }
-    if (/\s/.test(ch)) {
-      if (started) {
-        tokens.push({ value: current, quoted });
-        current = '';
-        quoted = false;
-        started = false;
-      }
-      continue;
-    }
-    current += ch;
-    started = true;
-  }
-  if (quote !== undefined) return { tokens, error: QUOTE_OPEN };
-  if (started) tokens.push({ value: current, quoted });
-  return { tokens };
-}
-
-/** 参数样子的词：`-` 开头的非空词，被引号包着的除外 */
-function looksLikeParam(token: RawToken): boolean {
-  return !token.quoted && token.value.startsWith('-') && token.value !== '-';
-}
+const QUOTE_OPEN = `${QUOTE_OPEN_TEXT} · 用法: /help new`;
 
 /**
  * `/new` 的参数：`--dir`（`-d`）指定工作区，`--worktree`（`-w`）要求下一条
@@ -114,7 +65,7 @@ export function parseNewArgs(raw: string): {
   error: string | undefined;
 } {
   const { tokens, error } = tokenize(raw);
-  if (error !== undefined) return { arg: '', worktree: false, prompt: undefined, error };
+  if (error !== undefined) return { arg: '', worktree: false, prompt: undefined, error: QUOTE_OPEN };
   let worktree = false;
   let dir: string | undefined;
   const words: string[] = [];

@@ -815,6 +815,22 @@ describe('/sessions rename', () => {
     expect(text).toBe('✅ 会话名已改为「改好的名字」 · `#held01`');
   });
 
+  it('标题带空格时加引号也照收，引号不进标题', async () => {
+    const manager = makeManager({
+      listHeldSessions: vi.fn(async () => [entry({ id: 'session-held01', held: true })]),
+    });
+
+    await run(manager, 'rename #held01 "新的 会话名"');
+
+    expect(manager.renameSession).toHaveBeenCalledWith('session-held01', '新的 会话名');
+  });
+
+  it('认不出的参数回绝，不当目标也不当标题', async () => {
+    const manager = makeManager();
+    expect(await run(manager, 'rename #held01 --title 新名字')).toBe('⚠️ 未知参数: --title · 用法: /help sessions');
+    expect(manager.renameSession).not.toHaveBeenCalled();
+  });
+
   it('id 可以从全量清单解析（目标还没打开时提示先恢复）', async () => {
     const id = 'session-cold1234';
     const manager = makeManager({

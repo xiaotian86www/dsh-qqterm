@@ -88,6 +88,11 @@ describe('/ls（当前目录）', () => {
     expect(text).toContain(`### 📁 ${root.split(/[\\/]/).at(-1)} · \`${root}\``);
   });
 
+  it('路径带空格时用引号包起来也能解析', async () => {
+    const text = await run(makeManager(), `"${join(root, 'alpha')}"`);
+    expect(text).toContain(`### 📁 alpha · \`${join(root, 'alpha')}\``);
+  });
+
   it('不显示 `.` 与 `..`（按钮太窄，点起来费劲）', async () => {
     const text = await run(makeManager());
     expect(text).not.toContain('show="."');

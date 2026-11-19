@@ -35,6 +35,7 @@
 import { isAbsolute } from 'node:path';
 import type { CommandDeps, SlashCommand } from './types.ts';
 import { ownerOnlyAuth } from './auth.ts';
+import { looksLikeParam, QUOTE_OPEN_TEXT, tokenize } from './args.ts';
 import { getScopePeer, formatRelativeTime, sendMarkdownChunked, shortSessionId } from '../shared/index.ts';
 import type { ArchiveSessionOutcome, WorkspaceGroup, WorkspaceSession } from '../session/index.ts';
 
@@ -369,10 +370,10 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Slash
       return usageFor(manager.workspaceRegistryAvailable());
     },
     handler: async (cmdCtx) => {
-      const raw = (cmdCtx.command?.raw ?? '').trim();
-      const words = raw.split(/\s+/).filter(Boolean);
-      let sub = words[0] ?? '';
-      const rest = words.slice(1);
+      // 切词按约定俗成：空格分隔，带空格的目标或标题用引号包起来
+      const { tokens, error } = tokenize((cmdCtx.command?.raw ?? '').trim());
+      let sub = tokens[0]?.value ?? '';
+      const rest = tokens.slice(1);
       const { scope, peerId } = getScopePeer(cmdCtx);
       // 没有 workspaceRegistry 的部署：列表照常按目录分组，只是没有工作区名与归档
       const archivable = manager.workspaceRegistryAvailable();
@@ -385,11 +386,18 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Slash
       } else if (
         (sub === 'archived' || sub === 'all' || sub === 'groups'
           || sub === 'workspaces' || sub === 'list')
-        && rest[0] !== undefined && /^\d+$/.test(rest[0])
+        && rest[0] !== undefined && /^\d+$/.test(rest[0].value)
       ) {
-        page = Number(rest[0]);
+        page = Number(rest[0].value);
         rest.shift();
       }
+
+      // 引号没闭合、认不出的参数都不猜：把 `--xxx` 当目标只会得到「没有匹配的会话」，
+      // 等于静默丢弃。错误统一在 render 里回，走同一条 markdown 通道
+      const unknown = rest.find((token) => looksLikeParam(token));
+      const invalid = error !== undefined
+        ? `${QUOTE_OPEN_TEXT} · 用法: /help sessions`
+        : unknown === undefined ? undefined : `⚠️ 未知参数: ${unknown.value} · 用法: /help sessions`;
 
       const loadHeld = async (): Promise<WorkspaceSession[] | string> => {
         try {
@@ -444,6 +452,8 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Slash
       };
 
       const render = async (): Promise<string> => {
+        if (invalid !== undefined) return invalid;
+
         // 没有 registry 时归档子命令按未知子命令处理，与其它拼错的子命令同一句话
         if (!archivable && (sub === 'archive' || sub === 'a'
           || sub === 'archived' || sub === 'unarchive' || sub === 'u' || sub === 'restore')) {
@@ -482,7 +492,7 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Slash
 
           case 'resume':
           case 'r': {
-            const arg = rest[0] ?? '';
+            const arg = rest[0]?.value ?? '';
             if (arg.trim() === '') return `⚠️ 缺少目标 · ${commandLink('/sessions', '选择会话')}`;
 
             const target = await resolveOne(arg);
@@ -517,8 +527,8 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Slash
 
           case 'rename':
           case 'rn': {
-            const arg = rest[0] ?? '';
-            const title = rest.slice(1).join(' ').trim();
+            const arg = rest[0]?.value ?? '';
+            const title = rest.slice(1).map((token) => token.value).join(' ').trim();
             if (arg.trim() === '') {
               return '⚠️ 缺少目标 · 用法: /help sessions';
             }
@@ -553,8 +563,8 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Slash
             // 只给页码 = 翻候选页：没有序号后，1–3 位数字只可能是页码
             let pickerPage = 1;
             let listing = rest.length === 0;
-            if (rest.length === 1 && /^\d{1,3}$/.test(rest[0]!)) {
-              pickerPage = Number(rest[0]);
+            if (rest.length === 1 && /^\d{1,3}$/.test(rest[0]!.value)) {
+              pickerPage = Number(rest[0]!.value);
               listing = true;
             }
             // 不带目标 = 页脚「归档」链接的落地页：列所有工作区的候选，与
@@ -580,7 +590,7 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Slash
               return renderArchivePicker(candidates, pickerPage);
             }
 
-            const parsed = parseTargetsOrError(rest.join(' '));
+            const parsed = parseTargetsOrError(rest.map((token) => token.value).join(' '));
             if ('message' in parsed) return parsed.message;
 
             // 目标需要跨工作区全量清单（可能来自 /sessions all），
@@ -637,7 +647,7 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Slash
               return `⚠️ 缺少目标 · ${commandLink('/sessions archived', '查看已归档')}`;
             }
 
-            const parsed = parseTargetsOrError(rest.join(' '));
+            const parsed = parseTargetsOrError(rest.map((token) => token.value).join(' '));
             if ('message' in parsed) return parsed.message;
 
             const batch = resolveTargets(all, parsed.tokens);
