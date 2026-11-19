@@ -231,9 +231,8 @@ export function newCommand({ manager, config }: CommandDeps): SlashCommand {
         return lines.join('\n');
       }
 
-      const head = '✅ 已开启新会话';
-      const pending = worktree ? '\n🌿 下一条消息开新工作树' : '';
-      return label === undefined ? `${head}${pending}` : `${head}\n${label}${pending}`;
+      const head = worktree ? '✅ 已开启带工作树的会话' : '✅ 已开启新会话';
+      return label === undefined ? head : `${head}\n${label}`;
     },
   };
 }
