@@ -1312,9 +1312,15 @@ interface WorktreeOptions {
 
 function worktreeCtx(options: WorktreeOptions = {}) {
   const base = hostCtxServices() as Record<string, unknown>;
-  const create = vi.fn(options.create ?? (async (): Promise<WorktreeTree> => {
-    throw new Error('unexpected worktrees.create');
-  }));
+  // 宿主建树后会把会话的运行目录切到树里（workingDirectory.set）；这里同样模拟，
+  // 否则 sessionDirectory 只剩 header.cwd，测不到「/get 跟运行目录走」
+  let liveDir: string | undefined;
+  const create = vi.fn(async (...args: unknown[]) => {
+    if (options.create === undefined) throw new Error('unexpected worktrees.create');
+    const tree = await options.create(...args);
+    if (tree.path) liveDir = tree.path;
+    return tree;
+  });
   const restore = vi.fn(options.restore ?? (async (request: WorktreeTree) => ({
     path: request.path,
     branchRecreated: false,
@@ -1336,6 +1342,10 @@ function worktreeCtx(options: WorktreeOptions = {}) {
   const services = {
     ...base,
     subprocess,
+    workingDirectory: {
+      get: (session: unknown) => liveDir
+        ?? (session as { header?: { cwd?: string } } | undefined)?.header?.cwd,
+    },
     sessionProjections: {
       stateOf: (_session: unknown, key: string) => options.projection?.(key),
     },
@@ -1376,9 +1386,9 @@ describe('getOrCreate — 新会话开在工作树里', () => {
     // header.cwd 必须是仓库根：树的池与 .git/worktrees 登记都落在它下面
     const createdWith = registry.create.mock.calls[0]![0] as unknown as { meta?: { cwd?: string } };
     expect(createdWith.meta?.cwd).toBe(repo);
-    // 运行目录是树：工作区按 header 算（主仓库），聊天工作目录就是会话实际所在的树
-    expect(manager.chatDirectory()).toBe(tree.path);
-    expect(new PrefsStore().getDirectory(KEY)).toBe(tree.path);
+    // 落点是工作区（主仓库），会话的运行目录才是树
+    expect(manager.chatDirectory()).toBe(repo);
+    expect(new PrefsStore().getDirectory(KEY)).toBe(repo);
     // /status 的工作区仍是主仓库（与 /sessions 分组同源），live 目录只留给 /get、/ls
     expect((await manager.chatWorkspaceInfo('c2c', PEER))?.path).toBe(repo);
     expect((await manager.currentWorkspaceInfo('c2c', PEER))?.path).toBe(tree.path);
@@ -1439,7 +1449,7 @@ describe('getOrCreate — 新会话开在工作树里', () => {
 
     await manager.getOrCreate('c2c', PEER, PEER, REPLY);
     expect(create).toHaveBeenCalledTimes(2);
-    expect(manager.chatDirectory()).toBe(tree.path);
+    expect(manager.chatDirectory()).toBe(repo);
   });
 
   it('部署默认只读：不尝试建树，就地开会话并说明原因', async () => {
@@ -1498,33 +1508,25 @@ describe('getOrCreate — 新会话开在工作树里', () => {
     // 新会话在主仓库里开新树，而不是在旧树目录里再建池
     const createdWith = registry.create.mock.calls[0]![0] as unknown as { meta?: { cwd?: string } };
     expect(createdWith.meta?.cwd).toBe(repo);
-    expect(manager.chatDirectory()).toBe(tree.path);
+    expect(manager.chatDirectory()).toBe(repo);
   });
 
-  it('宿主建树后写进树里的 working-directory/change 不改工作区', async () => {
+  it('旧 prefs 里的树路径读回时归一到主仓库', () => {
     const repo = makeRepo();
-    const tree: WorktreeTree = {
-      path: join(repo, '.agents', 'worktrees', 'dsh-1a2b3c4d-9f0e'),
-      branch: 'dsh-1a2b3c4d-9f0e',
+    const tree = materializeTree({
+      path: join(repo, '.agents', 'worktrees', 'dsh-old'),
+      branch: 'dsh-old',
       baseCommit: '6b1f02c0ffee1234',
       repositoryRoot: repo,
-    };
-    materializeTree(tree);
-    const { registry } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
-    const { ctx } = worktreeCtx({
-      create: async () => tree,
-      projection: (key) => (key === 'worktree' ? { created: [{ worktree: tree, owned: true }] } : undefined),
     });
+    new PrefsStore().setDirectory(KEY, tree.path);
+    const { registry } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
+    const { ctx } = worktreeCtx();
     const manager = createManagerWithCtx(registry, ctx);
-    await manager.changeChatWorkspace('c2c', PEER, repo);
 
-    const record = await manager.getOrCreate('c2c', PEER, PEER, REPLY);
-    manager.noteWorkingDirectory(record.agent.session, tree.path);
-
-    // 运行目录跟着事件走，工作区仍是主仓库：树只出现在工作树行
-    expect(manager.chatDirectory()).toBe(tree.path);
-    expect((await manager.chatWorkspaceInfo('c2c', PEER))?.path).toBe(repo);
-    expect(manager.worktreeOf('c2c', PEER)?.path).toBe(tree.path);
+    // 树不是工作区：内存与磁盘都改回主仓库，下一条消息不会在树里开会话
+    expect(manager.chatDirectory()).toBe(repo);
+    expect(new PrefsStore().getDirectory(KEY)).toBe(repo);
   });
 
   it('目录不是 Git 仓库：就地开会话', async () => {
@@ -1558,7 +1560,7 @@ describe('getOrCreate — 新会话开在工作树里', () => {
     expect(manager.chatDirectory()).toBe(repo);
   });
 
-  it('建树后意图已消费：/clear 在同一棵树里就地开始', async () => {
+  it('建树后意图已消费：/clear 回工作区就地开始', async () => {
     const repo = makeRepo();
     const tree: WorktreeTree = {
       path: join(repo, '.agents', 'worktrees', 'dsh-x'),
@@ -1577,7 +1579,7 @@ describe('getOrCreate — 新会话开在工作树里', () => {
     await manager.getOrCreate('c2c', PEER, PEER, REPLY);
 
     expect(create).toHaveBeenCalledTimes(1);
-    expect(manager.chatDirectory()).toBe(tree.path);
+    expect(manager.chatDirectory()).toBe(repo);
   });
 
   it('读不到 HEAD：建树失败，本次会话不创建（不降级到主检出）', async () => {

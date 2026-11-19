@@ -159,14 +159,11 @@ export async function bootstrapGateway(
     },
   );
   // session/event 按 agent 作用域派发；带 global 才能收到所有已获取会话的事件，
-  // 不只当前会话（多会话输出都要回 QQ）。同一入口顺带跟运行期 cd：只有当前会话
-  // 的 working-directory/change 会覆盖聊天工作区。
+  // 不只当前会话（多会话输出都要回 QQ）。运行期 `cd`（working-directory/change）
+  // 只动会话的运行目录，不改聊天工作区，这里不拦。
   (ctx as unknown as {
     on(event: string, handler: (...args: unknown[]) => void, options?: { global?: boolean }): void;
   }).on('session/event', ((session: SessionLike, event: RawSessionEvent) => {
-    if (event.type === 'working-directory/change') {
-      manager.noteWorkingDirectory(session, event.data.cwd);
-    }
     outbound.routeSessionEvent(session, event);
   }) as (...args: unknown[]) => void, { global: true });
 
