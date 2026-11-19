@@ -90,6 +90,30 @@ export class ModelResolver {
   }
 
   /**
+   * 这个聊天获取过的会话 id（最近获取在前）
+   *
+   * 重启后内存里的已获取集合是空的，`/sessions` 靠这份名册把会话当冷行列出来。
+   */
+  getHeldSessionIds(sessionKey: string): string[] {
+    return this.prefs.getHeld(sessionKey);
+  }
+
+  /** 记下一次获取（挪到名册最前） */
+  rememberHeldSession(sessionKey: string, sessionId: string): void {
+    this.prefs.rememberHeld(sessionKey, sessionId);
+  }
+
+  /** 从名册里摘掉一个会话 */
+  forgetHeldSession(sessionKey: string, sessionId: string): void {
+    this.prefs.forgetHeld(sessionKey, sessionId);
+  }
+
+  /** 整体覆盖名册（剔除失效会话后写回） */
+  setHeldSessionIds(sessionKey: string, sessionIds: readonly string[]): void {
+    this.prefs.setHeld(sessionKey, sessionIds);
+  }
+
+  /**
    * 上次和这个聊天交互的 QQ 用户（启动恢复时的回复目标）
    */
   getTarget(sessionKey: string): string | undefined {
@@ -115,16 +139,6 @@ export class ModelResolver {
    */
   setTarget(sessionKey: string, targetId: string): void {
     this.prefs.setTarget(sessionKey, targetId);
-  }
-
-  /** 新会话是否开工作树；从未设置过返回 undefined（调用方按开处理） */
-  getWorktreeDefault(): boolean | undefined {
-    return this.prefs.getWorktree();
-  }
-
-  /** 记下新会话是否开工作树（值不变时不写盘） */
-  setWorktreeDefault(enabled: boolean): void {
-    this.prefs.setWorktree(enabled);
   }
 
   /**

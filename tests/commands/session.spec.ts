@@ -10,7 +10,7 @@ import { ConfigSchema, type QQTermConfig } from '../../src/config.ts';
 import type { SessionManager } from '../../src/session/index.ts';
 import type { Logger } from '../../src/types.ts';
 import type { CommandDeps } from '../../src/commands/types.ts';
-import { compactCommand, newCommand, resetCommand } from '../../src/commands/session.ts';
+import { compactCommand, newCommand, parseNewArgs, resetCommand } from '../../src/commands/session.ts';
 import type { SessionConfirmRequest } from '../../src/features/session-confirm.ts';
 
 const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
@@ -25,6 +25,9 @@ function makeManager() {
   return {
     remove: vi.fn(async () => {}),
     workspaceRegistryAvailable: vi.fn(() => true),
+    worktreesAvailable: vi.fn(() => true),
+    readOnlySandbox: vi.fn(() => false),
+    armWorktree: vi.fn(),
     resolveWorkspace: vi.fn(() => ({ ok: true as const, title: 'repo', path: 'D:\\repo', isNew: false })),
     changeChatWorkspace: vi.fn(async () => ({ ok: true as const, title: 'repo', path: 'D:\\repo', isNew: false })),
     // 默认没有当前会话：既有用例不该被确认门禁挡住
@@ -137,6 +140,51 @@ describe('/new（不带参数）', () => {
     expect(await run(manager, '', 'stranger')).toBe('✅ 已开启新会话');
     expect(manager.remove).toHaveBeenCalled();
   });
+
+  it('--worktree：交出意图，回执交代下一条消息开树', async () => {
+    const manager = makeManager();
+    expect(await run(manager, '--worktree')).toBe('✅ 已开启新会话\n🌿 下一条消息开新工作树');
+    expect(manager.remove).toHaveBeenCalledWith();
+    expect(manager.armWorktree).toHaveBeenCalledTimes(1);
+    expect(manager.changeChatWorkspace).not.toHaveBeenCalled();
+  });
+
+  it('-w 是 --worktree 的别名', async () => {
+    const manager = makeManager();
+    expect(await run(manager, '-w')).toContain('🌿 下一条消息开新工作树');
+    expect(manager.armWorktree).toHaveBeenCalledTimes(1);
+  });
+
+  it('没有 worktrees 服务：按未知参数处理，不动会话', async () => {
+    const manager = { ...makeManager(), worktreesAvailable: vi.fn(() => false) };
+
+    const text = await run(manager, '--worktree');
+
+    expect(text).toBe('⚠️ 未知参数: --worktree · 用法: /help new');
+    expect(manager.remove).not.toHaveBeenCalled();
+    expect(manager.armWorktree).not.toHaveBeenCalled();
+  });
+
+  it('只读沙箱：拒绝开树，不动会话', async () => {
+    const manager = { ...makeManager(), readOnlySandbox: vi.fn(() => true) };
+
+    const text = await run(manager, '--worktree');
+
+    expect(text).toContain('只读沙箱开不了工作树');
+    expect(text).toContain('/permission');
+    expect(manager.remove).not.toHaveBeenCalled();
+    expect(manager.armWorktree).not.toHaveBeenCalled();
+  });
+});
+
+describe('parseNewArgs', () => {
+  it('只剥完整 token，路径原样保留', () => {
+    expect(parseNewArgs('--worktree')).toEqual({ arg: '', worktree: true });
+    expect(parseNewArgs('-w D:\\My Repo')).toEqual({ arg: 'D:\\My Repo', worktree: true });
+    expect(parseNewArgs('repo -w')).toEqual({ arg: 'repo', worktree: true });
+    expect(parseNewArgs('-worktree-x')).toEqual({ arg: '-worktree-x', worktree: false });
+    expect(parseNewArgs('')).toEqual({ arg: '', worktree: false });
+  });
 });
 
 describe('/new <工作区>', () => {
@@ -236,6 +284,40 @@ describe('/new <工作区>', () => {
     expect(manager.changeChatWorkspace).not.toHaveBeenCalled();
     expect(text).toContain('仅限绑定用户可用');
   });
+
+  it('--worktree 与路径同时给：换完工作区再交出意图，回执三行', async () => {
+    const manager = makeManager();
+
+    const text = await run(manager, '-w D:\\My Repo');
+
+    expect(manager.resolveWorkspace).toHaveBeenCalledWith('D:\\My Repo');
+    expect(manager.changeChatWorkspace).toHaveBeenCalledWith('c2c', 'user1', 'D:\\My Repo');
+    expect(manager.armWorktree).toHaveBeenCalledTimes(1);
+    expect(text.split('\n')).toHaveLength(3);
+    expect(text).toContain('🌿 下一条消息开新工作树');
+  });
+
+  it('只读沙箱带路径也拒绝，不动会话', async () => {
+    const manager = { ...makeManager(), readOnlySandbox: vi.fn(() => true) };
+
+    const text = await run(manager, '--worktree repo');
+
+    expect(text).toContain('只读沙箱');
+    expect(manager.resolveWorkspace).not.toHaveBeenCalled();
+    expect(manager.remove).not.toHaveBeenCalled();
+  });
+
+  it('用法页只在有 worktrees 服务时列 --worktree', () => {
+    const withService = newCommand({ manager: makeManager() as unknown as SessionManager, config, logger });
+    expect(withService.usage).toContain('`/new --worktree`');
+
+    const noService = newCommand({
+      manager: { ...makeManager(), worktreesAvailable: vi.fn(() => false) } as unknown as SessionManager,
+      config,
+      logger,
+    });
+    expect(noService.usage).not.toContain('--worktree');
+  });
 });
 
 describe('有会话时的二次确认', () => {
@@ -262,31 +344,23 @@ describe('有会话时的二次确认', () => {
     return command.handler(makeCtx(raw, 'user1', 'clear'));
   }
 
-  it('/new 有当前会话时先发卡片，不直接开新会话', async () => {
+  it('/new 有当前会话时直接开新会话，不发卡片', async () => {
     const channel = makeChannel();
     const manager = { ...makeManager(), currentSessionId: vi.fn(() => 'sess-1'), sessionConfirmChannel: channel };
 
-    expect(await runNew(manager)).toEqual({ kind: 'noop' });
-    expect(manager.remove).not.toHaveBeenCalled();
-    expect(channel.offer).toHaveBeenCalledTimes(1);
-
-    const req = channel.list[0]!;
-    expect(req.action).toBe('new');
-    expect(req.currentId).toBe('sess-1');
-    expect(req.target).toEqual({ scope: 'c2c', targetId: 'user1' });
-
-    // 点了确认才真正执行
-    await expect(req.run()).resolves.toBe('✅ 已开启新会话');
+    expect(await runNew(manager)).toBe('✅ 已开启新会话');
     expect(manager.remove).toHaveBeenCalledWith();
+    expect(channel.offer).not.toHaveBeenCalled();
   });
 
-  it('/new 没有当前会话时不做确认', async () => {
+  it('/new <路径> 直接换工作区，不发卡片', async () => {
     const channel = makeChannel();
-    const manager = { ...makeManager(), sessionConfirmChannel: channel };
+    const manager = { ...makeManager(), currentSessionId: vi.fn(() => 'sess-1'), sessionConfirmChannel: channel };
 
-    expect(await runNew(manager)).toBe('✅ 已开启新会话');
-    expect(channel.offer).not.toHaveBeenCalled();
+    expect(await runNew(manager, 'D:\\repo')).toBe('✅ 已开启新会话\n工作区: repo · D:\\repo');
     expect(manager.remove).toHaveBeenCalledWith();
+    expect(manager.changeChatWorkspace).toHaveBeenCalledWith('c2c', 'user1', 'D:\\repo');
+    expect(channel.offer).not.toHaveBeenCalled();
   });
 
   it('/clear 有当前会话时先发卡片，不直接停会话', async () => {
@@ -322,13 +396,13 @@ describe('有会话时的二次确认', () => {
 
   it('卡片发不出去时放弃动作，不退回直接执行', async () => {
     const channel = makeChannel(false);
-    const manager = { ...makeManager(), currentSessionId: vi.fn(() => 'sess-1'), sessionConfirmChannel: channel };
+    const manager = { ...makeResetManager(true), currentSessionId: vi.fn(() => 'sess-1'), sessionConfirmChannel: channel };
 
-    expect(await runNew(manager)).toBe('⚠️ 确认卡片没能发出，稍后再试一次');
-    expect(manager.remove).not.toHaveBeenCalled();
+    expect(await runResetCmd(manager)).toBe('⚠️ 确认卡片没能发出，稍后再试一次');
+    expect(manager.resetCurrentSession).not.toHaveBeenCalled();
   });
 
-  it('/new <路径> 解析失败时不发卡片', async () => {
+  it('/new <路径> 解析失败时不动会话', async () => {
     const channel = makeChannel();
     const manager = {
       ...makeManager(),

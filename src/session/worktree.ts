@@ -14,16 +14,19 @@ export const WORKTREE_TIMEOUT_MS = 120_000;
 /**
  * 工作树操作失败。
  *
- * `kind` 决定入站消息怎么收尾：建不出来 = 本次会话没有创建；重建不出来 =
- * 会话还在，只是目录回不来。
+ * `kind` 决定入站消息怎么收尾：建不出来（含读不到基点提交）= 本次会话没有创建；
+ * 重建不出来 = 会话还在，只是目录回不来。
  */
 export class WorktreeError extends Error {
-  readonly kind: 'create' | 'restore';
+  readonly kind: 'create' | 'restore' | 'base';
+  /** 拉出这棵树的父分支（读得到时才有，失败文案用它点明起点） */
+  readonly base?: string;
 
-  constructor(kind: 'create' | 'restore', message: string, cause?: unknown) {
+  constructor(kind: 'create' | 'restore' | 'base', message: string, cause?: unknown, base?: string) {
     super(message, cause === undefined ? undefined : { cause });
     this.name = 'WorktreeError';
     this.kind = kind;
+    if (base !== undefined) this.base = base;
   }
 }
 
@@ -45,9 +48,27 @@ export function worktreeFailureText(err: unknown): string {
   return text.length > 60 ? `${text.slice(0, 60)}…` : text;
 }
 
-/** 建树回执（只发一次）：交代分支、基点与路径 */
-export function worktreeNotice(tree: { branch: string; baseCommit: string; path: string }): string {
-  return `✅ 已在新工作树 \`${tree.branch}\` 里开启会话 · 基点 \`${shortCommit(tree.baseCommit)}\`\n路径: \`${tree.path}\``;
+/**
+ * 建树回执（只发一次）：交代分支、拉出它的父分支与路径。
+ *
+ * `parent` 是创建那一刻 chatDir 的分支名；detached HEAD 没有分支名，退回基点短号。
+ * 读不到基点提交时走不到这里——那种情况会话根本不创建。
+ */
+export function worktreeNotice(
+  tree: { branch: string; baseCommit: string; path: string },
+  parent?: string,
+): string {
+  const origin = parent === undefined
+    ? `基点 \`${shortCommit(tree.baseCommit)}\``
+    : `从 \`${parent}\` 拉出`;
+  return `✅ 已在新工作树 \`${tree.branch}\` 里开启会话 · ${origin}\n路径: \`${tree.path}\``;
+}
+
+/** 明确要求开树却没能开成时的就地提示（会话照常开了，不是失败） */
+export function worktreeSkipNotice(reason: 'not-repo' | 'read-only'): string {
+  return reason === 'not-repo'
+    ? '⚠️ 当前目录不是 Git 仓库，本次就地开会话'
+    : '⚠️ 沙箱已是只读，本次就地开会话';
 }
 
 /** 提交短号：回执与 /status 同一口径 */

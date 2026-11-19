@@ -143,8 +143,13 @@ function createRegistry(resumeImpl: ResumeImpl) {
   const registry = {
     get: vi.fn(() => undefined),
     resume: vi.fn(resumeImpl),
-    create: vi.fn(async (options: { sessionId: string }) => {
+    create: vi.fn(async (options: { sessionId: string; meta?: { cwd?: string } }) => {
       const handle = fakeHandle(options.sessionId);
+      const cwd = options.meta?.cwd;
+      if (cwd !== undefined) {
+        // 真实宿主把建会话目录写进 session.header.cwd：工作区挂载与 /status 都按它算
+        (handle.agent.session as { header?: { cwd?: string } }).header = { cwd };
+      }
       handles.push(handle);
       return handle;
     }),
@@ -1167,7 +1172,7 @@ describe('restoreCurrentSession — 启动恢复上次会话', () => {
     expect(await manager.restoreCurrentSession()).toEqual({ kind: 'none' });
     expect(registry.resume).not.toHaveBeenCalled();
     expect(registry.create).not.toHaveBeenCalled();
-    // 不清掉的话 /sessions 会显示「待恢复」，恢复链接却永远失败
+    // 不清掉的话 /sessions 会把它当冷行列出来，恢复链接却永远失败
     expect(new PrefsStore().getSessionId(KEY)).toBeUndefined();
     expect(new PrefsStore().getTarget(KEY)).toBe(PEER);
   });
@@ -1271,7 +1276,7 @@ describe('getTurnProgress — 生成中的现场', () => {
   });
 });
 
-// ── 工作树：新会话默认开在树里（宿主 worktrees 服务，可选） ──
+// ── 工作树：/new --worktree 显式开树（宿主 worktrees 服务，可选） ──
 
 interface WorktreeTree {
   path: string;
@@ -1295,12 +1300,14 @@ function materializeTree(tree: WorktreeTree): WorktreeTree {
 }
 
 interface WorktreeOptions {
-  create?: () => Promise<WorktreeTree>;
+  create?: (...args: unknown[]) => Promise<WorktreeTree>;
   restore?: (request: WorktreeTree) => Promise<{ path: string; branchRecreated: boolean }>;
   /** 部署默认沙箱模式（默认 workspace-write） */
   mode?: string;
   /** sessionProjections 替身：只处理 worktree 投影 */
   projection?: (key: string) => unknown;
+  /** chatDir 的 HEAD（默认 main @ 6b1f02c…）；null = 读不到（非仓库 / 超时） */
+  head?: { commit: string; branch?: string } | null;
 }
 
 function worktreeCtx(options: WorktreeOptions = {}) {
@@ -1312,8 +1319,23 @@ function worktreeCtx(options: WorktreeOptions = {}) {
     path: request.path,
     branchRecreated: false,
   })));
+  const head = options.head === undefined ? { commit: '6b1f02c0ffee1234', branch: 'main' } : options.head;
+  const subprocess = {
+    resolveExecutable: async () => 'git',
+    spawn: (spec: { argv: readonly string[] }) => {
+      const isRef = spec.argv.includes('symbolic-ref');
+      const text = head === null ? '' : (isRef ? (head.branch ?? '') : head.commit);
+      return {
+        collected: { stdout: { readFrom: () => ({ text }) } },
+        done: Promise.resolve({ exitCode: head === null ? 1 : 0 }),
+        terminate: () => {},
+        waitForExit: async () => undefined,
+      };
+    },
+  };
   const services = {
     ...base,
+    subprocess,
     sessionProjections: {
       stateOf: (_session: unknown, key: string) => options.projection?.(key),
     },
@@ -1329,7 +1351,7 @@ function worktreeCtx(options: WorktreeOptions = {}) {
 }
 
 describe('getOrCreate — 新会话开在工作树里', () => {
-  it('主仓库里新建会话：先建树，落在树路径，回执只带这一次', async () => {
+  it('/new --worktree 之后新建会话：从当前分支拉出，落在树路径', async () => {
     const repo = makeRepo();
     const tree: WorktreeTree = {
       path: join(repo, '.agents', 'worktrees', 'dsh-1a2b3c4d-9f0e'),
@@ -1344,18 +1366,24 @@ describe('getOrCreate — 新会话开在工作树里', () => {
     });
     const manager = createManagerWithCtx(registry, ctx);
     await manager.changeChatWorkspace('c2c', PEER, repo);
+    manager.armWorktree();
 
     const record = await manager.getOrCreate('c2c', PEER, PEER, REPLY);
 
     expect(create).toHaveBeenCalledTimes(1);
+    // 基点是 chatDir 的 HEAD 全 sha：detached 也安全，宿主在仓库根也能解析
+    expect(create.mock.calls[0]![1]).toEqual({ from: '6b1f02c0ffee1234' });
     // header.cwd 必须是仓库根：树的池与 .git/worktrees 登记都落在它下面
     const createdWith = registry.create.mock.calls[0]![0] as unknown as { meta?: { cwd?: string } };
     expect(createdWith.meta?.cwd).toBe(repo);
-    // 工作区是主仓库：树只是这个会话的运行目录，不落盘成工作区
-    expect(manager.chatDirectory()).toBe(repo);
-    expect(new PrefsStore().getDirectory(KEY)).toBe(repo);
+    // 运行目录是树：工作区按 header 算（主仓库），聊天工作目录就是会话实际所在的树
+    expect(manager.chatDirectory()).toBe(tree.path);
+    expect(new PrefsStore().getDirectory(KEY)).toBe(tree.path);
+    // /status 的工作区仍是主仓库（与 /sessions 分组同源），live 目录只留给 /get、/ls
+    expect((await manager.chatWorkspaceInfo('c2c', PEER))?.path).toBe(repo);
+    expect((await manager.currentWorkspaceInfo('c2c', PEER))?.path).toBe(tree.path);
     expect(record.worktreeNotice).toContain('✅ 已在新工作树 `dsh-1a2b3c4d-9f0e` 里开启会话');
-    expect(record.worktreeNotice).toContain('基点 `6b1f02c`');
+    expect(record.worktreeNotice).toContain('· 从 `main` 拉出');
     expect(manager.worktreeOf('c2c', PEER)).toEqual({
       branch: tree.branch,
       baseCommit: tree.baseCommit,
@@ -1369,48 +1397,64 @@ describe('getOrCreate — 新会话开在工作树里', () => {
     expect(create).toHaveBeenCalledTimes(1);
   });
 
-  it('建树失败：会话不保留、指针不落盘，错误带 git 原因', async () => {
+  it('建树失败：会话不保留、指针不落盘，意图保留可重试', async () => {
     const repo = makeRepo();
+    const tree: WorktreeTree = {
+      path: join(repo, '.agents', 'worktrees', 'dsh-x'),
+      branch: 'dsh-x',
+      baseCommit: '6b1f02c0ffee1234',
+      repositoryRoot: repo,
+    };
+    let attempts = 0;
     const { registry, handles } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
-    const { ctx } = worktreeCtx({
+    const { ctx, create } = worktreeCtx({
       create: async () => {
-        throw new Error(
-          'Could not finish worktree dsh-x at D:\\repo. Any created checkout and branch are retained. '
-          + "fatal: cannot lock ref 'refs/heads/dsh-x'",
-        );
+        attempts += 1;
+        if (attempts === 1) {
+          throw new Error(
+            'Could not finish worktree dsh-x at D:\\repo. Any created checkout and branch are retained. '
+            + "fatal: cannot lock ref 'refs/heads/dsh-x'",
+          );
+        }
+        return tree;
       },
     });
     const manager = createManagerWithCtx(registry, ctx);
     await manager.changeChatWorkspace('c2c', PEER, repo);
+    manager.armWorktree();
 
-    await expect(manager.getOrCreate('c2c', PEER, PEER, REPLY))
-      .rejects.toThrow(/cannot lock ref/);
-    await expect(manager.getOrCreate('c2c', PEER, PEER, REPLY))
-      .rejects.toBeInstanceOf(WorktreeError);
+    const first = await manager.getOrCreate('c2c', PEER, PEER, REPLY).then(() => undefined, (err: unknown) => err);
+    expect(first).toBeInstanceOf(WorktreeError);
+    expect((first as WorktreeError).message).toContain('cannot lock ref');
+    // 失败文案要点明起点分支，用户才知道树是从哪儿拉的
+    expect((first as WorktreeError).base).toBe('main');
 
-    expect(handles).toHaveLength(2);
-    for (const handle of handles) {
-      expect(handle.dispose).toHaveBeenCalledTimes(1);
-      expect(handle.agent.cancel).toHaveBeenCalled();
-    }
+    expect(handles).toHaveLength(1);
+    expect(handles[0]!.dispose).toHaveBeenCalledTimes(1);
+    expect(handles[0]!.agent.cancel).toHaveBeenCalled();
     // 会话没进已获取集合，指针也没有落下：重发一次会重新尝试
     expect(manager.size).toBe(0);
     expect(persistedId()).toBeUndefined();
     expect(manager.chatDirectory()).toBe(repo);
+
+    await manager.getOrCreate('c2c', PEER, PEER, REPLY);
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(manager.chatDirectory()).toBe(tree.path);
   });
 
-  it('部署默认只读：不尝试建树，就地开会话', async () => {
+  it('部署默认只读：不尝试建树，就地开会话并说明原因', async () => {
     const repo = makeRepo();
     const { registry } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
     const { ctx, create } = worktreeCtx({ mode: 'read-only' });
     const manager = createManagerWithCtx(registry, ctx);
     await manager.changeChatWorkspace('c2c', PEER, repo);
+    manager.armWorktree();
 
     const record = await manager.getOrCreate('c2c', PEER, PEER, REPLY);
 
     expect(create).not.toHaveBeenCalled();
     expect(manager.chatDirectory()).toBe(repo);
-    expect(record.worktreeNotice).toBeUndefined();
+    expect(record.worktreeNotice).toBe('⚠️ 沙箱已是只读，本次就地开会话');
     expect(manager.hasWorktree(record.sessionId)).toBe(false);
   });
 
@@ -1419,6 +1463,8 @@ describe('getOrCreate — 新会话开在工作树里', () => {
     const { registry } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
     const manager = createManagerWithCtx(registry, absentCtx());
     await manager.changeChatWorkspace('c2c', PEER, repo);
+    // 服务缺失时 /new 会把 --worktree 当未知参数；这里直接 arm，验证兜底不建、也不提部署差异
+    manager.armWorktree();
 
     const record = await manager.getOrCreate('c2c', PEER, PEER, REPLY);
 
@@ -1444,6 +1490,7 @@ describe('getOrCreate — 新会话开在工作树里', () => {
     // 树路径不是工作区：换成主仓库，新会话从主仓库开新树
     const changed = await manager.changeChatWorkspace('c2c', PEER, oldTree);
     expect(changed.ok && changed.path).toBe(repo);
+    manager.armWorktree();
 
     await manager.getOrCreate('c2c', PEER, PEER, REPLY);
 
@@ -1451,7 +1498,7 @@ describe('getOrCreate — 新会话开在工作树里', () => {
     // 新会话在主仓库里开新树，而不是在旧树目录里再建池
     const createdWith = registry.create.mock.calls[0]![0] as unknown as { meta?: { cwd?: string } };
     expect(createdWith.meta?.cwd).toBe(repo);
-    expect(manager.chatDirectory()).toBe(repo);
+    expect(manager.chatDirectory()).toBe(tree.path);
   });
 
   it('宿主建树后写进树里的 working-directory/change 不改工作区', async () => {
@@ -1474,8 +1521,9 @@ describe('getOrCreate — 新会话开在工作树里', () => {
     const record = await manager.getOrCreate('c2c', PEER, PEER, REPLY);
     manager.noteWorkingDirectory(record.agent.session, tree.path);
 
-    // /status 的「工作区」与 /sessions 的分组都按主仓库算，树只出现在工作树行
-    expect(manager.chatDirectory()).toBe(repo);
+    // 运行目录跟着事件走，工作区仍是主仓库：树只出现在工作树行
+    expect(manager.chatDirectory()).toBe(tree.path);
+    expect((await manager.chatWorkspaceInfo('c2c', PEER))?.path).toBe(repo);
     expect(manager.worktreeOf('c2c', PEER)?.path).toBe(tree.path);
   });
 
@@ -1486,20 +1534,23 @@ describe('getOrCreate — 新会话开在工作树里', () => {
     const { ctx, create } = worktreeCtx();
     const manager = createManagerWithCtx(registry, ctx);
     await manager.changeChatWorkspace('c2c', PEER, plain);
+    manager.armWorktree();
 
-    await manager.getOrCreate('c2c', PEER, PEER, REPLY);
+    const record = await manager.getOrCreate('c2c', PEER, PEER, REPLY);
 
     expect(create).not.toHaveBeenCalled();
     expect(manager.chatDirectory()).toBe(plain);
+    expect(record.worktreeNotice).toBe('⚠️ 当前目录不是 Git 仓库，本次就地开会话');
   });
 
-  it('/worktree off 之后：就地开会话，不调建树', async () => {
+  it('没要求开树就不建：/new 的意图被 remove 清掉', async () => {
     const repo = makeRepo();
     const { registry } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
     const { ctx, create } = worktreeCtx();
     const manager = createManagerWithCtx(registry, ctx);
-    manager.setWorktreeEnabled(false);
+    manager.armWorktree();
     await manager.changeChatWorkspace('c2c', PEER, repo);
+    await manager.remove();
 
     await manager.getOrCreate('c2c', PEER, PEER, REPLY);
 
@@ -1507,17 +1558,50 @@ describe('getOrCreate — 新会话开在工作树里', () => {
     expect(manager.chatDirectory()).toBe(repo);
   });
 
-  it('默认开，开关落进 prefs：新实例读得回', () => {
+  it('建树后意图已消费：/clear 在同一棵树里就地开始', async () => {
+    const repo = makeRepo();
+    const tree: WorktreeTree = {
+      path: join(repo, '.agents', 'worktrees', 'dsh-x'),
+      branch: 'dsh-x',
+      baseCommit: '6b1f02c0ffee1234',
+      repositoryRoot: repo,
+    };
     const { registry } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
-    const { ctx } = worktreeCtx();
+    const { ctx, create } = worktreeCtx({ create: async () => tree });
     const manager = createManagerWithCtx(registry, ctx);
-    expect(manager.worktreeEnabled()).toBe(true);
-    expect(manager.worktreesAvailable()).toBe(true);
+    await manager.changeChatWorkspace('c2c', PEER, repo);
+    manager.armWorktree();
+    await manager.getOrCreate('c2c', PEER, PEER, REPLY);
 
-    manager.setWorktreeEnabled(false);
+    await manager.resetCurrentSession();
+    await manager.getOrCreate('c2c', PEER, PEER, REPLY);
 
-    const again = createManagerWithCtx(registry, ctx);
-    expect(again.worktreeEnabled()).toBe(false);
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(manager.chatDirectory()).toBe(tree.path);
+  });
+
+  it('读不到 HEAD：建树失败，本次会话不创建（不降级到主检出）', async () => {
+    const repo = makeRepo();
+    const tree: WorktreeTree = {
+      path: join(repo, '.agents', 'worktrees', 'dsh-x'),
+      branch: 'dsh-x',
+      baseCommit: '6b1f02c0ffee1234',
+      repositoryRoot: repo,
+    };
+    const { registry } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
+    const { ctx, create } = worktreeCtx({ create: async () => tree, head: null });
+    const manager = createManagerWithCtx(registry, ctx);
+    await manager.changeChatWorkspace('c2c', PEER, repo);
+    manager.armWorktree();
+
+    const failure = await manager.getOrCreate('c2c', PEER, PEER, REPLY).catch((err: unknown) => err);
+
+    expect(failure).toBeInstanceOf(WorktreeError);
+    expect((failure as WorktreeError).kind).toBe('base');
+    expect(registry.create).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+    expect(persistedId()).toBeUndefined();
+    expect(manager.chatDirectory()).toBe(repo);
   });
 });
 

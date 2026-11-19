@@ -156,6 +156,18 @@ describe('回执文案', () => {
     );
   });
 
+  it('知道父分支：说成「从 `main` 拉出」，不重复基点', () => {
+    expect(worktreeNotice({
+      branch: 'dsh-x',
+      baseCommit: '6b1f02c0ffee',
+      path: 'D:\\repo\\.agents\\worktrees\\dsh-x',
+    }, 'main')).toBe(
+      '✅ 已在新工作树 `dsh-x` 里开启会话 · 从 `main` 拉出\n'
+      + '路径: `D:\\repo\\.agents\\worktrees\\dsh-x`',
+    );
+  });
+
+
   it('短号固定 7 位；不足时原样', () => {
     expect(shortCommit('abcdef0123456789')).toBe('abcdef0');
     expect(shortCommit('abc')).toBe('abc');

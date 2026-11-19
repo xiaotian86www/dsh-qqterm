@@ -78,7 +78,7 @@ function makeManager(options: StubOptions = {}) {
     getEffectivePreset: vi.fn(() => options.preset ?? 'default'),
     getPermissionPreset: vi.fn(() => options.permission ?? 'workspace-write'),
     listPermissionPresets: vi.fn(() => [{ id: 'workspace-write', name: '工作区内修改' }]),
-    currentWorkspaceInfo: vi.fn(async () => ('workspace' in options
+    chatWorkspaceInfo: vi.fn(async () => ('workspace' in options
       ? options.workspace
       : { title: 'repo', path: 'D:\\repo', missing: false })),
     worktreeOf: vi.fn(() => options.worktree),
@@ -129,7 +129,7 @@ describe('/status（有会话）', () => {
     expect(text).toContain('**权限**: 工作区内修改 (workspace-write)');
   });
 
-  it('会话在工作树里时多给一行分支与基点', async () => {
+  it('会话在工作树里时多给一行分支与树路径', async () => {
     const text = await run(makeManager({
       worktree: {
         branch: 'dsh-1a2b3c4d-9f0e',
@@ -137,7 +137,9 @@ describe('/status（有会话）', () => {
         path: 'D:\\repo\\.agents\\worktrees\\dsh-1a2b3c4d-9f0e',
       },
     }));
-    expect(text).toContain('**工作树**: `dsh-1a2b3c4d-9f0e` · 基点 `6b1f02c`');
+    expect(text).toContain(
+      '**工作树**: `dsh-1a2b3c4d-9f0e` · `D:\\repo\\.agents\\worktrees\\dsh-1a2b3c4d-9f0e`',
+    );
   });
 
   it('没有工作树的会话不出现这一行', async () => {
