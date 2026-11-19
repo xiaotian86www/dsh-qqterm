@@ -188,7 +188,6 @@ The menu is bot-wide configuration that every user sees, and changes only show a
 | `/reasoning` (alias `/think`) | View or switch the current session's reasoning effort (levels depend on the model) |
 | `/preset` | View or switch the current agent preset |
 | `/permission` | View or switch the permission preset (sandbox mode + approval policy, effective immediately; bound user only) |
-| `/worktree` | View or switch whether new sessions start in a worktree (on by default, existing sessions unaffected; bound user only) |
 | `/cost` | View token usage of the current session |
 | `/status` | View session status: session name and short id / workspace / model / reasoning effort / context / tokens |
 | `/stop` | Abort the current generation; `/stop all` aborts every acquired session that is generating |
@@ -216,7 +215,7 @@ A workspace is the host's durable grouping record for "one directory + the sessi
 - **No `cwd` config**: the session's working directory comes from the host.
 - **New sessions land in the host's default workspace** (`Documents/deepseek-harness/default-workspace` on first use); when there is no default workspace it falls back to the dsh launch directory.
 - **The workspace follows the session**: `/sessions resume` moves this chat into that session's directory; a later `/new` stays in the same workspace, and it survives a restart (persisted in the `dirs` section of `~/.dsh-qqterm/model-prefs.json`).
-- **New sessions start in a Git worktree**: inside a Git repository the first message after `/new` first creates a worktree on a `dsh-<short session id>` branch at the current HEAD and the session runs there, matching the web app; `/new <workspace|path>` behaves the same, the directory only decides where the worktree is created. A failed creation means no session that round, with a two-line reason. Deployments without the worktree service, non-Git directories, and a read-only default sandbox create the session in place and never mention worktrees; after `/worktree 关` new sessions run in the main checkout. `/status` gains a worktree line with its branch and path; archiving removes a clean worktree and keeps its branch, while a dirty one is retained.
+- **Worktrees on request**: `/new` stays in place by default; with `--worktree` (`-w`) the first message creates a worktree on a `dsh-<short session id>` branch based at the HEAD of the current directory and the session runs there, matching the web app; `/new --worktree <workspace|path>` switches directory first. Uncommitted changes do not travel with the worktree. An unreadable HEAD or a failed creation means no session that round (never a silent fallback to the repository HEAD), with the reason and a next step; the intent is kept, so resending retries. Non-Git directories and a read-only sandbox create the session in place (a read-only sandbox is refused right at `/new`), and deployments without the worktree service treat `--worktree` as an unknown argument. `/status` gains a worktree line with its base commit; archiving removes a clean worktree and keeps its branch, while a dirty one is retained.
 - **Titles come from directory names**: the host derives the workspace title from the last path segment, and titles you renamed yourself are never overwritten.
 
 ### Switching workspace (`/new <workspace>`)

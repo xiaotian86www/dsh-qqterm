@@ -111,6 +111,14 @@ export interface HostAdapter {
    */
   worktrees(): WorktreeServiceLike | undefined;
   /**
+   * 目录所在仓库的 HEAD（当前分支名 + 提交）。
+   *
+   * 建工作树的基点用它：宿主默认取 repository root 的 HEAD，在树里再开会话会
+   * 从主检出而不是当前分支拉出。只跑只读的 git 命令，不套沙箱写策略；服务
+   * 缺失、超时、非仓库都返回 undefined，调用方据此判定建树失败（不降级）。
+   */
+  headOf(directory: string): Promise<RepoHead | undefined>;
+  /**
    * 部署默认的沙箱模式。
    *
    * 新会话还没有 `sandbox/mode` 事件，不带 session 解析得到的就是它的初始策略；
@@ -212,6 +220,12 @@ export interface WorkspaceRegistryLike {
   unarchiveSession(sessionId: string): Promise<void>;
 }
 
+/** 目录所在仓库的 HEAD（分支可能没有：detached HEAD） */
+export interface RepoHead {
+  readonly commit: string;
+  readonly branch?: string;
+}
+
 /** 宿主建出来的检出（对齐 dsh-experimental-worktree 的 CreatedWorktree） */
 export interface CreatedWorktreeLike {
   readonly path: string;
@@ -243,6 +257,65 @@ export interface WorktreeServiceLike {
 /** sandboxPolicy 服务最小契约：只读部署默认模式 */
 export interface SandboxPolicyLike {
   resolve(request?: { session?: unknown; mode?: string }): { mode?: string } | undefined;
+}
+
+/** subprocess 服务最小契约（只跑只读命令：解析可执行文件 + 收集 stdout） */
+interface SubprocessLike {
+  resolveExecutable(command: string, env?: Readonly<Record<string, string>>, signal?: AbortSignal): Promise<string>;
+  spawn(spec: {
+    argv: readonly string[];
+    cwd: string;
+    env?: Readonly<Record<string, string>>;
+    signal?: AbortSignal;
+    graceMs: number;
+    stdio: {
+      stdin: 'ignore';
+      stdout: { maxBytes: number };
+      stderr: { maxBytes: number };
+    };
+  }): SubprocessHandleLike;
+}
+
+interface SubprocessHandleLike {
+  readonly collected: { readonly stdout: { readFrom(fromByte: number): { text: string } } };
+  readonly done: Promise<{ exitCode: number | null }>;
+  terminate(): void;
+  waitForExit(): Promise<unknown>;
+}
+
+/** 读 HEAD 的超时：本机 git 毫秒级返回，挂住说明目录不可用 */
+const HEAD_TIMEOUT_MS = 5_000;
+
+/**
+ * 在 `cwd` 里跑一条只读 git 命令，返回裁剪后的 stdout。
+ *
+ * 不套沙箱包装：策略约束的是写，rev-parse / symbolic-ref 只读。失败、非零退出
+ * 或输出为空都返回 undefined，由调用方降级。
+ */
+async function gitStdout(
+  subprocess: SubprocessLike,
+  git: string,
+  cwd: string,
+  args: readonly string[],
+  signal: AbortSignal,
+): Promise<string | undefined> {
+  const child = subprocess.spawn({
+    argv: [git, '-C', cwd, ...args],
+    cwd,
+    env: { GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0' },
+    signal,
+    graceMs: 1_000,
+    stdio: { stdin: 'ignore', stdout: { maxBytes: 4_096 }, stderr: { maxBytes: 4_096 } },
+  });
+  try {
+    const { exitCode } = await child.done;
+    if (exitCode !== 0) return undefined;
+    const text = child.collected.stdout.readFrom(0).text.trim();
+    return text === '' ? undefined : text;
+  } finally {
+    child.terminate();
+    await child.waitForExit().catch(() => undefined);
+  }
 }
 
 /**
@@ -495,6 +568,25 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
 
     worktrees() {
       return optionalService<WorktreeServiceLike>(ctx, 'worktrees');
+    },
+
+    async headOf(directory) {
+      const subprocess = optionalService<SubprocessLike>(ctx, 'subprocess');
+      if (subprocess === undefined) return undefined;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), HEAD_TIMEOUT_MS);
+      try {
+        const git = await subprocess.resolveExecutable('git', undefined, controller.signal);
+        const commit = await gitStdout(subprocess, git, directory, ['rev-parse', '--verify', 'HEAD^{commit}'], controller.signal);
+        if (commit === undefined) return undefined;
+        const branch = await gitStdout(subprocess, git, directory, ['symbolic-ref', '-q', '--short', 'HEAD'], controller.signal);
+        return { commit, ...(branch === undefined ? {} : { branch }) };
+      } catch (err) {
+        logger?.debug?.(`host adapter: headOf 失败: ${err instanceof Error ? err.message : String(err)}`);
+        return undefined;
+      } finally {
+        clearTimeout(timer);
+      }
     },
 
     sandboxMode() {
