@@ -1172,7 +1172,7 @@ describe('restoreCurrentSession — 启动恢复上次会话', () => {
     expect(await manager.restoreCurrentSession()).toEqual({ kind: 'none' });
     expect(registry.resume).not.toHaveBeenCalled();
     expect(registry.create).not.toHaveBeenCalled();
-    // 不清掉的话 /sessions 会显示「待恢复」，恢复链接却永远失败
+    // 不清掉的话 /sessions 会把它当冷行列出来，恢复链接却永远失败
     expect(new PrefsStore().getSessionId(KEY)).toBeUndefined();
     expect(new PrefsStore().getTarget(KEY)).toBe(PEER);
   });

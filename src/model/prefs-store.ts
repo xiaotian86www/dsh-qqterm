@@ -1,5 +1,5 @@
 /**
- * PrefsStore — 会话偏好持久化（会话映射 + 工作目录 + 回复目标 + 工作树默认值）
+ * PrefsStore — 会话偏好持久化（会话映射 + 工作目录 + 回复目标 + 会话名册 + 工作树默认值）
  *
  * 隔离文件 I/O 操作，便于单元测试时 mock。
  * 存储路径：~/.dsh-qqterm/model-prefs.json（全局共享，多实例/多进程共存）。
@@ -19,6 +19,9 @@ type DebugFn = (msg: string) => void;
 /** 持久化异常回调（可选，应接 warn 级日志——映射丢失影响会话连续性，需可见） */
 type ErrorFn = (msg: string) => void;
 
+/** 名册保留多少个会话 id：够列出重启前的会话，又不至于无限长 */
+const HELD_MAX = 20;
+
 /** 隔离偏好文件结构 */
 interface PrefsFile {
   /** sessionKey → 最新 sessionId（用于重启后恢复当前会话） */
@@ -27,6 +30,8 @@ interface PrefsFile {
   dirs: Record<string, string>;
   /** sessionKey → 上次和这个聊天交互的 QQ 用户 openid（重启后主动推送用） */
   targets: Record<string, string>;
+  /** sessionKey → 这个聊天获取过的会话 id（最近获取在前；重启后列表靠它） */
+  held?: Record<string, string[]>;
   /** 新会话是否开在 Git 工作树里（缺省 = 开） */
   worktree?: boolean;
 }
@@ -44,6 +49,10 @@ export class PrefsStore {
   private dirs = new Map<string, string>();
   /** per-peer 上次交互的用户 openid（内存态） */
   private targets = new Map<string, string>();
+  /** sessionKey → 获取过的会话 id（内存态；最近获取在前） */
+  private held = new Map<string, string[]>();
+  /** 本进程写过的 held key：合并时整体替换这些 key，其它写者的名册保留 */
+  private touchedHeld = new Set<string>();
   /** 新会话是否开工作树（内存态；undefined = 从未设置） */
   private worktree?: boolean;
   /** 本进程显式删除的 key（防止并发合并把删除复活） */
@@ -122,6 +131,49 @@ export class PrefsStore {
     this.write();
   }
 
+  // ── 会话名册 ──
+
+  /** 这个聊天获取过的会话 id（最近获取在前） */
+  getHeld(sessionKey: string): string[] {
+    return [...(this.held.get(sessionKey) ?? [])];
+  }
+
+  /** 记下一次获取：挪到最前、去重、裁到 HELD_MAX；内容没变不写盘 */
+  rememberHeld(sessionKey: string, sessionId: string): void {
+    this.setHeld(sessionKey, [sessionId, ...(this.held.get(sessionKey) ?? [])]);
+  }
+
+  /**
+   * 从名册里摘掉一个 id（归档 / /clear 后不再列出）。
+   *
+   * 摘到空也保留空数组：合并时靠「本进程写过这个 key」压住磁盘旧名册，
+   * 删掉 key 就分不清「没写过」和「写空了」。
+   */
+  forgetHeld(sessionKey: string, sessionId: string): void {
+    const current = this.held.get(sessionKey);
+    if (current === undefined || !current.includes(sessionId)) return;
+    this.setHeld(sessionKey, current.filter((id) => id !== sessionId));
+  }
+
+  /** 整体覆盖名册（剔除失效会话后写回）；内容没变不写盘 */
+  setHeld(sessionKey: string, sessionIds: readonly string[]): void {
+    const next: string[] = [];
+    for (const id of sessionIds) {
+      if (id === '' || next.includes(id)) continue;
+      next.push(id);
+      if (next.length >= HELD_MAX) break;
+    }
+    const current = this.held.get(sessionKey);
+    if (current !== undefined
+      && current.length === next.length
+      && current.every((id, index) => id === next[index])) {
+      return;
+    }
+    this.held.set(sessionKey, next);
+    this.touchedHeld.add(sessionKey);
+    this.write();
+  }
+
   // ── 工作树默认值 ──
 
   /** 新会话是否开工作树；从未设置过返回 undefined（调用方按开处理） */
@@ -162,6 +214,13 @@ export class PrefsStore {
           if (typeof targetId === 'string' && targetId) {
             this.targets.set(key, targetId);
           }
+        }
+      }
+      if (data.held && typeof data.held === 'object') {
+        for (const [key, ids] of Object.entries(data.held)) {
+          if (!Array.isArray(ids)) continue;
+          const clean = ids.filter((id): id is string => typeof id === 'string' && id !== '');
+          if (clean.length > 0) this.held.set(key, clean.slice(0, HELD_MAX));
         }
       }
       if (typeof data.worktree === 'boolean') {
@@ -229,11 +288,24 @@ export class PrefsStore {
     };
     // worktree 是标量：本进程没设过就保留磁盘值（另一写者可能设过）
     const worktree = this.worktree ?? (typeof disk?.worktree === 'boolean' ? disk.worktree : undefined);
+    // held 是名册（整体替换语义）：本进程写过的 key 用内存值（空数组也要写回，
+    // 否则「清空」会被磁盘旧名册盖回去），其它写者的名册原样保留
+    const held: Record<string, string[]> = {};
+    if (disk?.held && typeof disk.held === 'object') {
+      for (const [key, ids] of Object.entries(disk.held)) {
+        if (Array.isArray(ids)) held[key] = ids.filter((id) => typeof id === 'string' && id !== '');
+      }
+    }
+    for (const key of this.touchedHeld) {
+      const ids = this.held.get(key);
+      if (ids !== undefined) held[key] = [...ids];
+    }
     return {
       sessionIds: pick(this.sessionIds, disk?.sessionIds, this.deleted.sessionIds),
       // dirs 只增不删，没有墓碑
       dirs: pick(this.dirs, disk?.dirs),
       targets: pick(this.targets, disk?.targets, this.deleted.targets),
+      ...(Object.keys(held).length > 0 ? { held } : {}),
       ...(worktree === undefined ? {} : { worktree }),
     };
   }

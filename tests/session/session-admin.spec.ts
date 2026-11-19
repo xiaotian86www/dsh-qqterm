@@ -546,6 +546,8 @@ describe('listHeldSessions', () => {
 
     await manager.switchSession('c2c', PEER, 'session-other', PEER, REPLY);
     await manager.switchSession('c2c', PEER, current, PEER, REPLY);
+    // 获取即进名册（最近获取在前）：重启后靠它把这两条当冷行列出来
+    expect(new PrefsStore().getHeld(KEY)).toEqual([current, 'session-other']);
 
     const entries = await manager.listHeldSessions('c2c', PEER);
     expect(entries.map((entry) => [
@@ -662,6 +664,54 @@ describe('listHeldSessions', () => {
       archived: false,
       title: '标题-hild',
     });
+  });
+
+  it('重启后名册里的会话作为冷行列出来，不带运行状态', async () => {
+    const ctx = createCtx({
+      withQuery: true,
+      sessions: [{ id: 'session-old', cwd: WORKSPACE(), createdAt: 7 }],
+    });
+    new PrefsStore().setHeld(KEY, ['session-old']);
+    const { manager } = createManager(ctx);
+
+    const [cold] = await manager.listHeldSessions('c2c', PEER);
+    expect(cold).toMatchObject({
+      id: 'session-old',
+      title: '标题--old',
+      createdAt: 7,
+      current: false,
+      live: false,
+      held: false,
+      running: false,
+    });
+  });
+
+  it('名册里已经不存在的会话剔除并写回名册', async () => {
+    const ctx = createCtx({ sessions: [{ id: 'session-kept', cwd: WORKSPACE() }] });
+    new PrefsStore().setHeld(KEY, ['session-gone', 'session-kept']);
+    const { manager } = createManager(ctx);
+
+    const entries = await manager.listHeldSessions('c2c', PEER);
+    expect(entries.map((item) => item.id)).toEqual(['session-kept']);
+    expect(new PrefsStore().getHeld(KEY)).toEqual(['session-kept']);
+  });
+
+  it('名册里的当前会话排最前并标 current', async () => {
+    const ctx = createCtx({
+      sessions: [
+        { id: 'session-a', cwd: WORKSPACE(), createdAt: 1 },
+        { id: 'session-b', cwd: WORKSPACE(), createdAt: 2 },
+      ],
+    });
+    new PrefsStore().setHeld(KEY, ['session-a', 'session-b']);
+    new PrefsStore().setSessionId(KEY, 'session-b');
+    const { manager } = createManager(ctx);
+
+    const entries = await manager.listHeldSessions('c2c', PEER);
+    expect(entries.map((item) => [item.id, item.current])).toEqual([
+      ['session-b', true],
+      ['session-a', false],
+    ]);
   });
 });
 
@@ -828,6 +878,20 @@ describe('archiveSession', () => {
     expect(outcome.ok).toBe(false);
     expect(outcome.reason).toBe('busy');
     expect(persistedId()).toBe(id);
+  });
+
+  it('归档只在名册里的冷会话后从名册摘掉', async () => {
+    const id = 'session-cold';
+    const ctx = createCtx({ sessions: [{ id, cwd: WORKSPACE() }] });
+    new PrefsStore().setHeld(KEY, [id]);
+    const { manager } = createManager(ctx);
+
+    const outcome = await manager.archiveSession(id);
+
+    expect(outcome.ok).toBe(true);
+    expect(archivedIds.has(id)).toBe(true);
+    expect(new PrefsStore().getHeld(KEY)).toEqual([]);
+    expect(await manager.listHeldSessions('c2c', PEER)).toEqual([]);
   });
 
 });
