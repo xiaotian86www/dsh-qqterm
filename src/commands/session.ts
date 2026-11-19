@@ -183,7 +183,6 @@ export function newCommand({ manager, config }: CommandDeps): SlashCommand {
           ? [`✅ 已在后台开启会话 \`#${short}\``]
           : [started.worktreeNotice];
         if (label !== undefined) lines.push(label);
-        lines.push(`> 💡 /sessions resume #${short} 切过去`);
         return lines.join('\n');
       }
 

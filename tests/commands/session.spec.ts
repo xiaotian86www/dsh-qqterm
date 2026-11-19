@@ -626,7 +626,7 @@ describe('/new --background', () => {
     expect(manager.armWorktree).not.toHaveBeenCalled();
     expect(manager.promptNewSession).not.toHaveBeenCalled();
     expect(text.split('\n')[0]).toBe('✅ 已在后台开启会话 `#abcdef12`');
-    expect(text).toContain('/sessions resume #abcdef12');
+    expect(text).not.toContain('/sessions resume');
   });
 
   it('--dir 指定目录时在那一处开会话，回执带工作区', async () => {
@@ -635,7 +635,7 @@ describe('/new --background', () => {
     const text = await run(manager, '-b --dir repo 修一下');
 
     expect(manager.startBackgroundSession).toHaveBeenCalledWith(expect.objectContaining({ directory: 'D:\\repo', prompt: '修一下' }));
-    expect(text).toBe('✅ 已在后台开启会话 `#abcdef12`\n工作区: repo · D:\\repo\n> 💡 /sessions resume #abcdef12 切过去');
+    expect(text).toBe('✅ 已在后台开启会话 `#abcdef12`\n工作区: repo · D:\\repo');
   });
 
   it('--worktree 的建树回执代替首行', async () => {
@@ -652,7 +652,7 @@ describe('/new --background', () => {
     expect(manager.startBackgroundSession).toHaveBeenCalledWith(expect.objectContaining({ worktree: true }));
     expect(text.startsWith('✅ 已在新工作树')).toBe(true);
     expect(text).not.toContain('已在后台开启会话');
-    expect(text).toContain('resume #abcdef12');
+    expect(text).not.toContain('/sessions resume');
   });
 
   it('没给提示词就回绝，不动会话', async () => {
