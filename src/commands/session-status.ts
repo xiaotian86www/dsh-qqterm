@@ -108,7 +108,7 @@ async function renderStatus(
     lines.push(`**工作区**: ${prefix}\`${workspace.path}\`${missing}`);
   }
 
-  // 工作树：只有会话日志里有建树记录时才出现（路径已在工作区行给出）
+  // 工作树：只有会话日志里有建树记录时才出现（工作区行给的是主仓库，树只是运行目录）
   const worktree = manager.worktreeOf(scope, peerId);
   if (worktree) {
     lines.push(`**工作树**: \`${worktree.branch}\` · 基点 \`${shortCommit(worktree.baseCommit)}\``);

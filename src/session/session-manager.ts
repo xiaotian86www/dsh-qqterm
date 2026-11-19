@@ -21,7 +21,7 @@
  */
 import { mintSessionId } from './session-id.ts';
 import { createQQUserMessage } from './user-message.ts';
-import { mainRepositoryRoot, WORKTREE_TIMEOUT_MS, WorktreeError, worktreeFailureText, worktreeNotice } from './worktree.ts';
+import { mainRepositoryRoot, WORKTREE_TIMEOUT_MS, WorktreeError, worktreeFailureText, worktreeNotice, worktreeSourceRoot } from './worktree.ts';
 import { SessionId } from '@deepseek-ai/dsh-session';
 import type { Context } from '@deepseek-ai/cordis';
 import {
@@ -241,9 +241,10 @@ export class SessionManager {
     this.chatDir = this.host.defaultWorkspacePath() ?? resolveAgentCwd(undefined);
     this.logger.info(`host adapter capabilities: ${this.host.capabilities.join(', ')}`);
     this.modelResolver = new ModelResolver(ctx, config, logger);
-    // 启动时优先用上次记下的工作目录；目录已不存在才退回默认值
+    // 启动时优先用上次记下的工作目录；目录已不存在才退回默认值。
+    // 旧版本可能把工作树路径写进这里，读回时同样归一到主仓库根
     const savedDir = this.modelResolver.getDirectory(this.sessionKey());
-    if (savedDir !== undefined && isDirectory(savedDir)) this.chatDir = savedDir;
+    if (savedDir !== undefined && isDirectory(savedDir)) this.chatDir = this.workspaceDirOf(savedDir);
 
     this.registerAgentDisposed();
   }
@@ -1863,14 +1864,27 @@ export class SessionManager {
   }
 
   /**
+   * 工作区的归属目录：链接工作树里的路径取主仓库根，其它原样返回。
+   *
+   * 树是会话的运行目录，不是工作区——宿主给工作树会话写的 header.cwd 就是主
+   * 仓库根，`/status` 的「工作区」与 `/sessions` 的分组都按它算。建树后宿主
+   * 追加的 `working-directory/change` 因此不改工作区。
+   */
+  private workspaceDirOf(directory: string): string {
+    return worktreeSourceRoot(directory) ?? directory;
+  }
+
+  /**
    * 覆盖聊天工作目录并落盘（启动时优先读回的记忆）。
    *
-   * 内存仍是唯一读写来源；磁盘只做镜像，值没变不写。
+   * 内存仍是唯一读写来源；磁盘只做镜像，值没变不写。所有入口都在这里归一，
+   * 工作树路径不会落成工作区。
    */
   private setChatDir(directory: string): void {
-    if (this.chatDir === directory) return;
-    this.chatDir = directory;
-    this.modelResolver.setDirectory(this.sessionKey(), directory);
+    const workspace = this.workspaceDirOf(directory);
+    if (this.chatDir === workspace) return;
+    this.chatDir = workspace;
+    this.modelResolver.setDirectory(this.sessionKey(), workspace);
   }
 
   /**
@@ -1886,9 +1900,10 @@ export class SessionManager {
     const sessionLike = session as { id?: unknown; header?: { id?: unknown } } | null | undefined;
     const id = sessionLike?.header?.id ?? sessionLike?.id;
     if (id !== record.sessionId && record.agent.session !== session) return;
-    if (this.chatDir === cwd) return;
-    this.setChatDir(cwd);
-    this.logger.info(`chat working directory changed: dir=${cwd}`);
+    const workspace = this.workspaceDirOf(cwd);
+    if (this.chatDir === workspace) return;
+    this.setChatDir(workspace);
+    this.logger.info(`chat working directory changed: dir=${workspace}`);
   }
 
   /** 某个 agent 所属会话当前的工作目录（交付物投递、`/get` 相对路径的基准） */
@@ -2130,7 +2145,8 @@ export class SessionManager {
     let isNew = false;
 
     if (isAbsolute(target)) {
-      path = resolve(target);
+      // 工作树路径不是工作区：会话总从主仓库开新树，报给用户的也按主仓库算
+      path = this.workspaceDirOf(resolve(target));
       const known = this.listWorkspaceInfos().find((item) => samePath(item.path, path));
       title = known?.title ?? basename(path);
       isNew = known === undefined;
@@ -2455,7 +2471,10 @@ export class SessionManager {
     this.records.set(sessionId, record);
     this.setCurrent(key, sessionId);
     if (directory) this.setChatDir(directory);
-    if (directory) void this.host.attachSessionToWorkspace(sessionId, directory);
+    // 同 openSession：挂工作区用 header.cwd（工作树会话即主仓库根），
+    // 传运行期目录（树路径）会凭空长出一个以树名命名的工作区
+    const attachCwd = this.headerCwd(agent) ?? directory;
+    if (attachCwd) void this.host.attachSessionToWorkspace(sessionId, attachCwd);
 
     this.logger.info(`session switched: key=${key} sessionId=${sessionId} acquired=${handle ? 'owned' : 'borrowed'}`);
     return wasCurrent
