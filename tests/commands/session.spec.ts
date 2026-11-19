@@ -458,10 +458,11 @@ describe('/new <提示词>', () => {
     expect(text).toContain('本次会话没有创建');
   });
 
-  it('用法页列出提示词写法', () => {
+  it('用法页说明 -- 之后全部当提示词', () => {
     const command = newCommand({ manager: makeManager() as unknown as SessionManager, config, logger });
     expect(command.usage).toContain('`/new <提示词>`');
-    expect(command.usage).toContain('参数位置随意');
+    expect(command.usage).toContain('`--` 之后的内容全部当提示词');
+    expect(command.usage).not.toContain('参数位置');
   });
 });
 
@@ -488,7 +489,7 @@ describe('/new --dir 参数', () => {
   it('用法页列出 --dir 写法', () => {
     const command = newCommand({ manager: makeManager() as unknown as SessionManager, config, logger });
     expect(command.usage).toContain('`/new --dir <工作区>`');
-    expect(command.usage).toContain('`-d` 是 `--dir` 的简写');
+    expect(command.usage).toContain('（`-d`）');
   });
 });
 
@@ -696,6 +697,6 @@ describe('/new --background', () => {
   it('用法页列出 --background', () => {
     const command = newCommand({ manager: makeManager() as unknown as SessionManager, config, logger });
     expect(command.usage).toContain('`/new --background <提示词>`');
-    expect(command.usage).toContain('`--background` 必须带提示词');
+    expect(command.usage).toContain('（`-b`）');
   });
 });
