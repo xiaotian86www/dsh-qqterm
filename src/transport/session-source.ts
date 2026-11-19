@@ -13,7 +13,6 @@
  */
 import type { SessionEventLike, SessionRecord } from '../session/index.ts';
 import { shortSessionId } from '../shared/utils.ts';
-import { chunkMarkdownText } from './chunker.ts';
 
 /** 标题在来源行里的展示上限（日志标题可能很长，来源行要保持一行） */
 const TITLE_MAX = 20;
@@ -158,91 +157,3 @@ export function decorateSessionMessage(
   if (body === '') return '';
   return `${sessionSourceHeader(sessionId, title)}\n\n${body}\n\n${sessionLinkRow(sessionId, archivable)}`;
 }
-
-/**
- * 待发的一片：裸正文 + 是否首片 / 末片。
- *
- * 装饰只在渲染时按标志拼一次：超长重切时对裸正文再切，子片继承标志，
- * 不会把来源头、尾部行再叠一遍（旧实现切的是已装饰文本，来源头会重复）。
- */
-export interface SessionMessagePiece {
-  text: string;
-  /** 首片：渲染时加来源行 */
-  header: boolean;
-  /** 末片：渲染时加尾部链接行 */
-  footer: boolean;
-}
-
-/** 按「上限 - 首尾开销」切片，首片带来源行、末片带尾部链接行 */
-export function splitSessionMessage(
-  text: string,
-  sessionId: string,
-  title: string | undefined,
-  limit: number,
-  archivable = false,
-): SessionMessagePiece[] {
-  const body = text.trim();
-  if (body === '') return [];
-  const reserve = sessionSourceHeader(sessionId, title).length
-    + sessionLinkRow(sessionId, archivable).length
-    + 4; // 两处 `\n\n`
-  const chunks = chunkMarkdownText(body, Math.max(1, limit - reserve));
-  return chunks.map((value, index) => ({
-    text: value,
-    header: index === 0,
-    footer: index === chunks.length - 1,
-  }));
-}
-
-/** 渲染一片：只按标志加装饰，重复渲染不会叠加 */
-export function renderSessionPiece(
-  piece: SessionMessagePiece,
-  sessionId: string,
-  title: string | undefined,
-  archivable = false,
-): string {
-  const head = piece.header ? sessionSourceHeader(sessionId, title) : '';
-  const tail = piece.footer ? sessionLinkRow(sessionId, archivable) : '';
-  return [head, piece.text, tail].filter((value) => value !== '').join('\n\n');
-}
-
-/**
- * 超长重切：只切裸正文，子片继承首 / 末标志。
- *
- * 按上限的一半切，保证每轮明显变短；正文已切不动（只剩一个字）时返回空数组，
- * 由调用方收尾提示，避免在「切完还是超长」上死循环。
- */
-export function resplitSessionPiece(
-  piece: SessionMessagePiece,
-  limit: number,
-): SessionMessagePiece[] {
-  const budget = Math.max(1, Math.floor(Math.min(piece.text.length, limit) / 2));
-  if (piece.text.length <= budget) return [];
-  let slices = chunkMarkdownText(piece.text, budget);
-  if (slices.length <= 1) {
-    // 没有换行可断（长串）：按字符硬切，保证每片比原文短
-    slices = [];
-    for (let start = 0; start < piece.text.length; start += budget) {
-      slices.push(piece.text.slice(start, start + budget));
-    }
-  }
-  if (slices.length <= 1) return [];
-  return slices.map((value, index) => ({
-    text: value,
-    header: piece.header && index === 0,
-    footer: piece.footer && index === slices.length - 1,
-  }));
-}
-
-/** 切分并装饰（短消息 / 交付物提示用） */
-export function chunkDecoratedSessionMessage(
-  text: string,
-  sessionId: string,
-  title: string | undefined,
-  limit: number,
-  archivable = false,
-): string[] {
-  return splitSessionMessage(text, sessionId, title, limit, archivable)
-    .map((piece) => renderSessionPiece(piece, sessionId, title, archivable));
-}
-

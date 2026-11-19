@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import type { SessionRecord } from '../../src/session/index.ts';
 import {
   UNNAMED_SESSION_TITLE,
-  chunkDecoratedSessionMessage,
   decorateSessionMessage,
   sessionArchiveLink,
   sessionLinkRow,
@@ -97,41 +96,6 @@ describe('sessionTargetLabel', () => {
   it('标题净化并截断，不破坏行内代码与引号', () => {
     expect(sessionTargetLabel('session-04de1556', '修 `登录`\n第二行')).toBe('「修 登录 第二行」 · `#04de1556`');
     expect(sessionTargetLabel('session-04de1556', '一'.repeat(40)).endsWith('…」 · `#04de1556`')).toBe(true);
-  });
-});
-
-describe('chunkDecoratedSessionMessage', () => {
-  const id = 'session-04de1556-8c54-4b78-93e1-5714e079fca6';
-  const body = Array.from({ length: 30 }, (_, i) => `第 ${i} 行：内容内容内容内容`).join('\n');
-
-  it('首片带来源头、末片带尾部链接行、中间片不重复', () => {
-    const chunks = chunkDecoratedSessionMessage(body, id, '修登录', 260);
-
-    expect(chunks.length).toBeGreaterThan(1);
-    expect(chunks[0]!.startsWith('> `#04de1556` · 修登录\n\n')).toBe(true);
-    expect(chunks.join('\n')).toContain('<qqbot-cmd-input');
-    const last = chunks[chunks.length - 1]!;
-    expect(last).not.toContain('***');
-    expect(last).toContain('show="恢复"');
-    for (const chunk of chunks.slice(1, -1)) {
-      expect(chunk).not.toContain('#04de1556');
-    }
-  });
-
-  it('加完装饰后每条都不超过 textChunkLimit', () => {
-    for (const chunk of chunkDecoratedSessionMessage(body, id, '修登录', 260)) {
-      expect(chunk.length).toBeLessThanOrEqual(260);
-    }
-    for (const chunk of chunkDecoratedSessionMessage(body, id, '修登录', 260, true)) {
-      expect(chunk.length).toBeLessThanOrEqual(260);
-    }
-  });
-
-  it('带归档能力时末片仍只出现一次尾部链接行', () => {
-    const chunks = chunkDecoratedSessionMessage(body, id, '修登录', 260, true);
-    const last = chunks[chunks.length - 1]!;
-    expect(last).toContain('show="归档"');
-    expect(last.split('show="归档"').length).toBe(2);
   });
 });
 

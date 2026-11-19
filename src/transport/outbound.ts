@@ -8,14 +8,8 @@ import type { InlineKeyboard } from '@tencent-connect/qqbot-nodejs';
 import type { SessionManager, SessionRecord } from '../session/index.ts';
 import type { QQTermConfig } from '../config.ts';
 import type { Logger, ReplyTarget } from '../types.ts';
-import { chunkMarkdownText } from './chunker.ts';
-import {
-  renderSessionPiece,
-  resplitSessionPiece,
-  sessionTitleOf,
-  splitSessionMessage,
-  type SessionMessagePiece,
-} from './session-source.ts';
+import { splitForLimit } from './chunker.ts';
+import { decorateSessionMessage, sessionTitleOf } from './session-source.ts';
 import { formatToolResult, type ToolsRegistryLike, type ToolResultData } from './tool-presenter.ts';
 import type { DeliverablesDelivererLike } from './deliverables.ts';
 import {
@@ -193,7 +187,7 @@ class OutboundRouter {
       if (segment.text.trim() === '') continue;
       this.trackText(
         sessionId,
-        this.enqueue(sessionId, () => this.sendNow(record, segment.text, 'sendMarkdown')),
+        this.enqueue(sessionId, () => this.sendNow(record, this.compose(record, segment.text), 'sendMarkdown')),
       );
     }
   }
@@ -300,7 +294,7 @@ class OutboundRouter {
       if (await channel.offer(record, failure, retries)) return;
     }
     const canRetry = RETRYABLE_FAILURE_CODES.has(failure.code) && (record.lastPrompt ?? '').trim() !== '';
-    await this.sendNow(record, formatTurnFailure(failure, canRetry), 'sendTurnEndError');
+    await this.sendNow(record, this.compose(record, formatTurnFailure(failure, canRetry)), 'sendTurnEndError');
   }
 
   /**
@@ -319,51 +313,53 @@ class OutboundRouter {
     return next;
   }
 
-  /** 统一发送：入队 → 切分 + 逐 chunk 发送 + 错误记录 */
+  /** 组装完整消息：本地文件链接换成 /get 命令，非当前会话加来源行与尾部动作行 */
+  private compose(record: SessionRecord, text: string): string {
+    // 本地文件链接换成 /get 命令：QQ 点不开本地路径
+    const body = rewriteLocalFileLinks(text, this.manager.directoryForAgent(record.agent));
+    if (this.manager.isCurrentSession(record.sessionId)) return body;
+    // 归档入口只在部署有 workspaceRegistry 时给：没有该服务时命令不认这个子命令
+    return decorateSessionMessage(
+      body,
+      record.sessionId,
+      sessionTitleOf(record),
+      this.manager.workspaceRegistryAvailable(),
+    );
+  }
+
+  /** 统一发送：入队 → 组装 → 切分发送 */
   private send(record: SessionRecord, text: string, tag: string): Promise<void> {
-    return this.enqueue(record.sessionId, () => this.sendNow(record, text, tag));
+    return this.enqueue(record.sessionId, () => this.sendNow(record, this.compose(record, text), tag));
   }
 
   /**
-   * 在当前发送链内发送：非当前会话整段加来源头与尾部动作。
-   * 来源头只在首片、尾部动作只在末片，避免长回复每片都重复标注。
+   * 在当前发送链内发送：只做切分、逐片发送与失败重试。
+   *
+   * 收到的是拼好的整条消息（含来源行 / 尾部行），这里不区分正文与装饰，
+   * 只保证每片不超过上限、内容一个字都不丢：超长就按本条长度减半重切。
    */
-  private async sendNow(record: SessionRecord, text: string, tag: string): Promise<void> {
-    const current = this.manager.isCurrentSession(record.sessionId);
-    // 本地文件链接换成 /get 命令：QQ 点不开本地路径
-    const body = rewriteLocalFileLinks(text, this.manager.directoryForAgent(record.agent));
-    // 归档入口只在部署有 workspaceRegistry 时给：没有该服务时命令不认这个子命令
-    const archivable = this.manager.workspaceRegistryAvailable();
-    const title = sessionTitleOf(record);
-    // 队列存「裸正文 + 首末标志」：超长重切只切正文，装饰渲染时才拼，切几次都不会叠来源头
-    const pieces: SessionMessagePiece[] = current
-      ? chunkMarkdownText(body, this.config.textChunkLimit)
-        .map((value) => ({ text: value, header: false, footer: false }))
-      : splitSessionMessage(body, record.sessionId, title, this.config.textChunkLimit, archivable);
-    const render = (piece: SessionMessagePiece): string => (current
-      ? piece.text
-      : renderSessionPiece(piece, record.sessionId, title, archivable));
-
-    const queue = [...pieces];
+  private async sendNow(record: SessionRecord, message: string, tag: string): Promise<void> {
+    if (message === '') return;
+    const queue = splitForLimit(message, this.config.textChunkLimit);
     const send = (value: string): Promise<unknown> => this.bot.sendMarkdown(record.replyTarget, value);
     let blockedNotified = false;
 
     while (queue.length > 0) {
-      const piece = queue.shift()!;
-      const outcome = await this.outbox.deliver(record.sessionId, tag, () => send(render(piece)));
+      const part = queue.shift()!;
+      const outcome = await this.outbox.deliver(record.sessionId, tag, () => send(part));
 
       // 暂不可用：本条与后续分片一起排队，恢复后按原顺序补发
       if (outcome === 'queued') {
-        for (const rest of queue) this.outbox.enqueue(record.sessionId, tag, () => send(render(rest)));
+        for (const rest of queue) this.outbox.enqueue(record.sessionId, tag, () => send(rest));
         return;
       }
       // 渠道判死：后续分片已经没有任何意义
       if (outcome === 'broken') return;
       if (outcome === 'sent') continue;
 
-      // 内容类失败：超长对裸正文再切小重发，风控只告知一次
+      // 内容类失败：超长按本条长度减半重切，风控只告知一次
       if (outcome === 'too-long') {
-        const smaller = resplitSessionPiece(piece, this.config.textChunkLimit);
+        const smaller = splitForLimit(part, Math.floor(part.length / 2));
         if (smaller.length > 1) {
           queue.unshift(...smaller);
           continue;

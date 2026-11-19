@@ -175,7 +175,7 @@ rg -n '注意|务必|强烈建议|建议您|也可以|另外' src/commands src/f
 QQ 只有一个窗口，多个已获取会话的输出、提问、审批都回到这里，署名只靠首尾两行；实现集中在 `src/transport/session-source.ts`（`sessionSourceHeader` / `sessionLinkRow`），出站、交付物、提问、审批共用，不要另拼。
 
 - 首行：独占一行、后接空行，`` > `#短id` · 标题 ``；短 id 必须包行内代码（QQ 会把引用行里 `#` 开头的内容渲染成标题）；不带 emoji；标题取最新 `session/title`（`sessionTitleOf`），取不到写 `未命名会话`，压到 20 字内。
-- 尾部动作：正文后空一行、独占一行，`回复`（`/to #短id `）+ `恢复`（`/sessions resume #短id`），部署有 `workspaceRegistry` 时再 + `归档`（`/sessions archive #短id`，没有归档能力时不给入口）；长回复只在首片带首行、末片带链接（`chunkDecoratedSessionMessage`）。
+- 尾部动作：正文后空一行、独占一行，`回复`（`/to #短id `）+ `恢复`（`/sessions resume #短id`），部署有 `workspaceRegistry` 时再 + `归档`（`/sessions archive #短id`，没有归档能力时不给入口）；长回复只在首片带首行、末片带链接（拼好的整条消息交给 `splitForLimit` 按上限切，超长重切只切不装饰）。
 - 非当前会话的提问 / 审批用同一首行，正文不塞 `[#id]`；提问在引导行给 `回答 · 恢复`，审批 / 重试有自己的键盘，不追加。讲「当前这条消息」的路由警告只在句子里带 `#短id（标题）`（`sessionLabel`），不套首行。
 
 ## 5. 构建 / 测试

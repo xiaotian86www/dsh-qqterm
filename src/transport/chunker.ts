@@ -83,3 +83,35 @@ export function chunkMarkdownText(text: string, limit: number): string[] {
 
   return chunks.length > 0 ? chunks : [text];
 }
+/**
+ * 按上限切分整条消息（含装饰），保证每片不超过 limit 且不丢字符。
+ *
+ * 先按行 / 表格 / 代码块边界切；单行本身超长时再按字符硬切，
+ * 硬切点落在行内标签（`<qqbot-cmd-input …/>`）里就往前退到标签开头。
+ */
+export function splitForLimit(text: string, limit: number): string[] {
+  const size = Math.max(1, Math.floor(limit));
+  if (text.length <= size) return [text];
+  const chunks: string[] = [];
+  for (const chunk of chunkMarkdownText(text, size)) {
+    if (chunk.length <= size) chunks.push(chunk);
+    else chunks.push(...hardSplit(chunk, size));
+  }
+  return chunks;
+}
+
+/** 超长行的字符硬切：退到标签边界，避免把行内标签切成两半 */
+function hardSplit(text: string, size: number): string[] {
+  const chunks: string[] = [];
+  let rest = text;
+  while (rest.length > size) {
+    let cut = size;
+    const open = rest.lastIndexOf('<', cut - 1);
+    const close = rest.lastIndexOf('>', cut - 1);
+    if (open > close && open > 0) cut = open;
+    chunks.push(rest.slice(0, cut));
+    rest = rest.slice(cut);
+  }
+  if (rest !== '') chunks.push(rest);
+  return chunks;
+}
