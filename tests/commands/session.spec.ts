@@ -141,9 +141,12 @@ describe('/new（不带参数）', () => {
     expect(manager.remove).toHaveBeenCalled();
   });
 
-  it('--worktree：交出意图，回执交代下一条消息开树', async () => {
+  it('--worktree：交出意图，回执只说会话带工作树', async () => {
     const manager = makeManager();
-    expect(await run(manager, '--worktree')).toBe('✅ 已开启新会话\n🌿 下一条消息开新工作树');
+    const text = await run(manager, '--worktree');
+
+    expect(text).toBe('✅ 已开启带工作树的会话');
+    expect(text.split('\n')).toHaveLength(1);
     expect(manager.remove).toHaveBeenCalledWith();
     expect(manager.armWorktree).toHaveBeenCalledTimes(1);
     expect(manager.changeChatWorkspace).not.toHaveBeenCalled();
@@ -151,7 +154,7 @@ describe('/new（不带参数）', () => {
 
   it('-w 是 --worktree 的别名', async () => {
     const manager = makeManager();
-    expect(await run(manager, '-w')).toContain('🌿 下一条消息开新工作树');
+    expect(await run(manager, '-w')).toBe('✅ 已开启带工作树的会话');
     expect(manager.armWorktree).toHaveBeenCalledTimes(1);
   });
 
@@ -285,7 +288,7 @@ describe('/new <工作区>', () => {
     expect(text).toContain('仅限绑定用户可用');
   });
 
-  it('--worktree 与路径同时给：换完工作区再交出意图，回执三行', async () => {
+  it('--worktree 与路径同时给：换完工作区再交出意图，回执两行', async () => {
     const manager = makeManager();
 
     const text = await run(manager, '-w D:\\My Repo');
@@ -293,8 +296,7 @@ describe('/new <工作区>', () => {
     expect(manager.resolveWorkspace).toHaveBeenCalledWith('D:\\My Repo');
     expect(manager.changeChatWorkspace).toHaveBeenCalledWith('c2c', 'user1', 'D:\\My Repo');
     expect(manager.armWorktree).toHaveBeenCalledTimes(1);
-    expect(text.split('\n')).toHaveLength(3);
-    expect(text).toContain('🌿 下一条消息开新工作树');
+    expect(text).toBe('✅ 已开启带工作树的会话\n工作区: repo · D:\\repo');
   });
 
   it('只读沙箱带路径也拒绝，不动会话', async () => {
