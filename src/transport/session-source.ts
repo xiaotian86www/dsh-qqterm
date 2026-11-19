@@ -13,7 +13,6 @@
  */
 import type { SessionEventLike, SessionRecord } from '../session/index.ts';
 import { shortSessionId } from '../shared/utils.ts';
-import { chunkMarkdownText } from './chunker.ts';
 
 /** 标题在来源行里的展示上限（日志标题可能很长，来源行要保持一行） */
 const TITLE_MAX = 20;
@@ -158,27 +157,3 @@ export function decorateSessionMessage(
   if (body === '') return '';
   return `${sessionSourceHeader(sessionId, title)}\n\n${body}\n\n${sessionLinkRow(sessionId, archivable)}`;
 }
-
-/**
- * 切分并装饰：首片带来源头，末片带尾部链接行。
- *
- * 正文按「上限 - 首尾开销」切，保证加完装饰后每条仍不超过 textChunkLimit。
- */
-export function chunkDecoratedSessionMessage(
-  text: string,
-  sessionId: string,
-  title: string | undefined,
-  limit: number,
-  archivable = false,
-): string[] {
-  const header = sessionSourceHeader(sessionId, title);
-  const footer = sessionLinkRow(sessionId, archivable);
-  const body = text.trim();
-  if (body === '') return [];
-  const reserve = header.length + footer.length + 4; // 两处 `\n\n`
-  const chunks = chunkMarkdownText(body, Math.max(1, limit - reserve));
-  chunks[0] = `${header}\n\n${chunks[0]}`;
-  chunks[chunks.length - 1] = `${chunks[chunks.length - 1]}\n\n${footer}`;
-  return chunks;
-}
-
