@@ -329,9 +329,11 @@ class OutboundRouter {
     const current = this.manager.isCurrentSession(record.sessionId);
     // 本地文件链接换成 /get 命令：QQ 点不开本地路径
     const body = rewriteLocalFileLinks(text, this.manager.directoryForAgent(record.agent));
+    // 归档入口只在部署有 workspaceRegistry 时给：没有该服务时命令不认这个子命令
+    const archivable = this.manager.workspaceRegistryAvailable();
     const chunk = (value: string, limit: number): string[] => (current
       ? chunkMarkdownText(value, limit)
-      : chunkDecoratedSessionMessage(value, record.sessionId, sessionTitleOf(record), limit));
+      : chunkDecoratedSessionMessage(value, record.sessionId, sessionTitleOf(record), limit, archivable));
 
     const queue = chunk(body, this.config.textChunkLimit);
     const send = (value: string): Promise<unknown> => this.bot.sendMarkdown(record.replyTarget, value);
