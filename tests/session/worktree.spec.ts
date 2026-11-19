@@ -13,6 +13,7 @@ import {
   shortCommit,
   worktreeFailureText,
   worktreeNotice,
+  worktreeSourceRoot,
 } from '../../src/session/worktree.ts';
 
 let home = '';
@@ -81,6 +82,36 @@ describe('mainRepositoryRoot', () => {
     mkdirSync(weird, { recursive: true });
     writeFileSync(join(weird, '.git'), 'garbage\n');
     expect(mainRepositoryRoot(weird)).toBeUndefined();
+  });
+});
+
+describe('worktreeSourceRoot', () => {
+  it('普通检出（含子目录）：undefined，工作区不归一', () => {
+    const repo = makeRepo();
+    expect(worktreeSourceRoot(repo)).toBeUndefined();
+    const nested = join(repo, 'src');
+    mkdirSync(nested, { recursive: true });
+    expect(worktreeSourceRoot(nested)).toBeUndefined();
+  });
+
+  it('链接工作树：还原成主仓库根', () => {
+    const repo = makeRepo();
+    const worktree = makeLinkedWorktree(repo);
+    expect(worktreeSourceRoot(worktree)).toBe(repo);
+    const nested = join(worktree, 'src');
+    mkdirSync(nested, { recursive: true });
+    expect(worktreeSourceRoot(nested)).toBe(repo);
+  });
+
+  it('子模块与不是 Git 仓库的目录：undefined', () => {
+    const repo = makeRepo();
+    const sub = join(repo, 'vendor', 'lib');
+    mkdirSync(sub, { recursive: true });
+    writeFileSync(join(sub, '.git'), `gitdir: ${join(repo, '.git', 'modules', 'lib')}\n`);
+    expect(worktreeSourceRoot(sub)).toBeUndefined();
+    const plain = join(home, 'plain');
+    mkdirSync(plain, { recursive: true });
+    expect(worktreeSourceRoot(plain)).toBeUndefined();
   });
 });
 

@@ -29,6 +29,7 @@ import {
   worktreeFailureText,
   worktreeNotice,
   worktreeSkipNotice,
+  worktreeSourceRoot,
 } from './worktree.ts';
 import { SessionId } from '@deepseek-ai/dsh-session';
 import type { Context } from '@deepseek-ai/cordis';
@@ -219,9 +220,9 @@ export class SessionManager {
   /**
    * 当前这个聊天的工作目录（内存态，唯一读写来源）。
    *
-   * 构造时优先读回上次记下的目录，没有或已不存在才取宿主默认工作区；
-   * 之后只由 acquire / 切换会话 / `/new <工作区>` / 运行期 `cd` 覆盖并落盘；
-   * 读取不做任何回退。
+   * 只记下一会话的落点（工作区目录）：建会话、切换会话、`/new <工作区>` 写它；
+   * 运行期 `cd` 不写（那是会话的运行目录，宿主记在会话里、重启回放恢复）。
+   * 构造时优先读回上次记下的目录，没有或已不存在才取宿主默认工作区；读取不回退。
    */
   private chatDir: string;
   /**
@@ -262,9 +263,14 @@ export class SessionManager {
     this.chatDir = this.host.defaultWorkspacePath() ?? resolveAgentCwd(undefined);
     this.logger.info(`host adapter capabilities: ${this.host.capabilities.join(', ')}`);
     this.modelResolver = new ModelResolver(ctx, config, logger);
-    // 启动时优先用上次记下的工作目录；目录已不存在才退回默认值
+    // 启动时优先用上次记下的工作目录；目录已不存在才退回默认值。
+    // 旧版本可能把工作树路径写进这里，读回时同样归一到主仓库根
     const savedDir = this.modelResolver.getDirectory(this.sessionKey());
-    if (savedDir !== undefined && isDirectory(savedDir)) this.chatDir = savedDir;
+    if (savedDir !== undefined && isDirectory(savedDir)) {
+      this.chatDir = this.workspaceDirOf(savedDir);
+      // 旧版本可能把树路径写进 prefs：顺手改掉磁盘镜像，别让它一直留着旧值
+      if (this.chatDir !== savedDir) this.modelResolver.setDirectory(this.sessionKey(), this.chatDir);
+    }
 
     this.registerAgentDisposed();
   }
@@ -1429,7 +1435,8 @@ export class SessionManager {
     const sessionId = SessionId(mapped ?? mintSessionId());
     this.logger.info(`getOrCreate: key=${key} sessionId=${sessionId}`);
 
-    // 这个聊天的工作目录：新会话落在它里面，恢复的会话以它自己的 header 为准
+    // 这个聊天的工作区：新会话落在它里面，恢复的会话以它自己的 header 为准。
+    // 存进来的已经是工作区目录（写点归一），这里不再二次归一
     let directory = this.chatDirectory();
 
     // 已经获取过这个会话（`/to` 先拿到、或 `/sessions resume` 接上）：直接复用记录
@@ -1437,7 +1444,7 @@ export class SessionManager {
     if (known) {
       this.touch(known, scope, peerId, senderId, replyTarget);
       this.setCurrent(key, sessionId);
-      this.setChatDir(this.host.sessionDirectory(known.agent.session) ?? directory);
+      this.setChatDir(this.headerCwd(known.agent) ?? directory);
       return known;
     }
 
@@ -1517,8 +1524,9 @@ export class SessionManager {
     this.rememberHeld(sessionId);
     this.setCurrent(key, sessionId);
 
-    // 工作区跟着会话走：这个聊天当前目录以会话为准
-    if (directory) this.setChatDir(directory);
+    // 工作区跟着会话走：落点取会话的工作区（header.cwd），不是它的运行目录（树路径）
+    const workspace = this.headerCwd(agent) ?? directory;
+    if (workspace) this.setChatDir(workspace);
 
     // 挂载到对应工作区（侧边栏可见性）；fail-soft、异步执行，不阻塞消息处理。
     // 宿主只在客户端 session.create RPC 时挂载会话，插件会话不走那条路径，
@@ -1932,40 +1940,35 @@ export class SessionManager {
   /**
    * 该聊天当前所在的工作目录（内存态，唯一来源）。
    *
-   * 初值在构造时取宿主默认工作区；acquire、切换会话、`/new <工作区>` 与运行期
-   * `cd` 会覆盖它。这里不再回退会话 header / 持久化记录 / 默认工作区。
+   * 初值在构造时取宿主默认工作区；建会话、切换会话、`/new <工作区>` 会覆盖它。
+   * 运行期 `cd` 不改它（那只动会话的运行目录）。这里不回退会话 header /
+   * 持久化记录 / 默认工作区。
    */
   private chatDirectory(): string {
     return this.chatDir;
   }
 
   /**
+   * 工作区的归属目录：链接工作树里的路径取主仓库根，其它原样返回。
+   *
+   * 只在写落点前用一次（读回旧 prefs、`/new <路径>`），以及 `/sessions` 比会话用。
+   * 树是会话的运行目录，不是工作区：一旦写进落点，新会话的 header.cwd 就变成
+   * 树路径，凭空长出一个以树名命名的工作区。
+   */
+  private workspaceDirOf(directory: string): string {
+    return worktreeSourceRoot(directory) ?? directory;
+  }
+
+  /**
    * 覆盖聊天工作目录并落盘（启动时优先读回的记忆）。
    *
-   * 内存仍是唯一读写来源；磁盘只做镜像，值没变不写。
+   * 内存仍是唯一读写来源；磁盘只做镜像，值没变不写。存工作区目录（下一会话的
+   * 落点），不存会话的运行目录；旧数据里的树路径由 {@link workspaceDirOf} 归一。
    */
   private setChatDir(directory: string): void {
     if (this.chatDir === directory) return;
     this.chatDir = directory;
     this.modelResolver.setDirectory(this.sessionKey(), directory);
-  }
-
-  /**
-   * 运行期 `cd`：宿主在会话里追加 `working-directory/change`。
-   *
-   * 只认当前会话的目录变化；非当前会话的 `cd` 不影响这个聊天的工作区。
-   */
-  noteWorkingDirectory(session: unknown, cwd: unknown): void {
-    if (typeof cwd !== 'string' || cwd === '') return;
-    const record = this.currentRecord();
-    if (record === undefined) return;
-    // 事件里的 session 可能是宿主的投影包装，先按 id 认，再退回引用相等
-    const sessionLike = session as { id?: unknown; header?: { id?: unknown } } | null | undefined;
-    const id = sessionLike?.header?.id ?? sessionLike?.id;
-    if (id !== record.sessionId && record.agent.session !== session) return;
-    if (this.chatDir === cwd) return;
-    this.setChatDir(cwd);
-    this.logger.info(`chat working directory changed: dir=${cwd}`);
   }
 
   /** 某个 agent 所属会话当前的工作目录（交付物投递、`/get` 相对路径的基准） */
@@ -1990,13 +1993,14 @@ export class SessionManager {
    */
   async listWorkspaceSessions(_scope: ChatScope, _peerId: string): Promise<WorkspaceSession[]> {
     const key = this.sessionKey();
+    // 落点本身就是工作区目录；旧数据里的树路径在写入时已归一，这里不再算
     const workspace = this.chatDirectory();
     const currentId = this.currentSessionId(key);
     const archived = this.host.archivedSessionIds();
 
     const visible = (await this.host.listSessions())
       .filter((session) => session.origin !== 'subagent')
-      .filter((session) => session.cwd !== undefined && samePath(session.cwd, workspace))
+      .filter((session) => session.cwd !== undefined && samePath(this.workspaceDirOf(session.cwd), workspace))
       .sort((a, b) => (b.updatedAt - a.updatedAt) || (a.id < b.id ? -1 : 1));
 
     // 这里只列当前工作区，但条目也要带工作区字段：归档候选 / 归档页按它分组，
@@ -2213,7 +2217,16 @@ export class SessionManager {
     _scope: ChatScope,
     _peerId: string,
   ): Promise<{ title: string; path: string; missing: boolean } | undefined> {
-    return this.workspaceInfoOf(this.chatDirectory());
+    // 运行目录偏离会话自己的工作区（cd、或会话落在树里）时按运行目录算，树里的
+    // `/get a.txt` 才不会指到主仓库去；没偏离就以落点为准——`/new <工作区>` 之后、
+    // 下一条消息之前，基准已经是新工作区
+    const record = this.currentRecord();
+    const live = record === undefined ? undefined : this.host.sessionDirectory(record.agent.session);
+    const workspace = record === undefined ? undefined : this.headerCwd(record.agent);
+    const directory = live !== undefined && (workspace === undefined || !samePath(live, workspace))
+      ? live
+      : this.chatDirectory();
+    return this.workspaceInfoOf(directory);
   }
 
   /**
@@ -2231,9 +2244,7 @@ export class SessionManager {
     const directory =
       record === undefined
         ? this.chatDirectory()
-        : this.headerCwd(record.agent) ??
-          this.host.sessionDirectory(record.agent.session) ??
-          this.chatDirectory();
+        : this.workspaceDirOf(this.headerCwd(record.agent) ?? this.chatDirectory());
     return this.workspaceInfoOf(directory);
   }
 
@@ -2282,7 +2293,8 @@ export class SessionManager {
     let isNew = false;
 
     if (isAbsolute(target)) {
-      path = resolve(target);
+      // 工作树路径不是工作区：会话总从主仓库开新树，报给用户的也按主仓库算
+      path = this.workspaceDirOf(resolve(target));
       const known = this.listWorkspaceInfos().find((item) => samePath(item.path, path));
       title = known?.title ?? basename(path);
       isNew = known === undefined;
@@ -2540,7 +2552,7 @@ export class SessionManager {
     if (existing) {
       this.touch(existing, scope, peerId, senderId, replyTarget);
       this.setCurrent(key, sessionId);
-      this.setChatDir(this.host.sessionDirectory(existing.agent.session) ?? this.chatDir);
+      this.setChatDir(this.headerCwd(existing.agent) ?? this.host.sessionDirectory(existing.agent.session) ?? this.chatDir);
       this.logger.info(`session switched (already acquired): key=${key} sessionId=${sessionId}`);
       return wasCurrent
         ? (unarchived ? { ok: true, reason: 'same', unarchived: true } : { ok: true, reason: 'same' })
@@ -2607,8 +2619,8 @@ export class SessionManager {
     this.records.set(sessionId, record);
     this.rememberHeld(sessionId);
     this.setCurrent(key, sessionId);
-    if (directory) this.setChatDir(directory);
-    // 与 getOrCreate 同一条规则：挂载点用 header.cwd，别把工作树路径当成工作区
+    this.setChatDir(this.headerCwd(agent) ?? directory);
+    // 挂工作区用 header.cwd（工作树会话即主仓库根），传运行期目录（树路径）会凭空长出一个以树名命名的工作区
     const attachCwd = this.headerCwd(agent) ?? directory;
     if (attachCwd) void this.host.attachSessionToWorkspace(sessionId, attachCwd);
 

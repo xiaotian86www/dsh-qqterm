@@ -99,8 +99,9 @@ function createRegistry() {
       handles.push(handle);
       return handle;
     }),
-    create: vi.fn(async ({ sessionId }: { sessionId: string }) => {
-      const handle = fakeHandle(sessionId);
+    create: vi.fn(async ({ sessionId, meta }: { sessionId: string; meta?: { cwd?: string } }) => {
+      // 宿主把建会话时传的 cwd 写进 header.cwd：工作区归属按它算
+      const handle = fakeHandle(sessionId, meta?.cwd);
       handles.push(handle);
       return handle;
     }),
@@ -954,23 +955,27 @@ describe('工作区跟随会话', () => {
     expect(calls.every((args) => args[0] === defaultWs)).toBe(true);
   });
 
-  it('运行期 cd 只跟随当前会话，别的会话改目录不影响', async () => {
+  it('运行期 cd 只改会话的运行目录：/get 跟着走，工作区与落点不动', async () => {
     const moved = join(env.home, 'cd-target');
     mkdirSync(moved, { recursive: true });
-    const ctx = createCtx({ withQuery: true, sessions: [{ id: 'session-a', cwd: WORKSPACE() }] });
+    let live = WORKSPACE();
+    const ctx = createCtx({
+      withQuery: true,
+      sessions: [{ id: 'session-a', cwd: WORKSPACE() }],
+      workingDirectory: { defaultDirectory: WORKSPACE(), get: () => live },
+    });
     const { manager } = createManager(ctx);
     await manager.getOrCreate('c2c', PEER, PEER, REPLY);
-    const current = manager.getSessionRecord('c2c', PEER);
+    const landed = new PrefsStore().getDirectory(KEY);
 
-    // 非当前会话的 working-directory/change：忽略
-    manager.noteWorkingDirectory(fakeAgent('session-other').session, moved);
-    expect((await manager.currentWorkspaceInfo('c2c', PEER))?.path).toBe(`${env.home}/workspace`);
+    // 宿主把会话的 working-directory/change 写进日志，这里直接翻它的实时值
+    live = moved;
 
-    // 当前会话的 working-directory/change：跟随
-    manager.noteWorkingDirectory(current?.agent.session, moved);
+    // /get、/ls 的基准跟运行目录走
     expect((await manager.currentWorkspaceInfo('c2c', PEER))?.path).toBe(moved);
-    // 并落盘，重启后仍停在这个目录
-    expect(new PrefsStore().getDirectory(KEY)).toBe(moved);
+    // /status 的工作区与落点仍是会话的工作区，cd 不写 prefs
+    expect((await manager.chatWorkspaceInfo('c2c', PEER))?.path).toBe(WORKSPACE());
+    expect(new PrefsStore().getDirectory(KEY)).toBe(landed);
   });
 });
 
