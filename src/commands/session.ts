@@ -116,7 +116,6 @@ export function newCommand({ manager, config }: CommandDeps): SlashCommand {
         ...(manager.worktreesAvailable() ? ['`/new --worktree` 新会话开在独立工作树（`-w`）'] : []),
         '`/new --background <提示词>` 后台另开一条，不切走当前会话（`-b`）',
         ...(named ? ['工作区认标题、目录名或绝对路径'] : []),
-        '参数位置随意，`--` 之后一律当提示词',
       ].join('\n');
     },
     handler: async (cmdCtx) => {
