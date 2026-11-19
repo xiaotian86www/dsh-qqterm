@@ -1491,7 +1491,14 @@ export class SessionManager {
         if (err instanceof WorktreeError) throw err;
         if (!(await this.mayCreateAfterResumeFailure(key, sessionId, err))) throw err;
         mkdirSync(directory, { recursive: true });
-        const created = await this.spawnSession(key, sessionId, directory, agentPreset, composed.setup);
+        const created = await this.spawnSession(
+          key,
+          sessionId,
+          directory,
+          agentPreset,
+          composed.setup,
+          this.pendingWorktree,
+        );
         agent = created.agent;
         handle = created.handle;
         directory = created.directory;
@@ -1547,15 +1554,18 @@ export class SessionManager {
    * 默认策略只读、当前目录不是主仓库——后两种由调用方就地开会话并说明原因，
    * 服务缺失不提（部署差异）。
    */
-  private worktreeBase(directory: string): string | undefined {
-    if (!this.pendingWorktree) return undefined;
+  private worktreeBase(directory: string, wanted: boolean): string | undefined {
+    if (!wanted) return undefined;
     if (this.host.worktrees() === undefined) return undefined;
     if (this.host.sandboxMode() === 'read-only') return undefined;
     return mainRepositoryRoot(directory);
   }
 
   /**
-   * 新建会话：`/new --worktree` 要求开树就开在树里，否则就地。
+   * 新建会话：要求开树（`/new --worktree`、`/new --background -w`）就开在树里，否则就地。
+   *
+   * `wanted` 由调用方传入（当前指针的意图，或后台启动自带的要求），这里不读也不清
+   * `pendingWorktree`：清意图只发生在 `setCurrent`（成功接上当前会话）那一步。
    *
    * 宿主不回滚建树的半成品（分支与检出可能留下），这里只关掉刚创建的 agent：
    * 指针与已获取集都不动；意图保留，用户重发一次就会重新尝试。
@@ -1567,6 +1577,7 @@ export class SessionManager {
     directory: string,
     agentPreset: string | undefined,
     setup: PresetComposition['setup'],
+    wanted: boolean,
   ): Promise<{
     agent: DshAgent;
     handle: DshAgentHandle;
@@ -1574,8 +1585,7 @@ export class SessionManager {
     worktree?: SpawnedWorktree;
     worktreeSkipped?: 'not-repo' | 'read-only';
   }> {
-    const wanted = this.pendingWorktree;
-    const base = this.worktreeBase(directory);
+    const base = this.worktreeBase(directory, wanted);
     // 基点按 chatDir 的 HEAD 算：宿主默认取 repository root 的 HEAD，在树里再开会话
     // 会从主检出而不是当前分支拉出。读不到 HEAD 就不建会话——不降级到主检出。
     const plan = base === undefined
@@ -1596,7 +1606,6 @@ export class SessionManager {
     if (plan === undefined || worktrees === undefined) {
       // 明确要求过却没开成：意图用完即弃，并把原因带回回执
       if (!wanted) return { agent: created.agent, handle: created, directory };
-      this.pendingWorktree = false;
       if (worktrees === undefined) return { agent: created.agent, handle: created, directory };
       const reason = this.host.sandboxMode() === 'read-only' ? 'read-only' as const : 'not-repo' as const;
       return { agent: created.agent, handle: created, directory, worktreeSkipped: reason };
@@ -1608,7 +1617,6 @@ export class SessionManager {
         { from: plan.head.commit },
         AbortSignal.timeout(WORKTREE_TIMEOUT_MS),
       );
-      this.pendingWorktree = false;
       this.logger.info(`created worktree: key=${key} branch=${tree.branch} path=${tree.path}`);
       return {
         agent: created.agent,
@@ -1961,6 +1969,71 @@ export class SessionManager {
     return notice === undefined
       ? { sessionId: record.sessionId }
       : { sessionId: record.sessionId, worktreeNotice: notice };
+  }
+
+  /**
+   * `/new --background`：另开一条会话并把提示词发出去，不接管当前聊天。
+   *
+   * 与 `/new <提示词>` 的唯一区别是不动当前指针与聊天工作区：这条会话只进已获取
+   * 集合，输出、提问、审批照样回 QQ（带 `#短id` 署名），切过去用 `/sessions resume`。
+   * `--worktree` 的建树要求从参数进来，不经过 `pendingWorktree`，回执同样交给命令层。
+   */
+  async startBackgroundSession(input: {
+    directory: string;
+    worktree: boolean;
+    prompt: string;
+    scope: ChatScope;
+    peerId: string;
+    senderId: string;
+    replyTarget: ReplyTarget;
+  }): Promise<{ sessionId: string; worktreeNotice?: string }> {
+    const key = this.sessionKey();
+    const sessionId = SessionId(mintSessionId());
+    const presetId = await this.resolvePersistedPreset(sessionId);
+    const composed = await this.composePreset(presetId);
+    const directory = input.directory;
+    mkdirSync(directory, { recursive: true });
+    const created = await this.spawnSession(
+      key,
+      sessionId,
+      directory,
+      composed.agentPreset,
+      composed.setup,
+      input.worktree,
+    );
+
+    const record: SessionRecord = {
+      sessionKey: key,
+      sessionId,
+      agent: created.agent,
+      handle: created.handle,
+      replyTarget: input.replyTarget,
+      scope: input.scope,
+      peerId: input.peerId,
+      senderId: input.senderId,
+      ...(composed.agentPreset ? { agentPreset: composed.agentPreset } : {}),
+      acquiredAt: Date.now(),
+    };
+    this.records.set(sessionId, record);
+    this.rememberHeld(sessionId);
+
+    // 挂到工作区以便侧栏可见；指针与聊天工作区都不动，切过去才成为当前会话
+    const attachCwd = this.headerCwd(created.agent) ?? directory;
+    if (attachCwd) void this.host.attachSessionToWorkspace(sessionId, attachCwd);
+
+    const body = input.prompt.trim();
+    record.lastPrompt = body;
+    created.agent.followup(createQQUserMessage(body));
+    this.logger.info(
+      `background session started: sessionId=${sessionId} dir=${created.directory} worktree=${input.worktree}`,
+    );
+
+    const notice = created.worktree !== undefined
+      ? worktreeNotice(created.worktree.tree, created.worktree.parent)
+      : created.worktreeSkipped === undefined
+        ? undefined
+        : worktreeSkipNotice(created.worktreeSkipped);
+    return notice === undefined ? { sessionId } : { sessionId, worktreeNotice: notice };
   }
 
   /**

@@ -10,7 +10,7 @@ import type { CommandDeps, SlashCommand } from './types.ts';
 import { parseArgs } from './args.ts';
 import type { SessionConfirmAction } from '../features/session-confirm.ts';
 import { WorktreeError, worktreeErrorText, type ChangeWorkspaceOutcome } from '../session/index.ts';
-import { getScopePeer } from '../shared/index.ts';
+import { getScopePeer, shortSessionId } from '../shared/index.ts';
 
 /**
  * 有会话时的二次确认。
@@ -47,6 +47,9 @@ const READ_ONLY_WORKTREE = '⚠️ 只读沙箱开不了工作树 · 用 /permis
 /** `--dir` 后面没跟工作区 */
 const DIR_MISSING = '⚠️ --dir 后要跟工作区 · 用法: /help new';
 
+/** `--background` 没给提示词：后台会话没有要跑的东西 */
+const BACKGROUND_MISSING = '⚠️ --background 需要提示词 · 用法: /help new';
+
 
 /**
  * `/new` 的参数：`--dir`（`-d`）指定工作区，`--worktree`（`-w`）要求下一条
@@ -59,6 +62,7 @@ const DIR_MISSING = '⚠️ --dir 后要跟工作区 · 用法: /help new';
 export function parseNewArgs(raw: string): {
   arg: string;
   worktree: boolean;
+  background: boolean;
   prompt: string | undefined;
   error: string | undefined;
 } {
@@ -68,12 +72,16 @@ export function parseNewArgs(raw: string): {
     flags: [
       { name: 'dir', alias: 'd', value: true, missing: DIR_MISSING },
       { name: 'worktree', alias: 'w' },
+      { name: 'background', alias: 'b' },
     ],
   });
   const worktree = parsed.flags.has('worktree');
-  if (parsed.error !== undefined) return { arg: '', worktree, prompt: undefined, error: parsed.error };
+  const background = parsed.flags.has('background');
+  if (parsed.error !== undefined) {
+    return { arg: '', worktree, background, prompt: undefined, error: parsed.error };
+  }
   const prompt = parsed.words.length === 0 ? undefined : parsed.words.join(' ');
-  return { arg: parsed.values.get('dir') ?? '', worktree, prompt, error: undefined };
+  return { arg: parsed.values.get('dir') ?? '', worktree, background, prompt, error: undefined };
 }
 
 /**
@@ -108,14 +116,16 @@ export function newCommand({ manager, config }: CommandDeps): SlashCommand {
         '`-d` 是 `--dir` 的简写，路径带空格就加引号',
         ...(manager.worktreesAvailable() ? ['`/new --worktree` 在当前分支上拉出独立工作树'] : []),
         ...(named ? ['工作区认标题、目录名或绝对路径'] : []),
+        '`/new --background <提示词>`（`-b`）另开一条会话在后台跑，不切走当前会话',
         '空格分隔参数，带空格的路径或提示词加引号',
-        '参数位置随意；`--` 之后一律当提示词；不给提示词就只清指针',
+        '参数位置随意；`--` 之后一律当提示词',
+        '不给提示词就只清指针；`--background` 必须带提示词',
       ].join('\n');
     },
     handler: async (cmdCtx) => {
       const { scope, peerId } = getScopePeer(cmdCtx);
       const senderId = cmdCtx.message.senderId;
-      const { arg, worktree, prompt, error } = parseNewArgs((cmdCtx.command?.raw ?? '').trim());
+      const { arg, worktree, background, prompt, error } = parseNewArgs((cmdCtx.command?.raw ?? '').trim());
 
       if (error !== undefined) return error;
 
@@ -136,6 +146,49 @@ export function newCommand({ manager, config }: CommandDeps): SlashCommand {
       }
 
       if (worktree && manager.readOnlySandbox()) return READ_ONLY_WORKTREE;
+
+      // 后台：另开一条会话把提示词发出去，当前会话与它的工作区都不动
+      if (background) {
+        // 后台会话没有提示词就没有要跑的东西（普通 /new 不给提示词是合法的）
+        if (prompt === undefined) return BACKGROUND_MISSING;
+        let directory: string;
+        let label: string | undefined;
+        if (arg === '') {
+          directory = (await manager.chatWorkspaceInfo(scope, peerId))?.path ?? '';
+        } else {
+          const resolved = manager.resolveWorkspace(arg);
+          if (!resolved.ok) return describeChangeFailure(resolved);
+          directory = resolved.path;
+          label = manager.workspaceRegistryAvailable()
+            ? `工作区: ${resolved.title} · ${resolved.path}`
+            : `工作区: ${resolved.path}`;
+        }
+        if (directory === '') return '⚠️ 拿不到当前工作区 · 用 `--dir` 指定一个';
+
+        let started: { sessionId: string; worktreeNotice?: string };
+        try {
+          started = await manager.startBackgroundSession({
+            directory,
+            worktree,
+            prompt,
+            scope,
+            peerId,
+            senderId,
+            replyTarget: { scope, targetId: peerId },
+          });
+        } catch (err) {
+          if (err instanceof WorktreeError) return worktreeErrorText(err);
+          const message = err instanceof Error ? err.message : String(err);
+          return `❌ 没能开启会话: ${message}\n稍后再试一次。`;
+        }
+        const short = shortSessionId(started.sessionId);
+        const lines = started.worktreeNotice === undefined
+          ? [`✅ 已在后台开启会话 \`#${short}\``]
+          : [started.worktreeNotice];
+        if (label !== undefined) lines.push(label);
+        lines.push(`> 💡 /sessions resume #${short} 切过去`);
+        return lines.join('\n');
+      }
 
       // 先解析目标再动会话：路径写错不该把当前会话弄丢
       if (arg !== '') {
