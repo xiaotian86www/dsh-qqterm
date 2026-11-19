@@ -2146,7 +2146,7 @@ export class SessionManager {
    * 顺序是「当前 → 活记录按获取时间倒序 → 冷行（名册顺序）」；宿主列表暂时
    * 没有返回的持有会话也保留（用 agent 的目录与获取时间兜底），避免刚切过去就
    * 从列表消失。冷行是重启前获取过、这次还没打开的会话：标题 / 时间 / 目录都
-   * 取宿主快照，没有运行状态。标题读取失败不影响列表本身，取不到就显示
+   * 取宿主快照，状态按空闲列出。标题读取失败不影响列表本身，取不到就显示
    * 「未命名会话」。
    *
    * @param scope 当前 chat 作用域（用于标记 current）
@@ -2274,7 +2274,7 @@ export class SessionManager {
       };
     });
 
-    // 冷行：没有运行状态可报，held / live / running 全 false，标题与时间取宿主快照
+    // 冷行：held / live / running 全 false，状态层按空闲展示，标题与时间取宿主快照
     for (const id of cold) {
       const info = byId.get(id);
       const directory = info?.cwd;
