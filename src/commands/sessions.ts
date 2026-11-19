@@ -106,22 +106,28 @@ function usageFor(archivable: boolean): string {
   ].join('\n');
 }
 
-/** 目标解析结果 */
-export type SessionTargetResult =
-  | { ok: true; entry: WorkspaceSession }
+/** 目标解析结果（任意带 id 的清单） */
+export type SessionIdMatch<T> =
+  | { ok: true; entry: T }
   | { ok: false; error: string };
 
+/** 目标解析结果（会话清单版本） */
+export type SessionTargetResult = SessionIdMatch<WorkspaceSession>;
+
 /**
- * 把用户输入解析成列表中的一条会话。
+ * 把用户输入解析成清单里的一条目标。
  *
  * 句柄只有一种：id。完整 id、带 `session-` 前缀的 id、列表里那 8 位短 id 都认，
  * 前面可以带 `#`。短 id 可能是纯数字（uuid 前 8 位恰好都是数字的概率约 2%），
  * 所以数字串同样按 id 前缀处理，不再有「第几个」的含义。
+ *
+ * 泛型版本让 `/stop <id>` 这类「在别的清单里找目标」的命令复用同一套匹配与报错，
+ * 不在命令里另写一份前缀规则。
  */
-export function resolveSessionTarget(
-  entries: readonly WorkspaceSession[],
+export function matchSessionTarget<T extends { id: string }>(
+  entries: readonly T[],
   raw: string,
-): SessionTargetResult {
+): SessionIdMatch<T> {
   const arg = raw.trim().replace(/^#/, '');
   const printable = safeArg(raw.trim());
   if (arg === '') return { ok: false, error: '缺少目标（会话短 id）' };
@@ -143,6 +149,14 @@ export function resolveSessionTarget(
   if (matches.length > 1) return { ok: false, error: `id 前缀匹配到 ${matches.length} 个会话，多写几位再试` };
   const entry = matches[0];
   return entry ? { ok: true, entry } : { ok: false, error: `没有匹配的会话: ${printable}` };
+}
+
+/** 会话清单版：规则与 `matchSessionTarget` 同一份 */
+export function resolveSessionTarget(
+  entries: readonly WorkspaceSession[],
+  raw: string,
+): SessionTargetResult {
+  return matchSessionTarget(entries, raw);
 }
 
 /**

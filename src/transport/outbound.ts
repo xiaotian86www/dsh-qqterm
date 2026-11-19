@@ -318,12 +318,14 @@ class OutboundRouter {
     // 本地文件链接换成 /get 命令：QQ 点不开本地路径
     const body = rewriteLocalFileLinks(text, this.manager.directoryForAgent(record.agent));
     if (this.manager.isCurrentSession(record.sessionId)) return body;
-    // 归档入口只在部署有 workspaceRegistry 时给：没有该服务时命令不认这个子命令
+    // 归档入口只在部署有 workspaceRegistry 时给：没有该服务时命令不认这个子命令；
+    // 停止入口只在会话确实在生成时给：空闲会话点了也没东西可停
     return decorateSessionMessage(
       body,
       record.sessionId,
       sessionTitleOf(record),
       this.manager.workspaceRegistryAvailable(),
+      record.agent.status === 'running',
     );
   }
 

@@ -113,6 +113,24 @@ describe('OutboundRouter: 多会话标记', () => {
     );
   });
 
+  it('会话正在生成时尾部多一个停止入口', async () => {
+    const record = createRecord(c2cTarget);
+    (record.agent as unknown as { status: string }).status = 'running';
+    const { outbound, bot } = setup({ current: false, record });
+
+    outbound.routeSessionEvent({ header: { id: 'sess-qq' } }, {
+      type: 'assistant/message',
+      data: { message: { content: [{ type: 'text', text: 'hello' }] } },
+    });
+    await Promise.resolve();
+
+    expect(bot.sendMarkdown).toHaveBeenCalledWith(
+      c2cTarget,
+      `${sourceOf('sess-qq')}\n\nhello\n\n${footerOf('sess-qq')}`
+        + ' · <qqbot-cmd-input text="/stop #sess-qq" show="停止"/>',
+    );
+  });
+
   it('来源头带会话标题（取日志里最新的 session/title）', async () => {
     const record = createRecord(c2cTarget, 'sess-qq', [
       { type: 'session/title', data: { title: '旧标题' } },
