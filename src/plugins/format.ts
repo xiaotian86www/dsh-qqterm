@@ -6,6 +6,7 @@
  */
 import type { BundleInfoLike, PluginVersionLike } from './types.ts';
 import type { PluginOpState } from './state.ts';
+import { quoteArg } from '../commands/args.ts';
 
 /** 一页展示多少条插件 */
 const PAGE_SIZE = 10;
@@ -152,7 +153,13 @@ export function renderPluginResult(state: PluginOpState): string | undefined {
   // 构建脚本被拦下不算失败：给出批准后重试的入口，而不是让用户自己拼参数
   if (state.pendingBuilds !== undefined && state.pendingBuilds.length > 0) {
     const names = state.pendingBuilds.join(' · ');
-    const retry = `/plugins install ${state.target} --allow-builds=${state.pendingBuilds.join(',')}`;
+    const allow = `--allow-builds=${state.pendingBuilds.join(',')}`;
+    // 目标可能是本地路径：带空格时要加引号，否则点下去只装到第一段
+    const target = quoteArg(state.target);
+    if (target === undefined) {
+      return `⚠️ 安装被构建脚本拦下: ${names}\n用 \`/plugins install ${state.target} ${allow}\` 继续安装`;
+    }
+    const retry = `/plugins install ${target} ${allow}`;
     return [`⚠️ 安装被构建脚本拦下: ${names}`, commandLink(retry, '继续安装')].join('\n');
   }
 

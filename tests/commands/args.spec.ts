@@ -2,7 +2,7 @@
  * 命令参数切词的共用规则：空格分隔、成对引号包住一个值、\`--\` 与参数识别交给各命令
  */
 import { describe, expect, it } from 'vitest';
-import { looksLikeParam, parseArgs, parseRest, tokenize } from '../../src/commands/args.ts';
+import { looksLikeParam, parseArgs, parseRest, quoteArg, tokenize } from '../../src/commands/args.ts';
 
 describe('tokenize', () => {
   it('按空格切词，连续空白不产生空词', () => {
@@ -156,5 +156,31 @@ describe('parseArgs', () => {
 
   it('引号没闭合时回命令名对应的用法', () => {
     expect(parseArgs('--dir "D:\\My Repo', spec).error).toBe('⚠️ 引号没有闭合 · 用法: /help demo');
+  });
+});
+
+describe('quoteArg', () => {
+  const newSpec = { command: 'new', flags: [{ name: 'dir', alias: 'd', value: true }] };
+
+  it('没有空白与引号的值原样返回', () => {
+    expect(quoteArg('/repo')).toBe('/repo');
+  });
+
+  it('带空白的值用成对双引号包住，放回命令里仍是一个词', () => {
+    const quoted = quoteArg('D:\\My Repo');
+    expect(quoted).toBe('"D:\\My Repo"');
+    expect(parseArgs(`--dir ${quoted}`, newSpec).values.get('dir')).toBe('D:\\My Repo');
+  });
+
+  it('值里有双引号时改用单引号', () => {
+    expect(quoteArg(`a"b c`)).toBe(`'a"b c'`);
+  });
+
+  it('两种引号都有时不返回，调用方降级成纯文本', () => {
+    expect(quoteArg(`a"b'c`)).toBeUndefined();
+  });
+
+  it('没有空白但含引号的词也要包住，否则切词器会把它当引号起手', () => {
+    expect(quoteArg(`a"b`)).toBe(`'a"b'`);
   });
 });
