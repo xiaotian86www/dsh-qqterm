@@ -205,6 +205,51 @@ describe('/sessions 持有视图', () => {
     expect(text).not.toContain('修复登录 bug');
   });
 
+  it('行尾给回复与归档入口：当前会话不重复给回复，没打开的会话同样给', async () => {
+    const manager = makeManager({
+      listHeldSessions: vi.fn(async () => [
+        entry({
+          id: 'session-cccc1111',
+          current: true,
+          held: true,
+          title: '当前会话',
+          workspace: 'repo',
+          workspacePath: '/repo',
+        }),
+        entry({
+          id: 'session-dddd2222',
+          held: true,
+          live: true,
+          title: '后台会话',
+          workspace: 'repo',
+          workspacePath: '/repo',
+        }),
+        entry({
+          id: 'session-eeee3333',
+          title: '未打开的会话',
+          workspace: 'repo',
+          workspacePath: '/repo',
+        }),
+      ]),
+      currentSessionId: vi.fn(() => 'session-cccc1111'),
+    });
+
+    const text = await run(manager, '');
+    const lineOf = (id: string): string => text.split('\n').find((line) => line.includes(id)) ?? '';
+
+    // 已获取的后台会话：回复 + 归档，与恢复按钮同一行
+    expect(lineOf('#dddd2222')).toContain(
+      '<qqbot-cmd-input text="/to #dddd2222 " show="回复"/>'
+        + ' · <qqbot-cmd-input text="/sessions archive #dddd2222" show="归档"/>',
+    );
+    // 当前会话本来就在跟它说话，只留归档
+    expect(lineOf('#cccc1111')).not.toContain('show="回复"');
+    expect(lineOf('#cccc1111')).toContain('text="/sessions archive #cccc1111"');
+    // 还没打开的会话也照给：列表不区分打开与否，点了由 /to 提示先恢复
+    expect(lineOf('#eeee3333')).toContain('text="/to #eeee3333 " show="回复"');
+    expect(lineOf('#eeee3333')).toContain('text="/sessions archive #eeee3333"');
+  });
+
   it('持有会话下的子会话紧跟父行展示，不做成可恢复目标', async () => {
     const manager = makeManager({
       listHeldSessions: vi.fn(async () => [
@@ -559,6 +604,30 @@ describe('/sessions all', () => {
     expect(text).not.toContain(' ✅');
     expect(text).not.toContain('生成中');
     expect(text).not.toContain('空闲');
+  });
+
+  it('全部会话同样在行尾给回复与归档入口', async () => {
+    const manager = makeManager({
+      listWorkspaceGroups: vi.fn(async () => [{
+        id: 'ws-1',
+        title: 'repo',
+        path: '/repo',
+        missing: false,
+        sessions: [
+          entry({ id: 'session-held', held: true, live: true, title: '持有会话', workspace: 'repo' }),
+          entry({ id: 'session-cold', title: '未打开的会话', workspace: 'repo' }),
+        ],
+      }]),
+    });
+
+    const text = await run(manager, 'all');
+    const lineOf = (id: string): string => text.split('\n').find((line) => line.includes(id)) ?? '';
+
+    expect(lineOf('#held')).toContain('text="/to #held " show="回复"');
+    expect(lineOf('#held')).toContain('text="/sessions archive #held" show="归档"');
+    // 还没打开的会话也照给，列表不区分打开与否
+    expect(lineOf('#cold')).toContain('text="/to #cold " show="回复"');
+    expect(lineOf('#cold')).toContain('text="/sessions archive #cold" show="归档"');
   });
 
   it('按工作区分组列出：只给短 id，不编号', async () => {
@@ -1317,6 +1386,13 @@ describe('没有 workspaceRegistry 的部署', () => {
     expect(text).not.toContain('**repo**');
     expect(text).not.toContain('show="归档"');
     expect(text).toContain('show="全部会话"');
+  });
+
+  it('行尾仍给回复入口，但不给归档（命令不可用）', async () => {
+    const text = await run(pathOnlyManager(), '');
+
+    expect(text).toContain('text="/to #aaaa0001 " show="回复"');
+    expect(text).not.toContain('text="/sessions archive');
   });
 
   it('/sessions all 仍按目录分组，组标题只有路径', async () => {

@@ -317,8 +317,9 @@ function renderRow(entry: WorkspaceSession, options: RowOptions = {}): string {
  * 并直接提示，链接层不需要为当前项换命令。仍用按钮渲染是因为 QQ 把
  * `<qqbot-cmd-input>` 渲染成带内边距的块，纯文本行是齐左的，混在一起会错位。
  */
-function renderLine(entry: WorkspaceSession, label: string): string {
-  return commandLink(`/sessions resume ${displayId(entry.id)}`, label);
+function renderLine(entry: WorkspaceSession, label: string, extra = ''): string {
+  const line = commandLink(`/sessions resume ${displayId(entry.id)}`, label);
+  return extra === '' ? line : `${line} · ${extra}`;
 }
 
 /**
@@ -329,6 +330,26 @@ function renderLine(entry: WorkspaceSession, label: string): string {
 function commandLink(command: string, show: string): string {
   const label = cleanInline(show) || command;
   return `<qqbot-cmd-input text="${attrValue(command)}" show="${attrValue(label)}"/>`;
+}
+
+/**
+ * 会话行尾的快捷操作：不改当前指针的两个动作。
+ *
+ * - `回复`：把 `/to #短id ` 填进输入框，给这个会话发消息。当前会话本来就在跟它
+ *   说话，不给；其余一律给——列表不区分会话是否已打开，不给入口等于把「冷会话」
+ *   这个概念漏到界面上（会话还没打开时 `/to` 会请先恢复）。
+ * - `归档`：`/sessions archive #短id`，从列表与 Web 侧栏收走（日志保留，可取消归档）。
+ *   部署没有 `workspaceRegistry` 时这条命令按未知子命令处理，所以也不给入口。
+ *
+ * 与行首的恢复按钮同处一行，用 ` · ` 分隔；子会话不是独立目标，不挂这些链接。
+ */
+function quickLinks(entry: WorkspaceSession, archivable: boolean): string {
+  const links: string[] = [];
+  if (!entry.current) {
+    links.push(commandLink(`/to ${displayId(entry.id)} `, '回复'));
+  }
+  if (archivable) links.push(commandLink(`/sessions archive ${displayId(entry.id)}`, '归档'));
+  return links.join(' · ');
 }
 
 /**
@@ -816,7 +837,7 @@ function renderHeldList(
       lines.push(renderLine(row, renderRow(row, {
         showStatus: true,
         showCurrent: true,
-      })));
+      }), quickLinks(row, archivable)));
       // 子会话不是独立目标（/sessions resume 解析不到），只作为父行后的说明
       for (const child of row.children ?? []) {
         lines.push(renderRow(child, { showStatus: true }));
@@ -949,7 +970,7 @@ function renderGroups(groups: readonly WorkspaceGroup[], page = 1, archivable = 
       lines.push(...workspaceHeader(group.title, group.path, group.missing, true), '');
       lastGroupId = group.id;
     }
-    lines.push(renderLine(entry, renderRow(entry, { showHeld: true })));
+    lines.push(renderLine(entry, renderRow(entry, { showHeld: true }), quickLinks(entry, archivable)));
   }
 
   const allArchived = visible.filter(
