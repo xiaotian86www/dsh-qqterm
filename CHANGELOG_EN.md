@@ -9,6 +9,7 @@ This file records product-level changes to QQ SuperTerm. The format follows [Kee
 ### Added
 
 - **Session list survives a restart**: sessions you opened are also recorded in a roster (the latest 20, kept in `model-prefs.json` under `held`). After a restart `/sessions` lists them as cold rows with their title, time, and workspace, minus the running / idle status; `/sessions resume` actually opens one. Archiving and `/clear all` remove entries from the roster, and ids the host no longer has drop out on their own.
+- **Archive straight from a background session's message**: messages pushed by non-current sessions now carry an `Archive` action after Reply / Resume, running `/sessions archive #short-id` in one tap; deployments without `workspaceRegistry` do not show the entry point.
 - **`/goal` long-running goals**: forwards to the host `/goal` (create, show, edit, pause, resume, clear) with arguments passed through verbatim; success follows the host result and the reply carries the host text, with a single unsupported notice when the deployment lacks the command.
 
 ### Changed

@@ -4,6 +4,7 @@ import {
   UNNAMED_SESSION_TITLE,
   chunkDecoratedSessionMessage,
   decorateSessionMessage,
+  sessionArchiveLink,
   sessionLinkRow,
   sessionReplyLink,
   sessionResumeLink,
@@ -55,17 +56,30 @@ describe('来源行与尾部动作', () => {
       .toBe('<qqbot-cmd-input text="/sessions resume #04de1556" show="恢复"/>');
   });
 
-  it('尾部行是回复 + 恢复两个链接', () => {
+  it('归档链接把 /sessions archive #短id 直接执行', () => {
+    expect(sessionArchiveLink('session-04de1556-8c54-4b78-93e1-5714e079fca6'))
+      .toBe('<qqbot-cmd-input text="/sessions archive #04de1556" show="归档"/>');
+  });
+
+  it('没有归档能力时尾部行只有回复 + 恢复', () => {
     expect(sessionLinkRow('session-04de1556'))
       .toBe('<qqbot-cmd-input text="/to #04de1556 " show="回复"/>'
         + ' · <qqbot-cmd-input text="/sessions resume #04de1556" show="恢复"/>');
   });
 
-  it('整段装饰：来源头 + 正文 + 链接行', () => {
-    expect(decorateSessionMessage('hello', 'session-04de1556', '修登录'))
+  it('有归档能力时尾部行多一个归档链接，排在最后', () => {
+    expect(sessionLinkRow('session-04de1556', true))
+      .toBe('<qqbot-cmd-input text="/to #04de1556 " show="回复"/>'
+        + ' · <qqbot-cmd-input text="/sessions resume #04de1556" show="恢复"/>'
+        + ' · <qqbot-cmd-input text="/sessions archive #04de1556" show="归档"/>');
+  });
+
+  it('整段装饰：来源头 + 正文 + 链接行（含归档）', () => {
+    expect(decorateSessionMessage('hello', 'session-04de1556', '修登录', true))
       .toBe('> `#04de1556` · 修登录\n\nhello\n\n'
         + '<qqbot-cmd-input text="/to #04de1556 " show="回复"/>'
-        + ' · <qqbot-cmd-input text="/sessions resume #04de1556" show="恢复"/>');
+        + ' · <qqbot-cmd-input text="/sessions resume #04de1556" show="恢复"/>'
+        + ' · <qqbot-cmd-input text="/sessions archive #04de1556" show="归档"/>');
   });
 });
 
@@ -108,6 +122,16 @@ describe('chunkDecoratedSessionMessage', () => {
     for (const chunk of chunkDecoratedSessionMessage(body, id, '修登录', 260)) {
       expect(chunk.length).toBeLessThanOrEqual(260);
     }
+    for (const chunk of chunkDecoratedSessionMessage(body, id, '修登录', 260, true)) {
+      expect(chunk.length).toBeLessThanOrEqual(260);
+    }
+  });
+
+  it('带归档能力时末片仍只出现一次尾部链接行', () => {
+    const chunks = chunkDecoratedSessionMessage(body, id, '修登录', 260, true);
+    const last = chunks[chunks.length - 1]!;
+    expect(last).toContain('show="归档"');
+    expect(last.split('show="归档"').length).toBe(2);
   });
 });
 

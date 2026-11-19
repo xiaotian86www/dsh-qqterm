@@ -2,12 +2,14 @@
  * 非当前会话消息的来源标注与快捷回复入口。
  *
  * 多个已获取会话的输出都回同一个 QQ 聊天：正文前标会话（短 id + 标题），
- * 正文后空一行给「回复」「恢复」两个行内指令链接。来源行独占一行、
+ * 正文后空一行给「回复」「恢复」「归档」三个行内指令链接。来源行独占一行、
  * 与正文之间空一行——不能把标记直接拼在正文前面，否则会和 markdown 标题、
  * 列表、代码块粘成一段。
  *
- * 两个链接都必须保留：`回复` 把 `/to #短id ` 填进输入框，`恢复` 直接切走
- * 当前指针。两者独占一行、正文之后空一行，位置固定好找。
+ * 三个链接都必须保留：`回复` 把 `/to #短id ` 填进输入框，`恢复` 直接切走
+ * 当前指针，`归档` 把这个后台会话从列表里收走。三者独占一行、正文之后空一行，
+ * 位置固定好找；归档只在部署有 workspaceRegistry 时出现（没有归档能力时不给
+ * 点了没用的入口）。
  */
 import type { SessionEventLike, SessionRecord } from '../session/index.ts';
 import { shortSessionId } from '../shared/utils.ts';
@@ -68,9 +70,21 @@ export function sessionResumeLink(sessionId: string, label = '恢复'): string {
   return `<qqbot-cmd-input text="/sessions resume #${shortSessionId(sessionId)}" show="${label}"/>`;
 }
 
-/** 尾部链接行（正文下方独占一行）：回复 + 恢复 */
-export function sessionLinkRow(sessionId: string): string {
-  return `${sessionReplyLink(sessionId)} · ${sessionResumeLink(sessionId)}`;
+/**
+ * 归档链接：把这个会话移出列表与 Web 侧栏（日志保留，`/sessions unarchive` 找回）。
+ *
+ * 归档走 workspaceRegistry，部署没有该服务时 `/sessions archive` 按未知子命令处理，
+ * 所以调用方要先问 `workspaceRegistryAvailable()` 再决定是否拼进尾部行。
+ */
+export function sessionArchiveLink(sessionId: string, label = '归档'): string {
+  return `<qqbot-cmd-input text="/sessions archive #${shortSessionId(sessionId)}" show="${label}"/>`;
+}
+
+/** 尾部链接行（正文下方独占一行）：回复 + 恢复 [+ 归档] */
+export function sessionLinkRow(sessionId: string, archivable = false): string {
+  const links = [sessionReplyLink(sessionId), sessionResumeLink(sessionId)];
+  if (archivable) links.push(sessionArchiveLink(sessionId));
+  return links.join(' · ');
 }
 
 /**
@@ -134,10 +148,15 @@ export function sessionTitleOf(record: SessionRecord): string | undefined {
 /**
  * 整段文本加来源头与尾部链接行（不切分，用于短消息 / 交付物提示）。
  */
-export function decorateSessionMessage(text: string, sessionId: string, title?: string): string {
+export function decorateSessionMessage(
+  text: string,
+  sessionId: string,
+  title?: string,
+  archivable = false,
+): string {
   const body = text.trim();
   if (body === '') return '';
-  return `${sessionSourceHeader(sessionId, title)}\n\n${body}\n\n${sessionLinkRow(sessionId)}`;
+  return `${sessionSourceHeader(sessionId, title)}\n\n${body}\n\n${sessionLinkRow(sessionId, archivable)}`;
 }
 
 /**
@@ -150,9 +169,10 @@ export function chunkDecoratedSessionMessage(
   sessionId: string,
   title: string | undefined,
   limit: number,
+  archivable = false,
 ): string[] {
   const header = sessionSourceHeader(sessionId, title);
-  const footer = sessionLinkRow(sessionId);
+  const footer = sessionLinkRow(sessionId, archivable);
   const body = text.trim();
   if (body === '') return [];
   const reserve = header.length + footer.length + 4; // 两处 `\n\n`

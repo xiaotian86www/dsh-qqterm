@@ -57,6 +57,8 @@ function setup(opts?: {
   dir?: string;
   /** 渠道级失效回调 */
   onChannelBroken?: (reason: string) => void;
+  /** 部署是否有 workspaceRegistry（决定尾部有没有归档入口） */
+  archivable?: boolean;
 }) {
   const bot = createBot();
   const record = 'record' in (opts ?? {}) ? opts!.record : createRecord(c2cTarget);
@@ -64,6 +66,7 @@ function setup(opts?: {
     findBySessionId: vi.fn((id: string) => (id === 'sess-qq' ? record : undefined)),
     isCurrentSession: vi.fn(() => opts?.current ?? true),
     directoryForAgent: vi.fn(() => opts?.dir),
+    workspaceRegistryAvailable: vi.fn(() => opts?.archivable ?? false),
     ...(opts?.retryChannel !== undefined ? { retryChannel: opts.retryChannel } : {}),
   } as unknown as SessionManager;
   const outbound = createOutboundHandler(
@@ -91,6 +94,22 @@ describe('OutboundRouter: 多会话标记', () => {
     expect(bot.sendMarkdown).toHaveBeenCalledWith(
       c2cTarget,
       `${sourceOf('sess-qq')}\n\nhello\n\n${footerOf('sess-qq')}`,
+    );
+  });
+
+  it('有归档能力时尾部多一个归档入口', async () => {
+    const { outbound, bot } = setup({ current: false, archivable: true });
+
+    outbound.routeSessionEvent({ header: { id: 'sess-qq' } }, {
+      type: 'assistant/message',
+      data: { message: { content: [{ type: 'text', text: 'hello' }] } },
+    });
+    await Promise.resolve();
+
+    expect(bot.sendMarkdown).toHaveBeenCalledWith(
+      c2cTarget,
+      `${sourceOf('sess-qq')}\n\nhello\n\n${footerOf('sess-qq')}`
+        + ' · <qqbot-cmd-input text="/sessions archive #sess-qq" show="归档"/>',
     );
   });
 
@@ -260,6 +279,7 @@ describe('OutboundRouter: deliverables/presented', () => {
       findBySessionId: vi.fn(() => record),
       isCurrentSession: vi.fn(() => true),
       directoryForAgent: vi.fn(() => undefined),
+      workspaceRegistryAvailable: vi.fn(() => false),
     } as unknown as SessionManager;
     const deliver = vi.fn().mockResolvedValue(undefined);
     const outbound = createOutboundHandler(manager, bot, createConfig(), createLogger(), undefined, { deliver });
