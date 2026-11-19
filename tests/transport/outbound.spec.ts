@@ -611,6 +611,56 @@ describe('OutboundRouter 投递失败', () => {
     expect(send.mock.calls.every((call) => !String(call[1]).includes('拦截'))).toBe(true);
   });
 
+  it('非当前会话超长重切：来源头只出现一次，正文不重发', async () => {
+    const { outbound, bot } = setup({ current: false });
+    const accepted: string[] = [];
+    (bot.sendMarkdown as ReturnType<typeof vi.fn>).mockImplementation(async (_target: unknown, text: string) => {
+      if (text.length > 4000) throw httpError(40054007, 'message too long');
+      accepted.push(text);
+    });
+    const body = Array.from({ length: 200 }, (_, i) => `段落 ${i} 内容内容内容内容内容内容`).join('\n\n');
+
+    outbound.routeSessionEvent({ header: { id: 'sess-qq' } }, {
+      type: 'assistant/message',
+      data: { message: { content: [{ type: 'text', text: body }] } },
+    });
+    await drain();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(accepted.length).toBeGreaterThan(1);
+    for (const text of accepted) {
+      expect(text.length).toBeLessThanOrEqual(4000);
+      // 同一片里出现两次来源头，就是「对已装饰文本再切」的老 bug
+      expect(text.split('> `#sess-qq` · 未命名会话').length - 1).toBeLessThanOrEqual(1);
+    }
+    const joined = accepted.join('\n');
+    for (let i = 0; i < 200; i++) {
+      expect(joined.split(`段落 ${i} 内容`).length - 1).toBe(1);
+    }
+    expect(joined.split('show="恢复"').length - 1).toBe(1);
+  });
+
+  it('单行超长正文按字符重切：装饰只加一次，正文不丢', async () => {
+    const { outbound, bot } = setup({ current: false });
+    const accepted: string[] = [];
+    (bot.sendMarkdown as ReturnType<typeof vi.fn>).mockImplementation(async (_target: unknown, text: string) => {
+      if (text.length > 1200) throw httpError(40054007, 'message too long');
+      accepted.push(text);
+    });
+
+    outbound.routeSessionEvent({ header: { id: 'sess-qq' } }, {
+      type: 'assistant/message',
+      data: { message: { content: [{ type: 'text', text: 'a'.repeat(9000) }] } },
+    });
+    await drain();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(accepted.length).toBeGreaterThan(1);
+    for (const text of accepted) expect(text.length).toBeLessThanOrEqual(1200);
+    expect(accepted.join('').split('a').length - 1).toBe(9000);
+    expect(accepted.join('\n').split('> `#sess-qq` · 未命名会话').length - 1).toBe(1);
+  });
+
   it('被风控拦截时只补一条替代消息', async () => {
     const { outbound, bot } = setup();
     const send = bot.sendMarkdown as ReturnType<typeof vi.fn>;

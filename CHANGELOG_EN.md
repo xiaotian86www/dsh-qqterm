@@ -21,6 +21,7 @@ This file records product-level changes to QQ SuperTerm. The format follows [Kee
 
 ### Fixed
 
+- **Long messages from background sessions no longer repeat or flood**: re-splitting on "too long" now slices the raw body, so the source line and the action row are attached exactly once on the first / last piece. The old code re-split already-decorated pieces, duplicating the source line and resending the same body until the message count exploded — only a dsh restart stopped it.
 - **`dirs` only records where the next session starts; `cd` no longer moves the workspace**: the `/new` target, the `/sessions` grouping, and the `/status` workspace all read the session's `header.cwd`; a runtime `cd` (or a created worktree) changes only the session's working directory, so the workspace and the next `/new` target stay put while `/get` and `/ls` follow the live directory. Worktree paths from older data are normalized to the main checkout on load.
 - **The `/status` workspace line no longer shows the worktree directory**: a session running in a worktree reports the main checkout (the same source `/sessions` groups by) and the worktree line carries the tree path; resuming such a session also attaches it to the session directory instead of creating a workspace named after the tree.
 - **Consistent archive view and receipts**: the archive view groups by workspace, and archive / unarchive receipts put their buttons on their own block, matching the list views.

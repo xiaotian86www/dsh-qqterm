@@ -10,8 +10,11 @@ import type { QQTermConfig } from '../config.ts';
 import type { Logger, ReplyTarget } from '../types.ts';
 import { chunkMarkdownText } from './chunker.ts';
 import {
-  chunkDecoratedSessionMessage,
+  renderSessionPiece,
+  resplitSessionPiece,
   sessionTitleOf,
+  splitSessionMessage,
+  type SessionMessagePiece,
 } from './session-source.ts';
 import { formatToolResult, type ToolsRegistryLike, type ToolResultData } from './tool-presenter.ts';
 import type { DeliverablesDelivererLike } from './deliverables.ts';
@@ -331,45 +334,39 @@ class OutboundRouter {
     const body = rewriteLocalFileLinks(text, this.manager.directoryForAgent(record.agent));
     // 归档入口只在部署有 workspaceRegistry 时给：没有该服务时命令不认这个子命令
     const archivable = this.manager.workspaceRegistryAvailable();
-    const chunk = (value: string, limit: number): string[] => (current
-      ? chunkMarkdownText(value, limit)
-      : chunkDecoratedSessionMessage(value, record.sessionId, sessionTitleOf(record), limit, archivable));
+    const title = sessionTitleOf(record);
+    // 队列存「裸正文 + 首末标志」：超长重切只切正文，装饰渲染时才拼，切几次都不会叠来源头
+    const pieces: SessionMessagePiece[] = current
+      ? chunkMarkdownText(body, this.config.textChunkLimit)
+        .map((value) => ({ text: value, header: false, footer: false }))
+      : splitSessionMessage(body, record.sessionId, title, this.config.textChunkLimit, archivable);
+    const render = (piece: SessionMessagePiece): string => (current
+      ? piece.text
+      : renderSessionPiece(piece, record.sessionId, title, archivable));
 
-    const queue = chunk(body, this.config.textChunkLimit);
+    const queue = [...pieces];
     const send = (value: string): Promise<unknown> => this.bot.sendMarkdown(record.replyTarget, value);
     let blockedNotified = false;
 
     while (queue.length > 0) {
-      const part = queue.shift()!;
-      const outcome = await this.outbox.deliver(record.sessionId, tag, () => send(part));
+      const piece = queue.shift()!;
+      const outcome = await this.outbox.deliver(record.sessionId, tag, () => send(render(piece)));
 
       // 暂不可用：本条与后续分片一起排队，恢复后按原顺序补发
       if (outcome === 'queued') {
-        for (const rest of queue) this.outbox.enqueue(record.sessionId, tag, () => send(rest));
+        for (const rest of queue) this.outbox.enqueue(record.sessionId, tag, () => send(render(rest)));
         return;
       }
       // 渠道判死：后续分片已经没有任何意义
       if (outcome === 'broken') return;
       if (outcome === 'sent') continue;
 
-      // 内容类失败：超长切小重发，风控只告知一次
+      // 内容类失败：超长对裸正文再切小重发，风控只告知一次
       if (outcome === 'too-long') {
-        const limit = Math.max(1, Math.floor(Math.min(part.length, this.config.textChunkLimit) / 2));
-        if (limit < part.length) {
-          const smaller = chunk(part, limit);
-          if (smaller.length > 1) {
-            queue.unshift(...smaller);
-            continue;
-          }
-          // 没有换行可断（长串）：按字符硬切，保证每片比原文短
-          const hard: string[] = [];
-          for (let start = 0; start < part.length; start += limit) {
-            hard.push(part.slice(start, start + limit));
-          }
-          if (hard.length > 1) {
-            queue.unshift(...hard);
-            continue;
-          }
+        const smaller = resplitSessionPiece(piece, this.config.textChunkLimit);
+        if (smaller.length > 1) {
+          queue.unshift(...smaller);
+          continue;
         }
       }
       if (!blockedNotified) {
