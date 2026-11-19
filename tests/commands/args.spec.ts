@@ -71,6 +71,7 @@ describe('parseArgs', () => {
     flags: [
       { name: 'dir', alias: 'd', value: true },
       { name: 'worktree', alias: 'w' },
+      { name: 'background', alias: 'b' },
       { name: 'allow-builds', value: true, list: true },
     ],
     terminator: true,
@@ -81,6 +82,34 @@ describe('parseArgs', () => {
     expect(parsed.words).toEqual(['修一下', '再跑']);
     expect(parsed.flags.has('worktree')).toBe(true);
     expect(parsed.error).toBeUndefined();
+  });
+
+  it('开关可以合写，顺序随意', () => {
+    for (const raw of ['-wb', '-bw']) {
+      const parsed = parseArgs(raw, spec);
+      expect(parsed.flags.has('worktree')).toBe(true);
+      expect(parsed.flags.has('background')).toBe(true);
+      expect(parsed.error).toBeUndefined();
+    }
+  });
+
+  it('合写里带值的 `-d` 只能收尾', () => {
+    const parsed = parseArgs('-wbd repo', spec);
+    expect(parsed.flags.has('worktree')).toBe(true);
+    expect(parsed.flags.has('background')).toBe(true);
+    expect(parsed.values.get('dir')).toBe('repo');
+    expect(parseArgs('-dw repo', spec).error).toBe('⚠️ 未知参数: -dw · 用法: /help demo');
+  });
+
+  it('合写里有认不出的短名时整词回未知参数', () => {
+    expect(parseArgs('-wx', spec).error).toBe('⚠️ 未知参数: -wx · 用法: /help demo');
+  });
+
+  it('`--` 之后与引号里的合写不拆', () => {
+    expect(parseArgs('-- -wb', spec).words).toEqual(['-wb']);
+    const quoted = parseArgs('看下 "-wb"', spec);
+    expect(quoted.words).toEqual(['看下', '-wb']);
+    expect(quoted.flags.size).toBe(0);
   });
 
   it('带值参数 `--dir 值` 与 `--dir=值` 等价，重复给取最后一次', () => {

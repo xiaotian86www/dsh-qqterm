@@ -245,6 +245,13 @@ describe('parseNewArgs', () => {
     expect(parseNewArgs('-b -w')).toEqual({ arg: '', worktree: true, background: true, prompt: undefined, error: undefined });
   });
 
+  it('开关可以合写：-wb / -bw 等于 -w -b', () => {
+    expect(parseNewArgs('-wb')).toEqual({ arg: '', worktree: true, background: true, prompt: undefined, error: undefined });
+    expect(parseNewArgs('-bw 修一下')).toEqual({ arg: '', worktree: true, background: true, prompt: '修一下', error: undefined });
+    expect(parseNewArgs('-wbd repo 修一下')).toEqual({ arg: 'repo', worktree: true, background: true, prompt: '修一下', error: undefined });
+    expect(parseNewArgs('-dw repo')).toEqual({ arg: '', worktree: false, background: false, prompt: undefined, error: '⚠️ 未知参数: -dw · 用法: /help new' });
+  });
+
   it('--prompt / -p 按未知参数回绝', () => {
     expect(parseNewArgs('--prompt 修一下')).toEqual({ arg: '', worktree: false, background: false, prompt: undefined, error: '⚠️ 未知参数: --prompt · 用法: /help new' });
     expect(parseNewArgs('-p 修一下')).toEqual({ arg: '', worktree: false, background: false, prompt: undefined, error: '⚠️ 未知参数: -p · 用法: /help new' });
