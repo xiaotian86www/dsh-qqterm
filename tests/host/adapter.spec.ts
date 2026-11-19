@@ -227,6 +227,29 @@ describe('workspaceRegistry 可选', () => {
     expect([...adapter.archivedSessionIds()]).toEqual(['s1']);
   });
 
+  it('服务在插件 apply 之后才注册：构造期缺失，之后每次现读应生效', async () => {
+    const services: Record<string, unknown> = {};
+    const adapter = createHostAdapter(makeCtx(services));
+    expect(adapter.supportsWorkspaceRegistry()).toBe(false);
+    expect(await adapter.archiveSession('s1')).toMatchObject({ ok: false, reason: 'unavailable' });
+
+    // 组合包可能晚于插件 apply 才提供 workspaceRegistry
+    const registry = {
+      archivedSessionIds: ['s1'],
+      pinnedSessionIds: [],
+      list: () => [],
+      archiveSession: vi.fn(async () => {}),
+      unarchiveSession: vi.fn(async () => {}),
+      create: vi.fn(async () => ({ path: '/proj', attachSession: async () => {} })),
+    };
+    services.workspaceRegistry = registry;
+
+    expect(adapter.supportsWorkspaceRegistry()).toBe(true);
+    expect(adapter.capabilities).toContain('workspaceRegistry');
+    expect(await adapter.archiveSession('s1')).toEqual({ ok: true });
+    expect(registry.archiveSession).toHaveBeenCalledWith('s1', { stopActivity: true });
+  });
+
   it('sessionController 经 ctx.get 提供时用它的活跃时间', async () => {
     const ctx = makeCtx({
       sessionQuery: { listSessions: async () => [{ header: { id: 'a', cwd: '/w', createdAt: 100 }, live: false }] },
