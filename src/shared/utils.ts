@@ -214,6 +214,7 @@ export function formatRelativeTime(ts?: number): string {
  *
  * 唯一入口是 `ctx.get(name)`：它不需要 inject，未提供时返回 `undefined`，也不会抛错。
  * 属性访问不行——Cordis 代理在服务未注入时直接抛 `cannot get property "x" without inject`。
+ * 每次使用点现查，不要把返回值存成常量：服务可能稍后才注册，也可能中途卸载。
  */
 export function optionalService<T>(ctxLike: unknown, name: string): T | undefined {
   return (ctxLike as { get(serviceName: string): unknown }).get(name) as T | undefined;

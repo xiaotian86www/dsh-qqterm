@@ -46,7 +46,7 @@ qqterm 是通道，不是能力所有者：目标是从 QQ 接入的超级终端
 
 - `@deepseek-ai/*` 一律 `peerDependencies`，禁止进 `dependencies`，禁止打进客户端 bundle；不 import 宿主包私有深层路径；版本号运行时读 `package.json`，不另建常量。
 - 能力依赖全写进 `inject`（当前 14 项），运行时不探测、不写降级分支；服务缺失时插件 inactive，不抛错阻塞宿主。`inject` 只进不退。
-- 可选能力不进 `inject`，一律用 `ctx.get(name)` 软读（`src/shared/utils.ts` 的 `optionalService`）；属性访问会抛 `cannot get property "x" without inject`，可选链兜不住。五个例外：
+- 可选能力不进 `inject`，一律用 `ctx.get(name)` 软读（`src/shared/utils.ts` 的 `optionalService`）；属性访问会抛 `cannot get property "x" without inject`，可选链兜不住。软读必须在使用点现查，不得存成 `apply` / 构造期常量——返回值随提供方 fiber 是否活动而变，缓存会把「此刻还没有」固化成「整台部署永远没有」；需要「到位时注册、离开时注销」才用 `ctx.inject([…], …)`（见下方 `webServer`）。五个例外：
   - `agentPresets`：缺 `agent-preset-registry` 时 `/preset` 整条不注册，建会话走宿主默认组合。
   - `webServer`：只有 web / Desktop 组合包提供。绑定页经 `mountBindRoutes`（`src/setup/bind-routes.ts`）用 `ctx.inject(['webServer'], …)` 订阅，到位时注册、离开或替换时由 Cordis 注销；缺服务时扫码只走终端 / 浏览器降级通道。
   - `sessionController`：只软读 `list()`，取 `/sessions` 排序用的 `updatedAt`（`max(createdAt, lastPromptAt)`）与 `blank`；缺服务只丢排序与空白会话过滤。

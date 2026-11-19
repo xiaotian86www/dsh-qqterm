@@ -471,13 +471,19 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
   const query = host.sessionQuery;
   const controller = optionalSessionController(ctx);
   const titleService = host.sessionTitle;
-  const registry = optionalWorkspaceRegistry(ctx);
+  /**
+   * 每次现读，不在构造期定死：组合包注册服务与插件 apply 是并发的。
+   *
+   * 构造这一刻服务可能还没提供，存成常量就会把「此刻没有」固化成「整台部署
+   * 永远没有」，归档入口再不出现；软依赖一律在使用点现查。
+   */
+  const registryNow = (): WorkspaceRegistryLike | undefined => optionalWorkspaceRegistry(ctx);
 
   // 现读而不是建表时定死：forge 组合包可能在插件 apply 之后才注册 worktrees
   const capabilities = (): string[] => [
     'sessionEvents(snapshotEvents)',
     'sessionPersistence.stat',
-    ...(registry === undefined ? [] : ['workspaceRegistry']),
+    ...(registryNow() === undefined ? [] : ['workspaceRegistry']),
     ...(optionalService<WorktreeServiceLike>(ctx, 'worktrees') === undefined ? [] : ['worktrees']),
     'sessionQuery',
     'sessionTitle.rename',
@@ -485,6 +491,7 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
 
   /** registry.list() 收窄成纯数据快照；异常降级为空列表 */
   const workspaceList = (): WorkspaceInfo[] => {
+    const registry = registryNow();
     if (registry === undefined) return [];
     try {
       return registry.list().flatMap((workspace) => {
@@ -523,6 +530,7 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
     },
 
     async attachSessionToWorkspace(sessionId, cwd) {
+      const registry = registryNow();
       if (registry === undefined) return;
       try {
         // 不传 title：宿主按目录最后一段生成显示名（一般规律）
@@ -650,6 +658,7 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
     },
 
     async archiveSession(sessionId) {
+      const registry = registryNow();
       if (registry === undefined) return workspaceUnavailable('archive');
       try {
         // stopActivity：宿主先让 providers 停掉该会话的工作再写归档集，避免
@@ -663,6 +672,7 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
     },
 
     async unarchiveSession(sessionId) {
+      const registry = registryNow();
       if (registry === undefined) return workspaceUnavailable('unarchive');
       try {
         await registry.unarchiveSession(sessionId);
@@ -674,15 +684,15 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
     },
 
     archivedSessionIds() {
-      return new Set(registry?.archivedSessionIds ?? []);
+      return new Set(registryNow()?.archivedSessionIds ?? []);
     },
 
     pinnedSessionIds() {
-      return new Set(registry?.pinnedSessionIds ?? []);
+      return new Set(registryNow()?.pinnedSessionIds ?? []);
     },
 
     supportsWorkspaceRegistry() {
-      return registry !== undefined;
+      return registryNow() !== undefined;
     },
   };
 }
