@@ -126,7 +126,35 @@ describe('handleInbound：工作树', () => {
     await handleInbound(ctx, failingManager(new WorktreeError('create', 'fatal: cannot lock ref')), logger);
 
     expect(sent(ctx).at(-1)?.[1]).toBe(
-      '❌ 工作树没建成: fatal: cannot lock ref\n本次会话没有创建，重发一次会重新尝试。',
+      '❌ 没能建工作树: fatal: cannot lock ref\n本次会话没有创建，重发一次可重试，或再发一条 /new 就地开始。',
+    );
+  });
+
+  it('建树失败且读到了父分支：点明从哪个分支拉', async () => {
+    const ctx = makeCtx('hi');
+
+    await handleInbound(
+      ctx,
+      failingManager(new WorktreeError('create', 'fatal: bad revision', undefined, 'main')),
+      logger,
+    );
+
+    expect(sent(ctx).at(-1)?.[1]).toBe(
+      '❌ 没能从 `main` 建工作树: fatal: bad revision\n本次会话没有创建，重发一次可重试，或再发一条 /new 就地开始。',
+    );
+  });
+
+  it('读不到基点提交：会话没创建，不降级到主检出', async () => {
+    const ctx = makeCtx('hi');
+
+    await handleInbound(
+      ctx,
+      failingManager(new WorktreeError('base', '没能读到当前分支的提交')),
+      logger,
+    );
+
+    expect(sent(ctx).at(-1)?.[1]).toBe(
+      '❌ 没能读到当前分支的提交\n本次会话没有创建，重发一次可重试，或再发一条 /new 就地开始。',
     );
   });
 

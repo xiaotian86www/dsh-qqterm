@@ -21,7 +21,14 @@
  */
 import { mintSessionId } from './session-id.ts';
 import { createQQUserMessage } from './user-message.ts';
-import { mainRepositoryRoot, WORKTREE_TIMEOUT_MS, WorktreeError, worktreeFailureText, worktreeNotice } from './worktree.ts';
+import {
+  mainRepositoryRoot,
+  WORKTREE_TIMEOUT_MS,
+  WorktreeError,
+  worktreeFailureText,
+  worktreeNotice,
+  worktreeSkipNotice,
+} from './worktree.ts';
 import { SessionId } from '@deepseek-ai/dsh-session';
 import type { Context } from '@deepseek-ai/cordis';
 import {
@@ -122,6 +129,12 @@ export function latestCompletedPrefixBoundary(events: readonly unknown[]): numbe
 }
 
 /** 宿主 modelSelection projection 的状态（键 'modelSelection'） */
+/** 本次新建出来的工作树：树本身 + 拉出它的父分支（detached HEAD 时没有） */
+interface SpawnedWorktree {
+  tree: CreatedWorktreeLike;
+  parent?: string;
+}
+
 interface SelectionState {
   lastUsed?: HostSelection | null;
   pending?: HostSelection | null;
@@ -210,6 +223,13 @@ export class SessionManager {
    * 读取不做任何回退。
    */
   private chatDir: string;
+  /**
+   * `/new --worktree` 的意图：下一个新建会话开工作树。
+   *
+   * 只记「要不要」，基线到创建那一刻才读（chatDir 的 HEAD），所以 `/new` 与第一条
+   * 消息之间切目录、切分支都按最终目录算。内存态，重启即丢；切走、恢复、删除都清。
+   */
+  private pendingWorktree = false;
   private readonly modelResolver: ModelResolver;
   private readonly ctx: Context;
   private readonly host: HostAdapter;
@@ -355,20 +375,26 @@ export class SessionManager {
   }
 
   /**
-   * 部署里有没有 worktrees 服务（决定 /worktree 是否注册：没有就整条命令不出现）
+   * 部署里有没有 worktrees 服务（决定 `/new --worktree` 认不认这个参数：没有就按
+   * 未知参数处理，不解释部署差异）
    */
   worktreesAvailable(): boolean {
     return this.host.worktrees() !== undefined;
   }
 
-  /** 之后新建的会话是否开工作树（默认开） */
-  worktreeEnabled(): boolean {
-    return this.modelResolver.getWorktreeDefault() ?? true;
+  /**
+   * `/new --worktree`：下一个新建会话开工作树。
+   *
+   * 只是内存里的意图，基线在创建那一刻才读（chatDir 的 HEAD），所以 `/new` 与
+   * 第一条消息之间切目录、切分支都按最终目录算。不落盘，重启即丢。
+   */
+  armWorktree(): void {
+    this.pendingWorktree = true;
   }
 
-  /** 设置之后新建的会话是否开工作树；已有会话与其树不受影响 */
-  setWorktreeEnabled(enabled: boolean): void {
-    this.modelResolver.setWorktreeDefault(enabled);
+  /** 默认策略只读：建不了树，`/new --worktree` 提前拒绝 */
+  readOnlySandbox(): boolean {
+    return this.host.sandboxMode() === 'read-only';
   }
 
   /**
@@ -1373,6 +1399,7 @@ export class SessionManager {
   private setCurrent(key: string, sessionId: string): void {
     this.currentByKey.set(key, sessionId);
     this.persistSessionId(key, sessionId);
+    this.pendingWorktree = false;
   }
 
   /**
@@ -1385,6 +1412,7 @@ export class SessionManager {
   private clearCurrent(key: string): void {
     this.currentByKey.delete(key);
     if (this.modelResolver.getSessionId(key) !== undefined) this.modelResolver.clearSessionId(key);
+    this.pendingWorktree = false;
   }
 
   /** getOrCreate 的实际打开流程（已通过 singleflight 保证同 key 串行） */
@@ -1415,7 +1443,8 @@ export class SessionManager {
     let agent: DshAgent;
     let handle: DshAgentHandle | undefined;
     let agentPreset: string | undefined;
-    let worktree: CreatedWorktreeLike | undefined;
+    let worktree: SpawnedWorktree | undefined;
+    let worktreeSkipped: 'not-repo' | 'read-only' | undefined;
 
     const live = this.agents.get(sessionId);
     if (live) {
@@ -1459,6 +1488,7 @@ export class SessionManager {
         handle = created.handle;
         directory = created.directory;
         worktree = created.worktree;
+        worktreeSkipped = created.worktreeSkipped;
         this.logger.info(`created new session: key=${key} sessionId=${sessionId} preset=${agentPreset ?? 'none'} cwd=${directory}`);
       }
     }
@@ -1476,7 +1506,11 @@ export class SessionManager {
       acquiredAt: Date.now(),
     };
 
-    if (worktree !== undefined) record.worktreeNotice = worktreeNotice(worktree);
+    if (worktree !== undefined) {
+      record.worktreeNotice = worktreeNotice(worktree.tree, worktree.parent);
+    } else if (worktreeSkipped !== undefined) {
+      record.worktreeNotice = worktreeSkipNotice(worktreeSkipped);
+    }
 
     this.records.set(sessionId, record);
     this.setCurrent(key, sessionId);
@@ -1499,22 +1533,23 @@ export class SessionManager {
   /**
    * 新会话要不要开在工作树里：要就返回建树的基点（主仓库根）。
    *
-   * 四处不建：部署没有 worktrees 服务、用户用 /worktree off 关掉了、当前目录不是
-   * 主仓库、默认策略只读——宿主每条 git 命令都按会话策略包，只读下建目录、写
-   * .git/worktrees 必然被拒。
+   * 只有 `/new --worktree` 显式要求才建。三处不建：部署没有 worktrees 服务、
+   * 默认策略只读、当前目录不是主仓库——后两种由调用方就地开会话并说明原因，
+   * 服务缺失不提（部署差异）。
    */
   private worktreeBase(directory: string): string | undefined {
+    if (!this.pendingWorktree) return undefined;
     if (this.host.worktrees() === undefined) return undefined;
-    if (!this.worktreeEnabled()) return undefined;
     if (this.host.sandboxMode() === 'read-only') return undefined;
     return mainRepositoryRoot(directory);
   }
 
   /**
-   * 新建会话：能开工作树就开在树里，否则就地。
+   * 新建会话：`/new --worktree` 要求开树就开在树里，否则就地。
    *
    * 宿主不回滚建树的半成品（分支与检出可能留下），这里只关掉刚创建的 agent：
-   * 指针与已获取集都不动，用户重发一次就会重新尝试。
+   * 指针与已获取集都不动；意图保留，用户重发一次就会重新尝试。
+   * 读不到 chatDir 的 HEAD 时直接抛 `base` 错误，agent 都还没有创建。
    */
   private async spawnSession(
     key: string,
@@ -1526,14 +1561,21 @@ export class SessionManager {
     agent: DshAgent;
     handle: DshAgentHandle;
     directory: string;
-    worktree?: CreatedWorktreeLike;
+    worktree?: SpawnedWorktree;
+    worktreeSkipped?: 'not-repo' | 'read-only';
   }> {
+    const wanted = this.pendingWorktree;
     const base = this.worktreeBase(directory);
+    // 基点按 chatDir 的 HEAD 算：宿主默认取 repository root 的 HEAD，在树里再开会话
+    // 会从主检出而不是当前分支拉出。读不到 HEAD 就不建会话——不降级到主检出。
+    const plan = base === undefined
+      ? undefined
+      : { base, head: await this.headForWorktree(directory) };
     const created = await this.agents.create({
       sessionId,
       // 树的池与 .git/worktrees 登记都落在基点下，所以 header.cwd 必须是基点
       meta: {
-        cwd: base ?? directory,
+        cwd: plan?.base ?? directory,
         ...(agentPreset ? { agentPreset } : {}),
       },
       agentOptions: this.agentOptionsFor(),
@@ -1541,20 +1583,50 @@ export class SessionManager {
     });
 
     const worktrees = this.host.worktrees();
-    if (base === undefined || worktrees === undefined) {
-      return { agent: created.agent, handle: created, directory };
+    if (plan === undefined || worktrees === undefined) {
+      // 明确要求过却没开成：意图用完即弃，并把原因带回回执
+      if (!wanted) return { agent: created.agent, handle: created, directory };
+      this.pendingWorktree = false;
+      if (worktrees === undefined) return { agent: created.agent, handle: created, directory };
+      const reason = this.host.sandboxMode() === 'read-only' ? 'read-only' as const : 'not-repo' as const;
+      return { agent: created.agent, handle: created, directory, worktreeSkipped: reason };
     }
 
     try {
-      const tree = await worktrees.create(created.agent, {}, AbortSignal.timeout(WORKTREE_TIMEOUT_MS));
+      const tree = await worktrees.create(
+        created.agent,
+        { from: plan.head.commit },
+        AbortSignal.timeout(WORKTREE_TIMEOUT_MS),
+      );
+      this.pendingWorktree = false;
       this.logger.info(`created worktree: key=${key} branch=${tree.branch} path=${tree.path}`);
-      return { agent: created.agent, handle: created, directory: tree.path, worktree: tree };
+      return {
+        agent: created.agent,
+        handle: created,
+        directory: tree.path,
+        worktree: {
+          tree,
+          ...(plan.head.branch === undefined ? {} : { parent: plan.head.branch }),
+        },
+      };
     } catch (err) {
       this.logger.warn(`worktree creation failed: key=${key} ${err instanceof Error ? err.message : String(err)}`);
       created.agent.cancel({ kind: 'user' });
       await created.dispose().catch(() => {});
-      throw new WorktreeError('create', worktreeFailureText(err), err);
+      throw new WorktreeError('create', worktreeFailureText(err), err, plan.head.branch);
     }
+  }
+
+  /**
+   * 读 chatDir 的 HEAD 提交；读不到就建不了树，本次会话不创建（不降级到主检出 HEAD）。
+   */
+  private async headForWorktree(directory: string): Promise<{ commit: string; branch?: string }> {
+    const head = await this.host.headOf(directory);
+    if (head === undefined) {
+      this.logger.warn(`worktree base unreadable: directory=${directory}`);
+      throw new WorktreeError('base', '没能读到当前分支的提交');
+    }
+    return head;
   }
 
   /**

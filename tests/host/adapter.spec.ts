@@ -245,6 +245,60 @@ describe('workspaceRegistry 可选', () => {
   });
 });
 
+describe('读当前分支（headOf）', () => {
+  function fakeSubprocess(reply: (argv: readonly string[]) => { code: number; text: string }) {
+    const calls: Array<{ argv: readonly string[]; cwd: string; env?: Readonly<Record<string, string>> }> = [];
+    const service = {
+      resolveExecutable: async () => 'git',
+      spawn(spec: {
+        argv: readonly string[];
+        cwd: string;
+        env?: Readonly<Record<string, string>>;
+      }) {
+        calls.push({ argv: spec.argv, cwd: spec.cwd, env: spec.env });
+        const { code, text } = reply(spec.argv);
+        return {
+          collected: { stdout: { readFrom: () => ({ text }) } },
+          done: Promise.resolve({ exitCode: code }),
+          terminate: () => {},
+          waitForExit: async () => {},
+        };
+      },
+    };
+    return { service, calls };
+  }
+
+  it('读 HEAD 提交与分支，命令带 -C 目录与只读环境', async () => {
+    const { service, calls } = fakeSubprocess((argv) =>
+      (argv.includes('--verify') ? { code: 0, text: '6b1f02c0ffee\n' } : { code: 0, text: 'main\n' }));
+    const adapter = createHostAdapter(makeCtx({ subprocess: service }));
+
+    expect(await adapter.headOf('D:\\repo')).toEqual({ commit: '6b1f02c0ffee', branch: 'main' });
+    expect(calls[0]?.argv).toEqual(['git', '-C', 'D:\\repo', 'rev-parse', '--verify', 'HEAD^{commit}']);
+    expect(calls[0]?.env).toEqual({ GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0' });
+  });
+
+  it('detached HEAD：symbolic-ref 失败时只给提交', async () => {
+    const { service } = fakeSubprocess((argv) =>
+      (argv.includes('--verify') ? { code: 0, text: 'abc123\n' } : { code: 1, text: '' }));
+    const adapter = createHostAdapter(makeCtx({ subprocess: service }));
+
+    expect(await adapter.headOf('D:\\repo')).toEqual({ commit: 'abc123' });
+  });
+
+  it('不是仓库 / 没有 subprocess 服务 / 执行失败：一律 undefined，不抛', async () => {
+    const notRepo = fakeSubprocess(() => ({ code: 128, text: '' }));
+    expect(await createHostAdapter(makeCtx({ subprocess: notRepo.service })).headOf('D:\\x')).toBeUndefined();
+    expect(await createHostAdapter(makeCtx()).headOf('D:\\x')).toBeUndefined();
+
+    const broken = {
+      resolveExecutable: async () => { throw new Error('spawn EPERM'); },
+      spawn: () => { throw new Error('unreachable'); },
+    };
+    expect(await createHostAdapter(makeCtx({ subprocess: broken })).headOf('D:\\x')).toBeUndefined();
+  });
+});
+
 describe('会话改名（sessionTitle）', () => {
   const session = { id: 'session-x' };
 
