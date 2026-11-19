@@ -35,7 +35,7 @@
 import { isAbsolute } from 'node:path';
 import type { CommandDeps, SlashCommand } from './types.ts';
 import { ownerOnlyAuth } from './auth.ts';
-import { parseArgs } from './args.ts';
+import { parseArgs, quoteArg } from './args.ts';
 import { getScopePeer, formatRelativeTime, sendMarkdownChunked, shortSessionId } from '../shared/index.ts';
 import type { ArchiveSessionOutcome, WorkspaceGroup, WorkspaceSession } from '../session/index.ts';
 
@@ -231,9 +231,12 @@ function shortTitle(entry: WorkspaceSession): string {
  * 路径不走 cleanInline——它会把 `_` `*` `~` 之类删掉，按钮上的地址就和
  * 真实目录对不上；这里只去换行，再按属性值转义。
  */
-function workspaceLink(path: string): string {
+function workspaceLink(path: string): string | undefined {
   const label = path.replace(/[\r\n]+/g, ' ').trim();
-  return `<qqbot-cmd-input text="${attrValue(`/new --dir ${label}`)}" show="${attrValue(label)}"/>`;
+  // 路径带空格时必须加引号：切词器会把 `--dir` 的值截到第一个空格，后半截变成提示词
+  const quoted = quoteArg(label);
+  if (quoted === undefined) return undefined;
+  return `<qqbot-cmd-input text="${attrValue(`/new --dir ${quoted}`)}" show="${attrValue(label)}"/>`;
 }
 
 /**
@@ -257,9 +260,8 @@ function workspaceHeader(
   // 宿主的 workspace.path 都是绝对路径；相对路径交给 /new 会落到进程目录，
   // 不是用户点的那个工作区，所以不给入口
   const absolute = isAbsolute(path) || /^[A-Za-z]:[\\/]/.test(path);
-  const target = linkable && !missing && absolute
-    ? workspaceLink(path)
-    : `\`${path}\``;
+  // 引号包不住的值（同时含两种引号）退回纯文本，不编一条执行不了的命令
+  const target = (linkable && !missing && absolute ? workspaceLink(path) : undefined) ?? `\`${path}\``;
   // 没有 registry 的部署只有路径：不编造工作区名，整行就是入口
   const lines = name === '' ? [target] : [`**${name}** · ${target}`];
   if (missing) lines.push('⚠️ 目录不存在');

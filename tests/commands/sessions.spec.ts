@@ -325,9 +325,10 @@ describe('/sessions 持有视图', () => {
     });
     const text = await run(manager, '');
 
-    // 名字不参与链接；路径原样保留 `_`，属性里的 `&` 转义
+    // 名字不参与链接；路径原样保留 `_`，属性里的 `&` 转义；带空格的值加引号，
+    // 否则点下去 `--dir` 只剩前半截
     expect(text).toContain(
-      '**repo** · <qqbot-cmd-input text="/new --dir D:\\my_ws &amp; co" show="D:\\my_ws &amp; co"/>',
+      '**repo** · <qqbot-cmd-input text="/new --dir &quot;D:\\my_ws &amp; co&quot;" show="D:\\my_ws &amp; co"/>',
     );
   });
 
