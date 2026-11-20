@@ -109,7 +109,7 @@ describe('SessionConfirmChannel.offer', () => {
       [
         '**⚠️ 确认重置会话**',
         '',
-        '当前会话会停止，下一条消息开新会话。',
+        '当前会话会停止。',
         '',
         '> 👇 点「确认」继续',
       ].join('\n'),
@@ -124,7 +124,7 @@ describe('SessionConfirmChannel.offer', () => {
     await channel.offer(request('reset-all'));
 
     expect(sent[0]!.text).toContain('**⚠️ 确认重置全部会话**');
-    expect(sent[0]!.text).toContain('全部会话都会停止，下一条消息开新会话。');
+    expect(sent[0]!.text).toContain('全部会话都会停止。');
     expect(sent[0]!.text).toContain('> 👇 点「确认」继续');
   });
 
