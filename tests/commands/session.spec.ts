@@ -144,11 +144,11 @@ describe('/new（不带参数）', () => {
     expect(manager.remove).toHaveBeenCalled();
   });
 
-  it('--worktree：交出意图，回执只说会话带工作树', async () => {
+  it('--worktree：交出意图，回执与普通 /new 一样', async () => {
     const manager = makeManager();
     const text = await run(manager, '--worktree');
 
-    expect(text).toBe('✅ 已开启带工作树的会话');
+    expect(text).toBe('✅ 已开启新会话');
     expect(text.split('\n')).toHaveLength(1);
     expect(manager.remove).toHaveBeenCalledWith();
     expect(manager.armWorktree).toHaveBeenCalledTimes(1);
@@ -157,7 +157,7 @@ describe('/new（不带参数）', () => {
 
   it('-w 是 --worktree 的别名', async () => {
     const manager = makeManager();
-    expect(await run(manager, '-w')).toBe('✅ 已开启带工作树的会话');
+    expect(await run(manager, '-w')).toBe('✅ 已开启新会话');
     expect(manager.armWorktree).toHaveBeenCalledTimes(1);
   });
 
@@ -364,7 +364,7 @@ describe('/new --dir', () => {
     expect(manager.resolveWorkspace).toHaveBeenCalledWith('D:\\My Repo');
     expect(manager.changeChatWorkspace).toHaveBeenCalledWith('c2c', 'user1', 'D:\\My Repo');
     expect(manager.armWorktree).toHaveBeenCalledTimes(1);
-    expect(text).toBe('✅ 已开启带工作树的会话\n工作区: repo · D:\\repo');
+    expect(text).toBe('✅ 已开启新会话\n工作区: repo · D:\\repo');
   });
 
   it('只读沙箱带路径也拒绝，不动会话', async () => {
@@ -422,7 +422,7 @@ describe('/new <提示词>', () => {
   it('--worktree 与提示词同时给：建树回执代替「已开启」首行', async () => {
     const manager = {
       ...makeManager(),
-      promptNewSession: vi.fn(async () => ({ sessionId: 's2', worktreeNotice: '✅ 已在新工作树 `feat` 里开启会话 · 从 `main` 拉出\n路径: `D:\\wt\\feat`' })),
+      promptNewSession: vi.fn(async () => ({ sessionId: 's2', worktreeNotice: '✅ 已在新工作树 `feat` 里开启会话\n🌿 从 `main` 拉出 · 路径: `D:\\wt\\feat`' })),
     };
 
     const text = await run(manager, '--worktree 查一下为什么启动慢');
@@ -650,7 +650,7 @@ describe('/new --background', () => {
       ...makeManager(),
       startBackgroundSession: vi.fn(async () => ({
         sessionId: 'session-abcdef123',
-        worktreeNotice: '✅ 已在新工作树 `feat` 里开启会话 · 从 `main` 拉出\n路径: `D:/wt/feat`',
+        worktreeNotice: '✅ 已在新工作树 `feat` 里开启会话\n🌿 从 `main` 拉出 · 路径: `D:/wt/feat`',
       })),
     };
 

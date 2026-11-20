@@ -55,8 +55,8 @@ interface PendingConfirm {
  */
 function confirmText(action: SessionConfirmAction): string {
   const [title, body] = action === 'reset-all'
-    ? ['**⚠️ 确认重置全部会话**', '全部会话都会停止，下一条消息开新会话。']
-    : ['**⚠️ 确认重置会话**', '当前会话会停止，下一条消息开新会话。'];
+    ? ['**⚠️ 确认重置全部会话**', '全部会话都会停止。']
+    : ['**⚠️ 确认重置会话**', '当前会话会停止。'];
   return [title, '', body, '', '> 👇 点「确认」继续'].join('\n');
 }
 
