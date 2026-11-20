@@ -8,6 +8,7 @@ import {
   sessionReplyLink,
   sessionResumeLink,
   sessionSourceHeader,
+  sessionStopLink,
   sessionTargetLabel,
   sessionTitleOf,
   sourceTitle,
@@ -55,6 +56,11 @@ describe('来源行与尾部动作', () => {
       .toBe('<qqbot-cmd-input text="/sessions resume #04de1556" show="恢复"/>');
   });
 
+  it('停止链接执行 /stop #短id，不带尾随空格', () => {
+    expect(sessionStopLink('session-04de1556-8c54-4b78-93e1-5714e079fca6'))
+      .toBe('<qqbot-cmd-input text="/stop #04de1556" show="停止"/>');
+  });
+
   it('归档链接把 /sessions archive #短id 直接执行', () => {
     expect(sessionArchiveLink('session-04de1556-8c54-4b78-93e1-5714e079fca6'))
       .toBe('<qqbot-cmd-input text="/sessions archive #04de1556" show="归档"/>');
@@ -73,11 +79,32 @@ describe('来源行与尾部动作', () => {
         + ' · <qqbot-cmd-input text="/sessions archive #04de1556" show="归档"/>');
   });
 
+  it('会话正在生成时尾部行多一个停止链接，排在归档前', () => {
+    expect(sessionLinkRow('session-04de1556', true, true))
+      .toBe('<qqbot-cmd-input text="/to #04de1556 " show="回复"/>'
+        + ' · <qqbot-cmd-input text="/sessions resume #04de1556" show="恢复"/>'
+        + ' · <qqbot-cmd-input text="/stop #04de1556" show="停止"/>'
+        + ' · <qqbot-cmd-input text="/sessions archive #04de1556" show="归档"/>');
+  });
+
+  it('空闲会话即使有归档能力也不给停止入口', () => {
+    expect(sessionLinkRow('session-04de1556', true)).not.toContain('show="停止"');
+  });
+
   it('整段装饰：来源头 + 正文 + 链接行（含归档）', () => {
     expect(decorateSessionMessage('hello', 'session-04de1556', '修登录', true))
       .toBe('> `#04de1556` · 修登录\n\nhello\n\n'
         + '<qqbot-cmd-input text="/to #04de1556 " show="回复"/>'
         + ' · <qqbot-cmd-input text="/sessions resume #04de1556" show="恢复"/>'
+        + ' · <qqbot-cmd-input text="/sessions archive #04de1556" show="归档"/>');
+  });
+
+  it('整段装饰可以同时带上停止与归档入口', () => {
+    expect(decorateSessionMessage('hello', 'session-04de1556', '修登录', true, true))
+      .toBe('> `#04de1556` · 修登录\n\nhello\n\n'
+        + '<qqbot-cmd-input text="/to #04de1556 " show="回复"/>'
+        + ' · <qqbot-cmd-input text="/sessions resume #04de1556" show="恢复"/>'
+        + ' · <qqbot-cmd-input text="/stop #04de1556" show="停止"/>'
         + ' · <qqbot-cmd-input text="/sessions archive #04de1556" show="归档"/>');
   });
 });

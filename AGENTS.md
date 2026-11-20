@@ -74,7 +74,7 @@ qqterm 是通道，不是能力所有者：目标是从 QQ 接入的超级终端
 - 只做 C2C 私聊，群消息在 accessPolicy 拦掉，代码里没有群聊分支；按钮键盘只在 C2C 可用，发送失败降级成纯文本并记 warn。改问答 / 审批时在 C2C 验证回退。
 - `ask_user_question` / `approval` 走宿主 waterfall，不退回 `userQuestions.ask` 探测。投递失败按键盘 → 纯文本降级；仍失败按「暂不可用」挂起，等 `ready` / `resumed` 或新入站消息后重发，不判成 `unavailable`。插件卸载或渠道失效时把挂起项 `handoffPending` 交还宿主；借来的会话不 cancel、不 dispose。
 - 聊天会话 key 固定 `qqterm:${appId}:chat`，全 bot 只有一个「当前会话」；已获取会话可以有多份，输出全部回 QQ。非当前会话的署名见 §4.9。
-- `/sessions` 默认按工作区分组列工作中会话（重启后尚未打开的也在列），`all` 看全部、只标 `📌`。`resume` 只改指针；`/new` 清指针、不停旧会话；`/clear`（别名 `/reset`）停当前再开新，`/clear all` 停全部；`/stop` 停当前，`/stop all` 停全部生成中。`/clear` 与 `/clear all` 先发确认卡（5 分钟过期，卡片发不出去就放弃动作），`/new` 直接执行。
+- `/sessions` 默认按工作区分组列工作中会话（重启后尚未打开的也在列），`all` 看全部、只标 `📌`。`resume` 只改指针；`/new` 清指针、不停旧会话；`/clear`（别名 `/reset`）停当前再开新，`/clear all` 停全部；`/stop` 停当前、`/stop <id>` 停指定已获取会话（规则同 `/sessions` 的目标解析），`/stop all` 停全部生成中。`/clear` 与 `/clear all` 先发确认卡（5 分钟过期，卡片发不出去就放弃动作），`/new` 直接执行。
 - `/new` 的参数：工作区用 `--dir`（`-d`），其余非参数词按顺序连成提示词直接发出去；`--worktree`（`-w`）让这条提示词先建树，`--background`（`-b`）另开一条会话、不动当前指针与聊天工作区且必须带提示词。
 - 启动恢复：QQ `ready` 后按 prefs 指针 `getOrCreate`（singleflight）；盘上已无则跳过并清指针，**恢复失败绝不新建**；占用 / 后端故障时指针保持原样。回复目标存 `model-prefs.json` 的 `targets`，值变化才写；恢复失败（locked / 宿主报错）用它推 `⚠️ 上次的会话没能恢复` + `/sessions resume` 按钮，`not-found` 静默。持久化写在消息路径上，不写卸载钩子（强杀不执行）。
 - 模型 / 思考强度 / preset 沿用宿主核心行为，插件不另立配置：`/model`、`/reasoning` 有活跃会话时调 `agent.model.select` 写进该会话（不 fork 不重建，下轮生效），同时把同一份选择写成部署默认值；无会话只写默认值（`agentDefaultModel.saveSelection`，`/permission` 走 `settings.update`）。整段读改写走 `serializeSelection`，同一会话的 QQ 侧写入串行，不为切换拉起会话。`/preset` 写 `agent-preset-registry.selectedDefault`，对新建会话生效，插件不存 preset。查看视图显示当前值并标 `✅`，不造「全局」标签。
@@ -175,7 +175,7 @@ rg -n '注意|务必|强烈建议|建议您|也可以|另外' src/commands src/f
 QQ 只有一个窗口，多个已获取会话的输出、提问、审批都回到这里，署名只靠首尾两行；实现集中在 `src/transport/session-source.ts`（`sessionSourceHeader` / `sessionLinkRow`），出站、交付物、提问、审批共用，不要另拼。
 
 - 首行：独占一行、后接空行，`` > `#短id` · 标题 ``；短 id 必须包行内代码（QQ 会把引用行里 `#` 开头的内容渲染成标题）；不带 emoji；标题取最新 `session/title`（`sessionTitleOf`），取不到写 `未命名会话`，压到 20 字内。
-- 尾部动作：正文后空一行、独占一行，`回复`（`/to #短id `）+ `恢复`（`/sessions resume #短id`），部署有 `workspaceRegistry` 时再 + `归档`（`/sessions archive #短id`，没有归档能力时不给入口）；长回复只在首片带首行、末片带链接（拼好的整条消息交给 `splitForLimit` 按上限切，超长重切只切不装饰）。
+- 尾部动作：正文后空一行、独占一行，`回复`（`/to #短id `）+ `恢复`（`/sessions resume #短id`），该会话正在生成时 + `停止`（`/stop #短id`），部署有 `workspaceRegistry` 时再 + `归档`（`/sessions archive #短id`，没有归档能力时不给入口）；长回复只在首片带首行、末片带链接（拼好的整条消息交给 `splitForLimit` 按上限切，超长重切只切不装饰）。
 - 非当前会话的提问 / 审批用同一首行，正文不塞 `[#id]`；提问在引导行给 `回答 · 恢复`，审批 / 重试有自己的键盘，不追加。讲「当前这条消息」的路由警告只在句子里带 `#短id（标题）`（`sessionLabel`），不套首行。
 
 ## 5. 构建 / 测试
