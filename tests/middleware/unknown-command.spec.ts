@@ -105,7 +105,12 @@ function makeHarness(content: string, options: HarnessOptions = {}): Harness {
 
 async function run(content: string, options: HarnessOptions = {}): Promise<Harness> {
   const harness = makeHarness(content, options);
-  const guard = rejectUnknownCommands({ commandNames: COMMANDS });
+  const guard = rejectUnknownCommands({
+    commandNames: COMMANDS,
+    sendText: async (target, body) => {
+      await harness.ctx.bot.sendMarkdown(target as never, body);
+    },
+  });
   await guard(harness.ctx, harness.next);
   return harness;
 }

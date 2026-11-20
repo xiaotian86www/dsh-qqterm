@@ -14,6 +14,7 @@
 import { statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, isAbsolute, resolve } from 'node:path';
+import { cleanInline, clip, commandLink } from '../shared/inline.ts';
 
 /** 本地路径判定（与 Web markdown 渲染器同一套规则） */
 const LOCAL_PATH = /^(?:[\/\\]|\.{1,2}[\/\\]|[a-z]:[\/\\])/i;
@@ -26,25 +27,6 @@ const INLINE_CODE = /`[^`\n]*`/g;
 
 /** 可点击命令的 show 上限（与按钮短标签一致） */
 const SHOW_MAX = 28;
-
-/** 行内展示净化：换行与 markdown / 属性字符会破坏标签 */
-function cleanInline(raw: string): string {
-  return raw
-    .replace(/[\r\n]+/g, ' ')
-    .replace(/[`*_~<>"']/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-/** XML 属性值转义（`&` 在 QQ 的指令标签里必须先转义） */
-function attrValue(raw: string): string {
-  return raw.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
-}
-
-/** 超长文本截断（带省略号） */
-function clip(raw: string, max: number): string {
-  return raw.length > max ? `${raw.slice(0, max - 1)}…` : raw;
-}
 
 /**
  * 把链接目标解析成允许发送的绝对路径；不是本地文件、不存在、不是普通文件时返回 undefined。
@@ -93,7 +75,7 @@ function rewriteText(part: string, cwd: string | undefined): string {
     if (absolute === undefined) return whole;
 
     const show = clip(cleanInline(label), SHOW_MAX) || basename(absolute);
-    return `<qqbot-cmd-input text="${attrValue(`/get ${absolute}`)}" show="${attrValue(show)}"/>`;
+    return commandLink(`/get ${absolute}`, show);
   });
 }
 

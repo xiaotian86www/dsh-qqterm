@@ -4,6 +4,9 @@
  * 宿主契约：`deliverables/presented` 事件先于 turn/end 到达；文件按引用交付
  * （不复制内容），读取发生在投递时刻；外层轮次失败不撤销已完成的声明。
  * 每个文件独立投递，失败降级为文字提示，不阻断其余文件。
+ *
+ * 未送达的提示走 sender 的 text（分片 + 网络类重试），署名走 sender.decorate，
+ * 与普通消息同一套「非当前会话」标记，不再自己拼一遍。
  */
 import { basename } from 'node:path';
 import type { QQTermConfig } from '../config.ts';
@@ -11,8 +14,11 @@ import type { SessionRecord } from '../session/index.ts';
 import type { Logger } from '../types.ts';
 import { sendMediaFile, type MediaSenderLike } from '../media/send-media.ts';
 import type { PresentedFileRef } from './events.ts';
-import { chunkMarkdownText } from './chunker.ts';
-import type { QQBotSender } from './outbound.ts';
+import type { Sender } from './send.ts';
+import { errorMessage } from '../shared/utils.ts';
+
+/** 交付物只需要「发一段提示」和「加署名」 */
+export type DeliverablesSender = Pick<Sender, 'text' | 'decorate'>;
 
 /** 交付物投递器（outbound 路由只依赖此接口，便于测试注入） */
 export interface DeliverablesDelivererLike {
@@ -20,27 +26,21 @@ export interface DeliverablesDelivererLike {
 }
 
 export class DeliverablesDeliverer implements DeliverablesDelivererLike {
-  private readonly sender: QQBotSender;
+  private readonly sender: DeliverablesSender;
   private readonly mediaBot: MediaSenderLike;
   private readonly config: QQTermConfig;
   private readonly logger: Logger;
-  /**
-   * 非当前会话的文字提示装饰（来源头 + 尾部动作）；文件本身无法带标记。
-   */
-  private readonly decorateOf?: (record: SessionRecord, text: string) => string;
 
   public constructor(
-    sender: QQBotSender,
+    sender: DeliverablesSender,
     mediaBot: MediaSenderLike,
     config: QQTermConfig,
     logger: Logger,
-    decorateOf?: (record: SessionRecord, text: string) => string,
   ) {
     this.sender = sender;
     this.mediaBot = mediaBot;
     this.config = config;
     this.logger = logger;
-    this.decorateOf = decorateOf;
   }
 
   /** 轮末投递一批声明文件：逐个发送，未送达的聚合为一条文字提示 */
@@ -72,15 +72,12 @@ export class DeliverablesDeliverer implements DeliverablesDelivererLike {
 
     if (missed.length > 0) {
       const text = ['📎 已生成文件（未能直接发送）：', ...missed.map((name) => `- ${name}`)].join('\n');
-      const decorated = this.decorateOf?.(record, text) ?? text;
-      for (const chunk of chunkMarkdownText(decorated, this.config.textChunkLimit)) {
-        try {
-          await this.sender.sendMarkdown(record.replyTarget, chunk);
-        } catch (err) {
-          this.logger.error(
-            `qqterm: deliverables notice failed: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        }
+      try {
+        await this.sender.text(record.replyTarget, this.sender.decorate(record.sessionId, text));
+      } catch (err) {
+        this.logger.error(
+          `qqterm: deliverables notice failed: ${errorMessage(err)}`,
+        );
       }
     }
     this.logger.debug(`qqterm: deliverables delivered sent=${sent} missed=${missed.length}`);

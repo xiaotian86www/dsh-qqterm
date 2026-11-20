@@ -27,7 +27,11 @@ import type { SlashCommand } from '../commands/types.ts';
 import { attachmentProcessor } from '../middleware/attachment.ts';
 import { questionAnswer } from '../middleware/question-answer.ts';
 import { replyRecorder } from '../middleware/reply-recorder.ts';
-import { collectCommandNames, rejectUnknownCommands } from '../middleware/unknown-command.ts';
+import {
+  collectCommandNames,
+  rejectUnknownCommands,
+  type UnknownCommandSend,
+} from '../middleware/unknown-command.ts';
 import type { ReplyStore } from '../transport/reply-store.ts';
 
 export function setupMiddlewares(
@@ -38,6 +42,8 @@ export function setupMiddlewares(
   replyStore: ReplyStore,
   reloader?: Reloader,
   installer?: PluginInstaller,
+  /** 发兜底文本用的函数（bootstrap 注入 sender.text） */
+  sendText?: UnknownCommandSend,
 ): SlashCommand[] {
   // 1. 错误兜底（最外层洋葱皮）
   bot.use(errorHandler());
@@ -96,7 +102,12 @@ export function setupMiddlewares(
 
   // 6.6. 未知指令兜底（在 questionAnswer 之后：答案优先，别被守卫吃掉）
   //      拼错的 /xxx 直接回「没有这个指令」，不再当成提问转发给大模型
-  bot.use(rejectUnknownCommands({ commandNames: collectCommandNames(commandList) }));
+  bot.use(rejectUnknownCommands({
+    commandNames: collectCommandNames(commandList),
+    sendText: sendText ?? (async (target, body) => {
+      await bot.sendMarkdown(target, body);
+    }),
+  }));
 
   // 7. 入站派发串行（同 peer 短暂排队，避免并发创建会话 / 同时写 followup）
   //    守卫只管到「消息交给宿主」为止，不等本轮 turn 结束：会话内的先后由宿主

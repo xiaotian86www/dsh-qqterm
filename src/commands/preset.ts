@@ -8,6 +8,7 @@ import type { CommandDeps, SlashCommand } from './types.ts';
 import { parseRest } from './args.ts';
 import { ownerOnlyAuth } from './auth.ts';
 import { getScopePeer, sendMarkdownChunked } from '../shared/index.ts';
+import { commandLinkRaw } from '../shared/inline.ts';
 
 export function presetCommand({ manager, config, logger }: CommandDeps): SlashCommand {
   return {
@@ -45,7 +46,7 @@ export function presetCommand({ manager, config, logger }: CommandDeps): SlashCo
           const display = p.name ? `${p.name} (${p.id})` : p.id;
           // 默认项带 ✅；链接统一指向真实切换命令，重复切换由命令自身幂等处理
           const suffix = p.id === defaultId ? ' ✅' : '';
-          lines.push(`<qqbot-cmd-input text="/preset ${p.id}" show="/preset ${display}${suffix}"/>`);
+          lines.push(commandLinkRaw(`/preset ${p.id}`, `/preset ${display}${suffix}`));
         }
 
         await sendMarkdownChunked(cmdCtx, lines.join('\n'), config.textChunkLimit);

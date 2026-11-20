@@ -86,6 +86,7 @@ qqterm 是通道，不是能力所有者：目标是从 QQ 接入的超级终端
 - 入站 `source.kind` 必须是 `user`（`src/session/user-message.ts`）：标题、最近提问时间、轮次大纲、replay 断点都以人类消息为触发条件，自造 kind 会让新会话停在「未命名会话」。
 - Markdown 按 `textChunkLimit` 分片，代码块 / 表格感知切分在 `src/transport/chunker.ts`，不要绕过。
 - 普通消息在 `agent.followup()` 之后必须立刻返回：`concurrencyGuard` 以 QQ 用户为键，`await agent.whenIdle()` 会占着锁把别的会话一起堵住。
+- 发到 QQ 的聊天文本统一走 `src/transport/send.ts`：会话事件用 `Sender.session`（分片 → 入队 → 超长减半），卡片用 `Sender.card`（给了 `fallbackBody` 才在键盘失败时降级纯文本），命令回复用 `sendChunkedText`（经 `sendMarkdownChunked`），非当前会话署名叫 `Sender.decorate`。提示类文本（入站兜底、未知指令、热重载 / 插件公告）拿 `Sender.text` 的 `SendText` 形状注入，`handleInbound` / `rejectUnknownCommands` / `ReloaderOptions.notify` / `PluginInstallerOptions.notify` 都收这个函数。不要另写 `bot.sendMarkdown` 的分片 / 重试 / 署名。例外只有媒体与平台操作（`sendFile` / `sendImage` / `ack`）。
 - 工具结果只在 `showToolResults` 打开时推送，默认一条不发；失败按 §4.3 给目标与原因。用户可见文案内联在 `src/`（`locale/*.json` 只有插件 meta）；注释与内部日志用中文。
 
 ## 4. 用户可见文案
@@ -135,6 +136,7 @@ qqterm 是通道，不是能力所有者：目标是从 QQ 接入的超级终端
 - `label` ≤ 10 字符（`BUTTON_LABEL_MAX`），超长由 `buttonLabel()` 截断补 `…`；写法「图标 + 动作短语」（`✅ 允许一次`），完整文本留在正文。
 - 可点击指令一律 `<qqbot-cmd-input text="/命令 参数" show="展示文本"/>`：`text` 必须真能执行（重复点击由命令幂等兜底），`show` 是纯文本短标签、不写 markdown。
 - 属性净化：去换行、去 `` ` * _ ~ < > " '``、超长截到 28 字补 `…`（`shortTitle()`），`&` 按上下文转义；例外是 `/sessions` 组标题的路径链接，`show` 用原始路径（只去换行 + 属性转义），不过 `cleanInline()`。
+- 标签拼装只走 `src/shared/inline.ts`（`cleanInline()` / `attrValue()` / `clip()` / `commandLink()` / `commandLinkRaw()`）：展示文本先净化用 `commandLink()`，路径、id 这类必须原样显示的值用 `commandLinkRaw()`；不要在各文件重写净化与转义。
 - 当前项 `… ✅`、持有项 `… 📌`：一律行尾、不用前缀，同一条消息不同时出现两者；按钮发送失败必须降级成纯文本，事实与下一步都不能丢。
 
 ### 4.6 用词与语气
@@ -214,9 +216,9 @@ QQ 只有一个窗口，多个已获取会话的输出、提问、审批都回�
 ## 8. 安全与隐私
 
 - 绝不提交真实 appId / appSecret、OpenID、会话日志；凭据只放 profile 的 `cordis.patch.yml` 或 `QQBOT_APPID` / `QQBOT_SECRET`，示例一律占位符。
-- 白名单只有一个用户：`access.owner` 为空时拒绝所有私聊；群消息一律拒绝；审批 / 提问按钮必须校验点击者等于 owner。
+- 白名单只有一个用户：`access.owner` 为空时拒绝所有私聊；群消息一律拒绝；按钮点击（提问 / 审批 / 重试 / 确认）必须校验点击者等于 owner，网关与通道各复核一次。
 - 文件发送只发给 `access.owner`，因此不限制目录：`/get` 与交付物投递可以是任意路径，但目标必须是存在且可读的普通文件；目录仍需 `statSync` 检查，`/get` 拒绝非文件。
-- 媒体 / 缓存落 `~/.dsh-qqterm/`，不进仓库；`.env`、`.dsh-sessions/`、`docs/` 已在 .gitignore，不要为提交方便移除。
+- 媒体 / 缓存落 `~/.dsh-qqterm/`，不进仓库；`.env`、`.dsh-sessions/` 已在 .gitignore，不要为提交方便移除。`docs/` 入库，只放可公开的设计文档（如入站/出站路径清单），不放凭据、OpenID、会话日志。
 
 ## 9. 已知坑
 

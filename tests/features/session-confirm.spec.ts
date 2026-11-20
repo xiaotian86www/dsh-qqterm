@@ -24,10 +24,14 @@ interface SentMessage {
 }
 
 function createSender(sent: SentMessage[], opts?: { fail?: boolean }) {
+  const deliver = vi.fn(async (_target: ReplyTarget, content: string, o?: { keyboard?: unknown }) => {
+    if (opts?.fail) throw new Error('send failed');
+    sent.push({ text: content, opts: o });
+  });
   return {
-    sendMarkdown: vi.fn(async (_target: ReplyTarget, content: string, o?: { keyboard?: unknown }) => {
-      if (opts?.fail) throw new Error('send failed');
-      sent.push({ text: content, opts: o });
+    text: vi.fn(async (target: ReplyTarget, content: string) => deliver(target, content)),
+    card: vi.fn(async (target: ReplyTarget, content: string, keyboard?: unknown) => {
+      await deliver(target, content, { keyboard });
     }),
   };
 }
@@ -41,7 +45,7 @@ function createChannel(
   const sender = createSender(sent, { fail: opts?.fail });
   const manager = { currentSessionId: () => opts?.currentId };
   const logger = opts?.logger ?? createLogger();
-  const channel = new SessionConfirmChannel(manager, sender, logger);
+  const channel = new SessionConfirmChannel(manager, sender, { access: { owner: 'U1' } }, logger);
   return { channel, sender, logger };
 }
 
@@ -54,11 +58,12 @@ function request(action: SessionConfirmRequest['action'] = 'reset', currentId?: 
   };
 }
 
-function makeEvent(data?: string): InteractionEvent {
+function makeEvent(data?: string, user: string | null | undefined = 'U1'): InteractionEvent {
   return {
     id: 'i1',
     type: 1,
     version: 1,
+    ...(user !== undefined && user !== null ? { user_openid: user } : {}),
     data: { type: 1, resolved: { ...(data !== undefined ? { button_data: data } : {}) } },
   } as InteractionEvent;
 }
@@ -146,6 +151,18 @@ describe('SessionConfirmChannel.offer', () => {
 });
 
 describe('SessionConfirmChannel.handleInteraction', () => {
+  it('非 owner 点击不执行闭包，缺身份同样拒绝', async () => {
+    const sent: SentMessage[] = [];
+    const { channel } = createChannel(sent);
+    const req = request('reset');
+    await channel.offer(req);
+    const yes = buttonDataOf(sent[0]!.opts?.keyboard, 'yes');
+
+    expect(channel.handleInteraction(makeEvent(yes, 'U2'))).toBe(false);
+    expect(channel.handleInteraction(makeEvent(yes, null))).toBe(false);
+    expect(req.run).not.toHaveBeenCalled();
+  });
+
   it('点确认：执行闭包并把回执发回聊天', async () => {
     const sent: SentMessage[] = [];
     const { channel } = createChannel(sent);

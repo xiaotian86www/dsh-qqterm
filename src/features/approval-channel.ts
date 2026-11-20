@@ -11,8 +11,10 @@ import type { EventOptions } from '@deepseek-ai/cordis';
 import type { InteractionEvent } from '@tencent-connect/qqbot-nodejs';
 import { randomUUID } from 'node:crypto';
 import type { ChatScope, Logger, ReplyTarget } from '../types.ts';
+import { isOwner, errorMessage } from '../shared/utils.ts';
 import { decodeButtonData } from './button-utils.ts';
 import { buildApprovalKeyboard, buildApprovalText } from './approval-renderer.ts';
+import type { ChannelSender } from '../transport/send.ts';
 
 // ── 最小契约（对齐 dsh-user-approval，避免硬依赖） ──
 
@@ -60,10 +62,6 @@ export interface ApprovalChannelManagerLike {
   isCurrentSession?(sessionId: string): boolean;
   /** 会话标题（非当前会话的来源行用）；缺省时来源行只有 id */
   sessionTitle?(sessionId: string): string | undefined;
-}
-
-export interface ApprovalChannelSenderLike {
-  sendMarkdown(target: ReplyTarget, content: string, opts?: { keyboard?: unknown }): Promise<unknown>;
 }
 
 /** 配置投影（审批按钮校验唯一绑定用户用） */
@@ -135,13 +133,13 @@ export class ApprovalChannel {
   /** 投递期间收到释放请求的会话：发完立刻交回宿主 */
   private readonly handoffRequested = new Set<string>();
   private readonly manager: ApprovalChannelManagerLike;
-  private readonly sender: ApprovalChannelSenderLike;
+  private readonly sender: ChannelSender;
   private readonly logger: Logger;
   private readonly config: ApprovalChannelConfigLike;
 
   public constructor(
     manager: ApprovalChannelManagerLike,
-    sender: ApprovalChannelSenderLike,
+    sender: ChannelSender,
     config: ApprovalChannelConfigLike,
     logger: Logger,
   ) {
@@ -203,7 +201,7 @@ export class ApprovalChannel {
     try {
       entry.resolve(await entry.handoff());
     } catch (err) {
-      this.logger.error(`qqterm: no answerer accepted the approval after release: ${err instanceof Error ? err.message : String(err)}`);
+      this.logger.error(`qqterm: no answerer accepted the approval after release: ${errorMessage(err)}`);
       entry.resolve('cancelled');
     }
   }
@@ -234,8 +232,7 @@ export class ApprovalChannel {
 
     // 审批只认唯一绑定用户；点击者身份缺失同样拒绝（fail-closed）
     const clicker = event.user_openid;
-    const owner = this.config.access.owner.trim();
-    if (owner === '' || clicker !== owner) {
+    if (!isOwner(this.config.access.owner, clicker)) {
       this.logger.warn(`qqterm: approval button rejected (clicker not owner): user=${clicker ?? '(missing)'} sessionId=${entry.record.sessionId}`);
       return false;
     }
@@ -262,16 +259,17 @@ export class ApprovalChannel {
     const isCurrent = this.manager.isCurrentSession?.(sessionId) ?? true;
     const title = this.manager.sessionTitle?.(sessionId);
     try {
-      await this.sender.sendMarkdown(
+      // 不给纯文本兜底：没有按钮的审批卡无法作答，发出去只会误导
+      await this.sender.card(
         record.replyTarget,
         buildApprovalText(request, command, { sessionId, isCurrent, title }),
-        { keyboard: buildApprovalKeyboard(nonce, sessionId) },
+        buildApprovalKeyboard(nonce, sessionId),
       );
     } catch (err) {
       this.inFlight.delete(sessionId);
       // 投递失败本身就会走宿主兜底，释放标记不再需要
       this.handoffRequested.delete(sessionId);
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = errorMessage(err);
       this.logger.error(`qqterm: approval send failed sessionId=${sessionId}: ${msg}`);
       // 卡片没送到 QQ 时不能把请求吞掉：交回链上其他通道（Web GUI 仍可弹窗）。
       this.logger.warn('qqterm: QQ approval delivery failed, falling back to the host answerer');
@@ -280,7 +278,7 @@ export class ApprovalChannel {
       } catch (nextErr) {
         // 链上也没有 answerer 了：两条通道都投不出去，按「未决策」结束（fail-closed），
         // 不让 rejection 冒成宿主的未捕获错误。
-        const nextMsg = nextErr instanceof Error ? nextErr.message : String(nextErr);
+        const nextMsg = errorMessage(nextErr);
         this.logger.error(`qqterm: no answerer accepted the approval: ${nextMsg}`);
         return 'cancelled';
       }
@@ -311,7 +309,7 @@ export class ApprovalChannel {
     try {
       return await delegate();
     } catch (err) {
-      this.logger.error(`qqterm: no answerer accepted the approval: ${err instanceof Error ? err.message : String(err)}`);
+      this.logger.error(`qqterm: no answerer accepted the approval: ${errorMessage(err)}`);
       return 'cancelled';
     }
   }

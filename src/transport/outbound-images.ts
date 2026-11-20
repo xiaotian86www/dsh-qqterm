@@ -9,6 +9,7 @@ import type { SessionRecord } from '../session/index.ts';
 import type { Logger } from '../types.ts';
 import type { MessageContentBlock } from './events.ts';
 import { resolveLocalFile } from './file-links.ts';
+import { errorMessage } from '../shared/utils.ts';
 
 /** 图片块引用（宿主 ImageAttachmentRef 里本模块用到的字段） */
 export interface ImageAttachmentLike {
@@ -164,7 +165,7 @@ export class OutboundImages {
         await this.bot.sendImage(record.replyTarget, source);
       } catch (err) {
         this.logger.warn(
-          `qqterm: 图片发送失败 attachmentId=${ref.attachmentId}: ${err instanceof Error ? err.message : String(err)}`,
+          `qqterm: 图片发送失败 attachmentId=${ref.attachmentId}: ${errorMessage(err)}`,
         );
       }
     }
@@ -180,7 +181,7 @@ export class OutboundImages {
         await this.bot.sendImage(record.replyTarget, { localPath: path });
       } catch (err) {
         this.logger.warn(
-          `qqterm: 图片发送失败 path=${path}: ${err instanceof Error ? err.message : String(err)}`,
+          `qqterm: 图片发送失败 path=${path}: ${errorMessage(err)}`,
         );
       }
     }

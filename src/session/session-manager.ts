@@ -88,6 +88,7 @@ import type {
   RetryPromptOutcome,
   WorktreeInfo,
 } from './types.ts';
+import { errorMessage } from '../shared/utils.ts';
 
 /** 没有活跃会话时，部署默认选择用的串行化键 */
 const DEFAULT_SELECTION_KEY = '@default';
@@ -420,7 +421,7 @@ export class SessionManager {
         isDefault: p.isDefault ?? (defaultId !== undefined && p.id === defaultId),
       }));
     } catch (err) {
-      this.logger.warn(`list presets failed: ${err instanceof Error ? err.message : String(err)}`);
+      this.logger.warn(`list presets failed: ${errorMessage(err)}`);
       return [];
     }
   }
@@ -452,7 +453,7 @@ export class SessionManager {
       try {
         known = await this.modelResolver.hasModel(route.provider, route.model);
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
+        const message = errorMessage(err);
         this.logger.warn(`model switch failed: key=${key} err=${message}`);
         return { ...route, reason: 'failed', message };
       }
@@ -470,7 +471,7 @@ export class SessionManager {
             ...(keepEffort !== undefined ? { reasoningEffort: keepEffort } : {}),
           });
         } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
+          const message = errorMessage(err);
           this.logger.warn(`default model switch failed: key=${key} err=${message}`);
           return { ...route, reason: 'failed', message };
         }
@@ -489,7 +490,7 @@ export class SessionManager {
         record.agent.model.select(selected);
         this.persistDefaultSelection(selected, key);
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
+        const message = errorMessage(err);
         this.logger.warn(`model switch failed: key=${key} err=${message}`);
         return { ...route, reason: 'failed', message };
       }
@@ -615,7 +616,7 @@ export class SessionManager {
         await this.agentDefaultModel.saveSelection(selected);
         return { ok: true, ...(effort !== undefined ? { effort } : {}) };
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
+        const message = errorMessage(err);
         this.logger.warn(`default reasoning effort switch failed: ${message}`);
         return { ok: false, reason: 'failed', message };
       }
@@ -626,7 +627,7 @@ export class SessionManager {
       this.persistDefaultSelection(selected, this.sessionKey());
       return { ok: true, ...(effort !== undefined ? { effort } : {}) };
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       this.logger.warn(`reasoning effort switch failed: ${message}`);
       return { ok: false, reason: 'failed', message };
     }
@@ -665,7 +666,7 @@ export class SessionManager {
       return state ?? undefined;
     } catch (err) {
       this.logger.debug(
-        `modelSelection projection unavailable: ${err instanceof Error ? err.message : String(err)}`,
+        `modelSelection projection unavailable: ${errorMessage(err)}`,
       );
       return undefined;
     }
@@ -950,6 +951,11 @@ export class SessionManager {
   /** 某个 sessionId 是不是当前聊天正在接的会话 */
   isCurrentSession(sessionId: string): boolean {
     return this.currentSessionId() === sessionId;
+  }
+
+  /** 会话是否正在生成：非当前会话的署名据此决定给不给「停止」入口 */
+  isRunningSession(sessionId: string): boolean {
+    return this.findBySessionId(sessionId)?.agent.status === 'running';
   }
 
   /**
@@ -1343,7 +1349,7 @@ export class SessionManager {
       };
     } catch (err) {
       this.logger.warn(
-        `qqterm: preset ${presetId ?? '(default)'} unavailable: ${err instanceof Error ? err.message : String(err)} — using host composition`,
+        `qqterm: preset ${presetId ?? '(default)'} unavailable: ${errorMessage(err)} — using host composition`,
       );
       return {};
     }
@@ -1628,7 +1634,7 @@ export class SessionManager {
         },
       };
     } catch (err) {
-      this.logger.warn(`worktree creation failed: key=${key} ${err instanceof Error ? err.message : String(err)}`);
+      this.logger.warn(`worktree creation failed: key=${key} ${errorMessage(err)}`);
       created.agent.cancel({ kind: 'user' });
       await created.dispose().catch(() => {});
       throw new WorktreeError('create', worktreeFailureText(err), err, plan.head.branch);
@@ -1664,7 +1670,7 @@ export class SessionManager {
       this.logger.info(`restored worktree: path=${restored.path} branchRecreated=${restored.branchRecreated}`);
       return restored.path;
     } catch (err) {
-      this.logger.warn(`worktree restore failed: ${err instanceof Error ? err.message : String(err)}`);
+      this.logger.warn(`worktree restore failed: ${errorMessage(err)}`);
       throw new WorktreeError('restore', worktreeFailureText(err), err);
     }
   }
@@ -1689,7 +1695,7 @@ export class SessionManager {
       const state = this.sessionProjections.stateOf(agent.session, 'worktree') as WorktreeProjectionLike | undefined;
       return Array.isArray(state?.created) ? state.created : [];
     } catch (err) {
-      this.logger.debug(`worktree projection unavailable: ${err instanceof Error ? err.message : String(err)}`);
+      this.logger.debug(`worktree projection unavailable: ${errorMessage(err)}`);
       return [];
     }
   }
@@ -2880,7 +2886,7 @@ export class SessionManager {
       const { kind, text } = executed.result;
       return text === undefined ? { kind } : { kind, text };
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       this.logger.warn(`host command failed: name=${name} err=${message}`);
       return { kind: 'threw', message };
     }
@@ -2919,7 +2925,7 @@ export class SessionManager {
 
 /** 错误文案（日志用） */
 function errorText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
+  return errorMessage(err);
 }
 
 /**

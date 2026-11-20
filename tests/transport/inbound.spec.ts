@@ -10,7 +10,7 @@ import type { MiddlewareContext } from '@tencent-connect/qqbot-nodejs';
 import { handleInbound } from '../../src/transport/inbound.ts';
 import { WorktreeError } from '../../src/session/worktree.ts';
 import type { SessionManager, SessionRecord } from '../../src/session/index.ts';
-import type { Logger } from '../../src/types.ts';
+import type { Logger, ReplyTarget } from '../../src/types.ts';
 
 const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
 
@@ -24,6 +24,13 @@ function makeCtx(content = 'hi', messageId = 'm1'): MiddlewareContext {
     stop: vi.fn(),
     receivedAt: Date.now(),
   } as unknown as MiddlewareContext;
+}
+
+/** 提示文本发送：用例仍按 bot.sendMarkdown 的调用断言 */
+function sendTextOf(ctx: MiddlewareContext): (target: ReplyTarget, body: string) => Promise<void> {
+  return async (target, body) => {
+    await ctx.bot.sendMarkdown(target as never, body);
+  };
 }
 
 /**
@@ -76,8 +83,9 @@ describe('handleInbound：派发不等待本轮 turn', () => {
   it('会话生成中也立即返回，不等 whenIdle', async () => {
     const { record, followup, whenIdle } = makeRecord('session-a');
     const manager = managerOf([record]);
+    const ctx = makeCtx('继续');
 
-    await handleInbound(makeCtx('继续'), manager, logger);
+    await handleInbound(ctx, manager, logger, sendTextOf(ctx));
 
     expect(followup).toHaveBeenCalledTimes(1);
     expect(textOf(followup.mock.calls[0]?.[0])).toBe('继续');
@@ -90,8 +98,10 @@ describe('handleInbound：派发不等待本轮 turn', () => {
     const manager = managerOf([busy.record, idle.record]);
 
     // 第一条把「当前会话」推进生成中；第二条目标已是空闲会话
-    await handleInbound(makeCtx('第一条'), manager, logger);
-    await handleInbound(makeCtx('第二条'), manager, logger);
+    const first = makeCtx('第一条');
+    await handleInbound(first, manager, logger, sendTextOf(first));
+    const second = makeCtx('第二条');
+    await handleInbound(second, manager, logger, sendTextOf(second));
 
     expect(busy.followup).toHaveBeenCalledTimes(1);
     expect(idle.followup).toHaveBeenCalledTimes(1);
@@ -102,8 +112,10 @@ describe('handleInbound：派发不等待本轮 turn', () => {
     const { record, followup } = makeRecord('session-a');
     const manager = managerOf([record]);
 
-    await handleInbound(makeCtx('一'), manager, logger);
-    await handleInbound(makeCtx('二'), manager, logger);
+    const first = makeCtx('一');
+    await handleInbound(first, manager, logger, sendTextOf(first));
+    const second = makeCtx('二');
+    await handleInbound(second, manager, logger, sendTextOf(second));
 
     expect(followup).toHaveBeenCalledTimes(2);
     expect(followup.mock.calls.map(call => textOf(call[0]))).toEqual(['一', '二']);
@@ -123,7 +135,12 @@ describe('handleInbound：工作树', () => {
   it('建树失败：说清会话没创建，重发会重新尝试', async () => {
     const ctx = makeCtx('hi');
 
-    await handleInbound(ctx, failingManager(new WorktreeError('create', 'fatal: cannot lock ref')), logger);
+    await handleInbound(
+      ctx,
+      failingManager(new WorktreeError('create', 'fatal: cannot lock ref')),
+      logger,
+      sendTextOf(ctx),
+    );
 
     expect(sent(ctx).at(-1)?.[1]).toBe(
       '❌ 没能建工作树: fatal: cannot lock ref\n本次会话没有创建，重发一次可重试，或再发一条 /new 就地开始。',
@@ -137,6 +154,7 @@ describe('handleInbound：工作树', () => {
       ctx,
       failingManager(new WorktreeError('create', 'fatal: bad revision', undefined, 'main')),
       logger,
+      sendTextOf(ctx),
     );
 
     expect(sent(ctx).at(-1)?.[1]).toBe(
@@ -151,6 +169,7 @@ describe('handleInbound：工作树', () => {
       ctx,
       failingManager(new WorktreeError('base', '没能读到当前分支的提交')),
       logger,
+      sendTextOf(ctx),
     );
 
     expect(sent(ctx).at(-1)?.[1]).toBe(
@@ -160,8 +179,12 @@ describe('handleInbound：工作树', () => {
 
   it('工作树重建失败：给下一步，不谎称会话没了', async () => {
     const ctx = makeCtx('hi');
-
-    await handleInbound(ctx, failingManager(new WorktreeError('restore', 'fatal: path exists')), logger);
+    await handleInbound(
+      ctx,
+      failingManager(new WorktreeError('restore', 'fatal: path exists')),
+      logger,
+      sendTextOf(ctx),
+    );
 
     expect(sent(ctx).at(-1)?.[1]).toBe(
       '❌ 工作树重建失败: fatal: path exists · 用 /new 重新开会话',
@@ -171,7 +194,7 @@ describe('handleInbound：工作树', () => {
   it('非工作树错误仍然走通用兜底', async () => {
     const ctx = makeCtx('hi');
 
-    await handleInbound(ctx, failingManager(new Error('EIO')), logger);
+    await handleInbound(ctx, failingManager(new Error('EIO')), logger, sendTextOf(ctx));
 
     expect(sent(ctx).at(-1)?.[1]).toBe('⚠️ 处理消息时出现异常，请稍后重试。');
   });
@@ -182,13 +205,13 @@ describe('handleInbound：工作树', () => {
     const manager = managerOf([record]);
     const first = makeCtx('一');
 
-    await handleInbound(first, manager, logger);
+    await handleInbound(first, manager, logger, sendTextOf(first));
 
     expect(sent(first).some(([, text]) => text === '✅ 已在新工作树 `dsh-x` 里开启会话\n路径: `D:\\repo\\.agents\\worktrees\\dsh-x`')).toBe(true);
     expect(record.worktreeNotice).toBeUndefined();
 
     const second = makeCtx('二');
-    await handleInbound(second, manager, logger);
+    await handleInbound(second, manager, logger, sendTextOf(second));
     expect(sent(second)).toHaveLength(0);
   });
 });

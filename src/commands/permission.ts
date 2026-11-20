@@ -11,6 +11,7 @@ import type { CommandDeps, SlashCommand } from './types.ts';
 import { parseRest } from './args.ts';
 import { ownerOnlyAuth } from './auth.ts';
 import { getScopePeer, sendMarkdownChunked } from '../shared/index.ts';
+import { commandLinkRaw } from '../shared/inline.ts';
 import type { PermissionPresetEntry } from '../session/index.ts';
 
 /** 宿主权限预设的中文名（宿主只给 id，Web 端的文案在客户端 locale 里） */
@@ -67,7 +68,7 @@ export function permissionCommand({ manager, config, logger }: CommandDeps): Sla
         for (const entry of entries) {
           const label = presetLabel(entry.id, entry);
           const suffix = entry.id === current ? ' ✅' : entry.id === 'auto' ? ' · EXP' : '';
-          lines.push(`<qqbot-cmd-input text="/permission ${entry.id}" show="/permission ${label}${suffix}"/>`);
+          lines.push(commandLinkRaw(`/permission ${entry.id}`, `/permission ${label}${suffix}`));
         }
 
         await sendMarkdownChunked(cmdCtx, lines.join('\n'), config.textChunkLimit);

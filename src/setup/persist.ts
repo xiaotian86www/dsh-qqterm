@@ -16,6 +16,7 @@ import { resolve } from 'node:path';
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { parseDocument, isMap, isSeq, isScalar, YAMLMap, type Document, type YAMLSeq } from 'yaml';
 import type { Logger } from '../types.ts';
+import { errorMessage } from '../shared/utils.ts';
 
 /** 凭据结果 */
 export interface SetupCredentials {
@@ -114,7 +115,7 @@ function editProfilePatch(
         throw new Error('写入后 qqterm 条目校验失败');
       }
     } catch (err) {
-      log.warn(`写入验证失败，回滚 cordis.patch.yml: ${err instanceof Error ? err.message : String(err)}`);
+      log.warn(`写入验证失败，回滚 cordis.patch.yml: ${errorMessage(err)}`);
       const rollback = `${patchPath}.qqterm.rollback`;
       writeFileSync(rollback, before, 'utf8');
       renameSync(rollback, patchPath);
@@ -268,7 +269,7 @@ export function persistCredentialsToProfile(
       log.warn(`拒绝写入 cordis.patch.yml: ${err.message}（原文件保留）`);
       return false;
     }
-    log.warn(`写入配置失败: ${err instanceof Error ? err.message : String(err)}`);
+    log.warn(`写入配置失败: ${errorMessage(err)}`);
     printYamlInstructions(credentials, resolve(profileDir, 'cordis.patch.yml'));
     return false;
   }
@@ -311,7 +312,7 @@ export function removeCredentialsFromProfile(
       log.warn(`拒绝写入 cordis.patch.yml: ${err.message}（原文件保留）`);
       return false;
     }
-    log.warn(`移除凭据失败: ${err instanceof Error ? err.message : String(err)}`);
+    log.warn(`移除凭据失败: ${errorMessage(err)}`);
     return false;
   }
 }
@@ -362,7 +363,7 @@ export function updateProfileConfig(
       log.warn(`拒绝写入 cordis.patch.yml: ${err.message}（原文件保留）`);
       return false;
     }
-    log.warn(`保存配置失败: ${err instanceof Error ? err.message : String(err)}`);
+    log.warn(`保存配置失败: ${errorMessage(err)}`);
     return false;
   }
 }

@@ -5,7 +5,7 @@
  */
 import type { Context } from '@deepseek-ai/cordis';
 import { basename } from 'node:path';
-import { optionalService } from '../shared/utils.ts';
+import { optionalService, errorMessage } from '../shared/utils.ts';
 
 /** 日志最小接口 */
 export interface AdapterLogger {
@@ -435,7 +435,7 @@ async function sessionListMeta(
       if (raw.blank === true) blank.add(raw.sessionId);
     }
   } catch (err) {
-    logger?.warn?.(`host adapter: sessionController.list 失败，活跃时间回退成创建时间: ${err instanceof Error ? err.message : String(err)}`);
+    logger?.warn?.(`host adapter: sessionController.list 失败，活跃时间回退成创建时间: ${errorMessage(err)}`);
   }
   return { recency, blank };
 }
@@ -503,7 +503,7 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
         return [{ id: workspace.id, title, path: workspace.path, sessionIds: [...sessionIds] }];
       });
     } catch (err) {
-      logger?.warn?.(`host adapter: workspaceRegistry.list 失败: ${err instanceof Error ? err.message : String(err)}`);
+      logger?.warn?.(`host adapter: workspaceRegistry.list 失败: ${errorMessage(err)}`);
       return [];
     }
   };
@@ -539,7 +539,7 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
         logger?.debug?.(`host adapter: attached session ${sessionId} to workspace ${workspace.path ?? cwd}`);
       } catch (err) {
         // 仅影响侧边栏展示，绝不打断消息处理；但属异常（cwd 不匹配/目录缺失等），warn 留痕
-        logger?.warn?.(`host adapter: workspace attach failed for ${sessionId}: ${err instanceof Error ? err.message : String(err)}`);
+        logger?.warn?.(`host adapter: workspace attach failed for ${sessionId}: ${errorMessage(err)}`);
       }
     },
 
@@ -590,7 +590,7 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
         const branch = await gitStdout(subprocess, git, directory, ['symbolic-ref', '-q', '--short', 'HEAD'], controller.signal);
         return { commit, ...(branch === undefined ? {} : { branch }) };
       } catch (err) {
-        logger?.debug?.(`host adapter: headOf 失败: ${err instanceof Error ? err.message : String(err)}`);
+        logger?.debug?.(`host adapter: headOf 失败: ${errorMessage(err)}`);
         return undefined;
       } finally {
         clearTimeout(timer);
@@ -603,7 +603,7 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
       try {
         return policy.resolve()?.mode;
       } catch (err) {
-        logger?.debug?.(`host adapter: sandboxPolicy.resolve 失败: ${err instanceof Error ? err.message : String(err)}`);
+        logger?.debug?.(`host adapter: sandboxPolicy.resolve 失败: ${errorMessage(err)}`);
         return undefined;
       }
     },
@@ -626,7 +626,7 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
             };
           });
       } catch (err) {
-        logger?.warn?.(`host adapter: sessionQuery.listSessions 失败: ${err instanceof Error ? err.message : String(err)}`);
+        logger?.warn?.(`host adapter: sessionQuery.listSessions 失败: ${errorMessage(err)}`);
         return [];
       }
     },
@@ -639,7 +639,7 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
         // 标题要读日志（每会话一次完整读取），失败只影响该条，绝不影响列表本身
         collectTitles(await query.readTitleSnapshots(ids), titles);
       } catch (err) {
-        logger?.warn?.(`host adapter: 批量读取会话标题失败: ${err instanceof Error ? err.message : String(err)}`);
+        logger?.warn?.(`host adapter: 批量读取会话标题失败: ${errorMessage(err)}`);
       }
       return titles;
     },
@@ -706,7 +706,7 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
  */
 function renameFailure(err: unknown): SessionRenameOutcome {
   const name = err instanceof Error ? err.name : '';
-  const message = err instanceof Error ? err.message : String(err);
+  const message = errorMessage(err);
   if (name === 'SessionTitleInvalidError') return { ok: false, reason: 'invalid', message };
   if (/not\s+(?:live|active|open)|disposed|closed/i.test(message)) {
     return { ok: false, reason: 'not-live', message };
@@ -731,7 +731,7 @@ function archiveFailure(
   verb: 'archive' | 'unarchive',
   sessionId: string,
 ): SessionArchiveOutcome {
-  const message = err instanceof Error ? err.message : String(err);
+  const message = errorMessage(err);
   const name = err instanceof Error ? err.name : '';
   if (name === 'WorkspaceUnknownSessionError') {
     return { ok: false, reason: 'not-found', message: `宿主找不到会话 ${sessionId}（可能已被删除）` };

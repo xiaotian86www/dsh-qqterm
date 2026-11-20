@@ -80,3 +80,40 @@ export function decodeButtonData(raw: string): ButtonData | undefined {
 
 /** 构建内联键盘的行数组（供 buildKeyboard/buildApprovalKeyboard 复用类型） */
 export type KeyboardRows = InlineKeyboard['content']['rows'];
+
+/** 键盘按钮（行内元素类型） */
+export type KeyboardButton = KeyboardRows[number]['buttons'][number];
+
+/** 回调按钮：`style` 1 是建议样式（蓝），0 是默认样式 */
+export interface CallbackButtonOptions {
+  id: string;
+  label: string;
+  /** 点击后的回显文案，纯文本（§4.1 允许 ✓ 前缀），不用图标 */
+  visitedLabel: string;
+  data: ButtonData;
+  style?: 0 | 1;
+}
+
+/**
+ * 构建一个回调按钮。
+ *
+ * 协议字段（`type: 1` = 回调、`permission: { type: 2 }` = 所有人可点、`click_limit: 1`）
+ * 只在这里写一次：四个 renderer 各拼一遍时，漏一个字段就是「点了没反应」。
+ * label 由 `buttonLabel()` 截断，调用方传完整文本即可。
+ */
+export function callbackButton(options: CallbackButtonOptions): KeyboardButton {
+  return {
+    id: options.id,
+    render_data: {
+      label: buttonLabel(options.label),
+      visited_label: options.visitedLabel,
+      style: options.style ?? 1,
+    },
+    action: {
+      type: 1,
+      permission: { type: 2 },
+      click_limit: 1,
+      data: encodeButtonData(options.data),
+    },
+  };
+}

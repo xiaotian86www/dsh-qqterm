@@ -5,6 +5,7 @@ import type { CommandDeps, SlashCommand } from './types.ts';
 import { parseRest } from './args.ts';
 import { ownerOnlyAuth } from './auth.ts';
 import { getScopePeer, sendMarkdownChunked } from '../shared/index.ts';
+import { commandLinkRaw } from '../shared/inline.ts';
 import { effortLabel } from '../model/effort-label.ts';
 
 export function modelCommand({ manager, config, logger }: CommandDeps): SlashCommand {
@@ -65,7 +66,7 @@ export function modelCommand({ manager, config, logger }: CommandDeps): SlashCom
               const isCurrent = current.provider === m.provider && current.model === m.id;
               const suffix = isCurrent ? ' ✅' : '';
               lines.push(
-                `<qqbot-cmd-input text="/model ${m.provider}/${m.id}" show="/model ${shortModelName(m.id, m.name)}${suffix}"/>`,
+                commandLinkRaw(`/model ${m.provider}/${m.id}`, `/model ${shortModelName(m.id, m.name)}${suffix}`),
               );
             }
           }

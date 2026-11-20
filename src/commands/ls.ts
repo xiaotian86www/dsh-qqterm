@@ -21,10 +21,12 @@ import type { CommandDeps, SlashCommand } from './types.ts';
 import { parseRest } from './args.ts';
 import type { ChatScope } from '../types.ts';
 import { getScopePeer, sendMarkdownChunked } from '../shared/index.ts';
+import { commandLinkRaw } from '../shared/inline.ts';
 import { sessionAdminAuth } from './sessions.ts';
 import { readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, isAbsolute, join, resolve } from 'node:path';
+import { errorMessage } from '../shared/utils.ts';
 
 /** 一次最多列多少个子目录（够逛，又不至于刷屏） */
 const MAX_ENTRIES = 40;
@@ -59,7 +61,7 @@ export function lsCommand({ manager, config, logger }: CommandDeps): SlashComman
       try {
         text = await renderListing(manager, scope, peerId, arg);
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
+        const message = errorMessage(err);
         logger?.warn(`/ls 失败: ${message}`);
         text = `⚠️ 列目录失败: ${message}`;
       }
@@ -124,25 +126,6 @@ function isDirectoryLink(parent: string, name: string): boolean {
   }
 }
 
-/** 目录条目：点一下把 `/ls <路径>` 填进输入框 */
-function dirButton(path: string, show: string): string {
-  return `<qqbot-cmd-input text="${attr(`/ls ${path}`)}" show="${attr(show)}"/>`;
-}
-
-/** 文件条目：点一下把 `/get <路径>` 填进输入框，直接发文件 */
-function fileButton(path: string, show: string): string {
-  return `<qqbot-cmd-input text="${attr(`/get ${path}`)}" show="${attr(show)}"/>`;
-}
-
-/** 属性值转义：目录名里出现引号/尖括号不能把按钮标签弄坏 */
-function attr(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/"/g, '&quot;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-}
-
 /** 渲染 `/ls` 的输出 */
 async function renderListing(
   manager: CommandDeps['manager'],
@@ -175,9 +158,10 @@ async function renderListing(
   ];
   const shown = entries.slice(0, MAX_ENTRIES);
   for (const entry of shown) {
-    lines.push(entry.dir
-      ? dirButton(join(target, entry.name), entry.name)
-      : fileButton(join(target, entry.name), entry.name));
+    const path = join(target, entry.name);
+    // 目录点一下填 `/ls <路径>`，文件点一下填 `/get <路径>` 直接发文件；
+    // 文件名不过净化，否则 `_` `~` 会被删掉，按钮上的名字和真实文件对不上
+    lines.push(commandLinkRaw(entry.dir ? `/ls ${path}` : `/get ${path}`, entry.name));
   }
   if (entries.length === 0) lines.push('（这里是空的）');
 

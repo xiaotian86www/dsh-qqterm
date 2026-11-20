@@ -10,6 +10,7 @@ import { join, resolve } from 'node:path';
 import type { Context } from '@deepseek-ai/cordis';
 import type { Logger } from '../types.ts';
 import { PLUGIN_HOME } from '../shared/dirs.ts';
+import { errorMessage } from '../shared/utils.ts';
 
 /** 富媒体下载根目录（attachment.ts 复用） */
 export const MEDIA_ROOT = resolve(PLUGIN_HOME, 'media');
@@ -42,7 +43,7 @@ export async function cleanupExpiredMedia(ttlHours: number, logger?: Logger): Pr
       logger?.debug(`qqterm: cleaned expired media: ${name}`);
       return true;
     } catch (err) {
-      logger?.warn(`qqterm: media cleanup failed for ${name}: ${err instanceof Error ? err.message : String(err)}`);
+      logger?.warn(`qqterm: media cleanup failed for ${name}: ${errorMessage(err)}`);
       return false;
     }
   }));
@@ -67,7 +68,7 @@ export function startMediaCleanup(ctx: Context, ttlHours: number, logger: Logger
       if (cleaned > 0) logger.info(`qqterm: cleaned ${cleaned} expired media files`);
     })
     .catch((err) => {
-      logger.warn(`qqterm: media cleanup failed: ${err instanceof Error ? err.message : String(err)}`);
+      logger.warn(`qqterm: media cleanup failed: ${errorMessage(err)}`);
     });
 
   (ctx as unknown as { effect(fn: () => (() => Promise<void>) | void, name?: string): void })
@@ -78,7 +79,7 @@ export function startMediaCleanup(ctx: Context, ttlHours: number, logger: Logger
             if (n > 0) logger.info(`qqterm: cleaned ${n} expired media files`);
           })
           .catch((err) => {
-            logger.warn(`qqterm: media cleanup failed: ${err instanceof Error ? err.message : String(err)}`);
+            logger.warn(`qqterm: media cleanup failed: ${errorMessage(err)}`);
           });
       }, CLEANUP_INTERVAL_MS);
 

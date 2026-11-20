@@ -28,6 +28,7 @@
  */
 import type { Context } from '@deepseek-ai/cordis';
 import type { QQBot } from '@tencent-connect/qqbot-nodejs';
+import type { SendText } from '../transport/send.ts';
 import {
   changedEntries,
   createSettledWatch,
@@ -81,6 +82,8 @@ export interface Reloader {
 export interface ReloaderOptions {
   /** 状态文件路径（单测注入临时目录，避免读写真实的 ~/.dsh-qqterm） */
   statePath?: string;
+  /** 发结果通知用的函数（bootstrap 注入 sender.text：分片 + 网络类重试） */
+  notify?: SendText;
 }
 
 /** 回复之后再重载：给被动回复留出送达时间 */
@@ -121,6 +124,7 @@ export function createReloader(ctx: Context, logger: Logger, options?: ReloaderO
    */
   const service = <T>(name: string): T | undefined => services.get?.(name) as T | undefined;
   const statePath = options?.statePath ?? reloadStatePath(resolveProfileDir(ctx));
+  const notify = options?.notify;
 
   /**
    * 结果投递串行化：新 fiber 的 ready 补发与「下次命令前补发」可能同时触发，
@@ -142,7 +146,9 @@ export function createReloader(ctx: Context, logger: Logger, options?: ReloaderO
     delivering = true;
     try {
       // 被动回复凭证由 ReplyStore 提供（msg_id 已落盘），这里只给投递目标
-      await bot.sendMarkdown({ scope: 'c2c', targetId: notice.targetId }, text);
+      // 注入过 notify 就走统一发送端口（分片 + 网络类重试）；命令层没有 sender 时退回原样
+      const send = notify ?? ((target: { scope: 'c2c'; targetId: string }, body: string) => bot.sendMarkdown(target, body));
+      await send({ scope: 'c2c', targetId: notice.targetId }, text);
       // 只清这一轮的 notify：发送期间可能已有新一轮写下了自己的通知
       const latest = readReloadState(statePath, logger);
       if (latest !== undefined && latest.startedAt === state.startedAt) {

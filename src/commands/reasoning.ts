@@ -8,6 +8,7 @@ import type { CommandDeps, SlashCommand } from './types.ts';
 import { parseRest } from './args.ts';
 import { ownerOnlyAuth } from './auth.ts';
 import { getScopePeer, sendMarkdownChunked } from '../shared/index.ts';
+import { commandLinkRaw } from '../shared/inline.ts';
 import { effortLabel } from '../model/effort-label.ts';
 import type { EffortOption } from '../model/types.ts';
 
@@ -48,7 +49,7 @@ export function reasoningCommand({ manager, config, logger }: CommandDeps): Slas
         for (const option of view.options) {
           const isCurrent = current?.id === option.id;
           lines.push(
-            `<qqbot-cmd-input text="/reasoning ${option.id}" show="/reasoning ${optionLabel(option)}${isCurrent ? ' ✅' : ''}"/>`,
+            commandLinkRaw(`/reasoning ${option.id}`, `/reasoning ${optionLabel(option)}${isCurrent ? ' ✅' : ''}`),
           );
         }
 

@@ -37,10 +37,10 @@ import type { CommandDeps, SlashCommand } from './types.ts';
 import { ownerOnlyAuth } from './auth.ts';
 import { parseArgs, quoteArg } from './args.ts';
 import { getScopePeer, formatRelativeTime, sendMarkdownChunked, shortSessionId } from '../shared/index.ts';
+import { cleanInline, clip, commandLink, commandLinkRaw } from '../shared/inline.ts';
 import type { ArchiveSessionOutcome, WorkspaceGroup, WorkspaceSession } from '../session/index.ts';
-
-/** 每页展示多少条（也是单次最多处理的目标数） */
-const PAGE_SIZE = 10;
+import { errorMessage } from '../shared/utils.ts';
+import { pageCount, pageLinks, pageOutOfRange, pageSlice } from '../shared/paging.ts';
 
 /** 标题渲染上限（日志标题可能很长） */
 const TITLE_MAX = 28;
@@ -48,29 +48,10 @@ const TITLE_MAX = 28;
 /** 一次最多处理多少个目标：够用，又不至于一条命令刷出几十行 */
 const MAX_TARGETS = 10;
 
-/** 行内展示文本的净化：换行会打散列表，markdown / 属性字符会破坏渲染 */
-function cleanInline(raw: string): string {
-  return raw
-    .replace(/[\r\n]+/g, ' ')
-    .replace(/[`*_~<>"']/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-/** 超长文本截断（标题、用户输入的错误回显共用） */
-function clip(raw: string, max = TITLE_MAX): string {
-  return raw.length > max ? `${raw.slice(0, max)}…` : raw;
-}
-
 /** 用户输入只用于展示：净化 + 截断，空值给 — */
 function safeArg(raw: string): string {
   const cleaned = cleanInline(raw);
-  return cleaned === '' ? '—' : clip(cleaned);
-}
-
-/** XML 属性值转义（`&` 在 QQ 的指令标签里必须先转义） */
-function attrValue(raw: string): string {
-  return raw.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+  return cleaned === '' ? '—' : clip(cleaned, TITLE_MAX);
 }
 
 /**
@@ -236,7 +217,7 @@ function displayId(id: string): string {
 function shortTitle(entry: WorkspaceSession): string {
   const raw = cleanInline(entry.title ?? '');
   if (raw === '') return '未命名会话';
-  return clip(raw);
+  return clip(raw, TITLE_MAX);
 }
 
 /**
@@ -250,7 +231,7 @@ function workspaceLink(path: string): string | undefined {
   // 路径带空格时必须加引号：切词器会把 `--dir` 的值截到第一个空格，后半截变成提示词
   const quoted = quoteArg(label);
   if (quoted === undefined) return undefined;
-  return `<qqbot-cmd-input text="${attrValue(`/new --dir ${quoted}`)}" show="${attrValue(label)}"/>`;
+  return commandLinkRaw(`/new --dir ${quoted}`, label);
 }
 
 /**
@@ -266,7 +247,7 @@ function workspaceHeader(
   missing: boolean,
   linkable = false,
 ): string[] {
-  const name = clip(cleanInline(title));
+  const name = clip(cleanInline(title), TITLE_MAX);
   if (path === '') {
     const label = name || '未分组';
     return missing ? [`**${label}**`, '⚠️ 目录不存在'] : [`**${label}**`];
@@ -333,16 +314,6 @@ function renderLine(entry: WorkspaceSession, label: string, extra = ''): string 
 }
 
 /**
- * 可点击命令：QQ 会把它渲染成按钮，点一下就把 `command` 填进输入框。
- *
- * 只用于**真能执行**的命令；`show` 是纯文本标签（不能再带 markdown）。
- */
-function commandLink(command: string, show: string): string {
-  const label = cleanInline(show) || command;
-  return `<qqbot-cmd-input text="${attrValue(command)}" show="${attrValue(label)}"/>`;
-}
-
-/**
  * 会话行尾的快捷操作：不改当前指针的三个动作，只给工作中的会话。
  *
  * - `回复`：把 `/to #短id ` 填进输入框，给这个会话发消息。当前会话本来就在跟它
@@ -379,20 +350,6 @@ function heldFooter(recoverId?: string, archivable = true): string {
     parts.push(commandLink(`/sessions resume ${displayId(recoverId)}`, '恢复当前'));
   }
   return parts.join(' · ');
-}
-
-/** 分页导航：多页时给出 上一页 · 第 x/y 页 · 下一页，缺哪边省略哪边 */
-function pageLinks(
-  page: number,
-  pages: number,
-  command: (page: number) => string,
-): string[] {
-  if (pages <= 1) return [];
-  const links: string[] = [];
-  if (page > 1) links.push(commandLink(command(page - 1), '上一页'));
-  links.push(`第 ${page}/${pages} 页`);
-  if (page < pages) links.push(commandLink(command(page + 1), '下一页'));
-  return links;
 }
 
 export function sessionsCommand({ manager, config, logger }: CommandDeps): SlashCommand {
@@ -440,7 +397,7 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Slash
           // 按工作区分组后排序：列表顺序固定，翻页不跳组
           return groupHeldOrder(entries);
         } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
+          const message = errorMessage(err);
           logger?.warn(`/sessions 列举工作中会话失败: ${message}`);
           return `⚠️ 读取工作中会话失败: ${message}`;
         }
@@ -450,7 +407,7 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Slash
         try {
           return await manager.listWorkspaceGroups(scope, peerId);
         } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
+          const message = errorMessage(err);
           logger?.warn(`/sessions all 列举工作区失败: ${message}`);
           return `⚠️ 读取工作区失败: ${message}`;
         }
@@ -512,7 +469,7 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Slash
             const groups = await loadGroups();
             if (typeof groups === 'string') return groups;
             // 只为当前页的行读标题：分组列表不知道会翻到哪一页，不能一次全读
-            const rows = pageSlice(groupRows(groups), page);
+            const rows = pageSlice(groupRows(groups), page).shown;
             await manager.fillSessionTitles(rows.map((row) => row.entry));
             return renderGroups(groups, page, archivable);
           }
@@ -521,7 +478,7 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Slash
             const groups = await loadGroups();
             if (typeof groups === 'string') return groups;
             const rows = archivedRows(groups);
-            await manager.fillSessionTitles(pageSlice(rows, page).map((row) => row.entry));
+            await manager.fillSessionTitles(pageSlice(rows, page).shown.map((row) => row.entry));
             return renderArchived(rows, page);
           }
 
@@ -579,7 +536,7 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Slash
 
             const outcome = manager.renameSession(target.entry.id, title);
             if (outcome.ok) {
-              return `✅ 会话名已改为「${clip(cleanInline(outcome.title))}」 · \`${displayId(target.entry.id)}\``;
+              return `✅ 会话名已改为「${clip(cleanInline(outcome.title), TITLE_MAX)}」 · \`${displayId(target.entry.id)}\``;
             }
             switch (outcome.reason) {
               case 'no-session':
@@ -621,7 +578,7 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Slash
                   ? '🗂 还没有任何会话'
                   : `⚠️ 没有未归档的会话 · ${commandLink('/sessions archived', '查看已归档')}`;
               }
-              await manager.fillSessionTitles(pageSlice(candidates, pickerPage));
+              await manager.fillSessionTitles(pageSlice(candidates, pickerPage).shown);
               return renderArchivePicker(candidates, pickerPage);
             }
 
@@ -803,13 +760,12 @@ function renderHeldList(
   archivable = true,
 ): string {
   const total = entries.length;
-  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const pages = pageCount(total);
   if (page < 1 || page > pages) {
-    return `⚠️ 第 ${page} 页没有内容（共 ${pages} 页） · ${commandLink('/sessions 1', '回到第 1 页')}`;
+    return pageOutOfRange(page, pages, (next) => `/sessions ${next}`);
   }
 
-  const start = (page - 1) * PAGE_SIZE;
-  const shown = total === 0 ? [] : entries.slice(start, start + PAGE_SIZE);
+  const shown = pageSlice(entries, page).shown;
   const workspaceCount = groupHeldEntries(entries).length;
   const subagentCount = entries.reduce((sum, entry) => sum + (entry.children?.length ?? 0), 0);
   const currentEntry = entries.find((entry) => entry.current);
@@ -879,13 +835,12 @@ function renderArchivePicker(
   page = 1,
 ): string {
   const total = entries.length;
-  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const pages = pageCount(total);
   if (page < 1 || page > pages) {
-    return `⚠️ 第 ${page} 页没有内容（共 ${pages} 页） · ${commandLink('/sessions archive 1', '回到第 1 页')}`;
+    return pageOutOfRange(page, pages, (next) => `/sessions archive ${next}`);
   }
 
-  const start = (page - 1) * PAGE_SIZE;
-  const shown = entries.slice(start, start + PAGE_SIZE);
+  const shown = pageSlice(entries, page).shown;
   const workspaceCount = groupHeldEntries(entries).length;
   const lines: string[] = [
     `### 🗄 归档候选（${workspaceCount} 个工作区 · ${total} 个会话）`,
@@ -904,17 +859,6 @@ function renderArchivePicker(
   if (nav.length > 0) lines.push('', nav.join(' · '));
   lines.push('', commandLink('/sessions', '工作中会话'));
   return lines.join('\n');
-}
-
-/**
- * 会话列表的一页切片。
- *
- * 命令在渲染前只给这一页补标题，切片方式必须与渲染一致，否则用户会看到
- * 「未命名会话」出现在别的行上。
- */
-function pageSlice<T>(items: readonly T[], page: number): T[] {
-  const start = (page - 1) * PAGE_SIZE;
-  return items.slice(start, start + PAGE_SIZE);
 }
 
 /**
@@ -964,13 +908,12 @@ function renderGroups(groups: readonly WorkspaceGroup[], page = 1, archivable = 
   const rows = groupRows(visible);
 
   const total = rows.length;
-  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const pages = pageCount(total);
   if (page < 1 || page > pages) {
-    return `⚠️ 第 ${page} 页没有内容（共 ${pages} 页） · ${commandLink('/sessions all 1', '回到第 1 页')}`;
+    return pageOutOfRange(page, pages, (next) => `/sessions all ${next}`);
   }
 
-  const start = (page - 1) * PAGE_SIZE;
-  const shown = rows.slice(start, start + PAGE_SIZE);
+  const shown = pageSlice(rows, page).shown;
   const lines: string[] = [
     `### 🗂 全部会话（${visible.length} 个工作区 · ${total} 个会话）`,
     '',
@@ -1052,13 +995,12 @@ function renderArchived(
     ].join('\n');
   }
 
-  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const pages = pageCount(total);
   if (page < 1 || page > pages) {
-    return `⚠️ 第 ${page} 页没有内容（共 ${pages} 页） · ${commandLink('/sessions archived 1', '回到第 1 页')}`;
+    return pageOutOfRange(page, pages, (next) => `/sessions archived ${next}`);
   }
 
-  const start = (page - 1) * PAGE_SIZE;
-  const shown = rows.slice(start, start + PAGE_SIZE);
+  const shown = pageSlice(rows, page).shown;
   const workspaceCount = new Set(rows.map((row) => row.group.id)).size;
   const lines: string[] = [
     `### 🗄 已归档（${workspaceCount} 个工作区 · ${total} 个会话）`,

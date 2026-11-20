@@ -7,6 +7,7 @@
  */
 import { spawn } from 'node:child_process';
 import type { Logger } from '../types.ts';
+import { errorMessage } from '../shared/utils.ts';
 
 /** 呈现策略接口：二维码事件的通知接收方 */
 export interface QrPresenter {
@@ -94,6 +95,6 @@ function openInBrowser(url: string, logger: Logger): void {
     });
     child.unref();
   } catch (err) {
-    logger.warn(`拉起浏览器失败: ${err instanceof Error ? err.message : String(err)}`);
+    logger.warn(`拉起浏览器失败: ${errorMessage(err)}`);
   }
 }

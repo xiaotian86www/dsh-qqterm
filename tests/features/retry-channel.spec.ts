@@ -6,6 +6,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import type { InteractionEvent } from '@tencent-connect/qqbot-nodejs';
+import { decorateSessionMessage } from '../../src/transport/session-source.ts';
 import { RetryChannel, type RetrySessionRecordLike } from '../../src/features/retry-channel.ts';
 import type { ChatScope, Logger, ReplyTarget } from '../../src/types.ts';
 
@@ -18,13 +19,34 @@ interface SentMessage {
   opts?: { keyboard?: unknown };
 }
 
-function createSender(sent: SentMessage[], opts?: { failKeyboard?: boolean; failAll?: boolean }) {
+function createSender(
+  sent: SentMessage[],
+  opts?: { failKeyboard?: boolean; failAll?: boolean; current?: boolean; title?: string },
+) {
+  const deliver = vi.fn(async (_target: ReplyTarget, content: string, o?: { keyboard?: unknown }) => {
+    if (opts?.failAll) throw new Error('send failed');
+    if (o?.keyboard && opts?.failKeyboard) throw new Error('keyboard not permitted');
+    sent.push({ text: content, opts: o });
+  });
   return {
-    sendMarkdown: vi.fn(async (_target: ReplyTarget, content: string, o?: { keyboard?: unknown }) => {
-      if (opts?.failAll) throw new Error('send failed');
-      if (o?.keyboard && opts?.failKeyboard) throw new Error('keyboard not permitted');
-      sent.push({ text: content, opts: o });
+    text: vi.fn(async (target: ReplyTarget, content: string) => deliver(target, content)),
+    card: vi.fn(async (
+      target: ReplyTarget,
+      content: string,
+      keyboard: unknown,
+      fallback?: string,
+    ) => {
+      try {
+        await deliver(target, content, { keyboard });
+      } catch (err) {
+        if (fallback === undefined) throw err;
+        await deliver(target, fallback);
+      }
     }),
+    // 署名规则只在 send.ts 里实现，测试直接复用同一函数
+    decorate: vi.fn((sessionId: string, body: string) => (
+      opts?.current === false ? decorateSessionMessage(body, sessionId, opts.title, false) : body
+    )),
   };
 }
 
@@ -51,24 +73,23 @@ function makeRecord(opts?: {
   return record;
 }
 
-function createManager(record: RetrySessionRecordLike | undefined, opts?: { current?: boolean; title?: string }) {
-  return {
-    getSessionRecord: () => record,
-    isCurrentSession: () => opts?.current ?? true,
-    sessionTitle: () => opts?.title,
-  };
-}
-
 function createChannel(
   record: RetrySessionRecordLike | undefined,
   sent: SentMessage[],
   opts?: { current?: boolean; title?: string; enabled?: boolean; timeoutMs?: number; failKeyboard?: boolean; failAll?: boolean },
 ) {
-  const sender = createSender(sent, { failKeyboard: opts?.failKeyboard, failAll: opts?.failAll });
+  const sender = createSender(sent, {
+    failKeyboard: opts?.failKeyboard,
+    failAll: opts?.failAll,
+    current: opts?.current,
+    title: opts?.title,
+  });
   const channel = new RetryChannel(
-    createManager(record, { current: opts?.current, title: opts?.title }),
     sender,
-    { retryOffer: { enabled: opts?.enabled ?? true, timeoutMs: opts?.timeoutMs ?? 60_000 } },
+    {
+      retryOffer: { enabled: opts?.enabled ?? true, timeoutMs: opts?.timeoutMs ?? 60_000 },
+      access: { owner: 'U1' },
+    },
     createLogger(),
   );
   return { channel, sender };
@@ -185,6 +206,16 @@ describe('RetryChannel.handleInteraction', () => {
   it('别人点不动这张卡', async () => {
     const sent: SentMessage[] = [];
     const record = makeRecord({ sessionId: 'sess-a', peerId: 'U1' });
+    const { channel } = createChannel(record, sent);
+    await channel.offer(record, failure, 1);
+
+    expect(channel.handleInteraction(click('sess-a', 'resend', 'U2'))).toBe(false);
+    expect(record.agent.followup).not.toHaveBeenCalled();
+  });
+
+  it('会话记录缺 peerId 时也按 owner 拒绝别人', async () => {
+    const sent: SentMessage[] = [];
+    const record = makeRecord({ sessionId: 'sess-a', peerId: null });
     const { channel } = createChannel(record, sent);
     await channel.offer(record, failure, 1);
 

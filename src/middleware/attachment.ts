@@ -8,6 +8,7 @@ import type { MiddlewareContext } from '@tencent-connect/qqbot-nodejs';
 import { downloadMediaAttachments } from '../transport/attachment.ts';
 import type { QQTermConfig } from '../config.ts';
 import type { Logger, QuotedAttachment, RawAttachment } from '../types.ts';
+import { errorMessage } from '../shared/utils.ts';
 
 export function attachmentProcessor(config: QQTermConfig, logger: Logger) {
   return async (ctx: MiddlewareContext, next: () => Promise<void>): Promise<void> => {
@@ -33,7 +34,7 @@ export function attachmentProcessor(config: QQTermConfig, logger: Logger) {
         ctx.state.downloadedQuoteFiles = downloadedQuote;
       }
     } catch (err) {
-      logger.warn(`qqterm: attachment download failed: ${err instanceof Error ? err.message : String(err)}`);
+      logger.warn(`qqterm: attachment download failed: ${errorMessage(err)}`);
     }
 
     await next();

@@ -5,7 +5,7 @@
  * 这里统一成「原因 + 下一步」两到三行，可重试的失败再挂两个按钮。
  */
 import type { InlineKeyboard } from '@tencent-connect/qqbot-nodejs';
-import { buttonLabel, encodeButtonData, type KeyboardRows } from './button-utils.ts';
+import { callbackButton, type KeyboardRows } from './button-utils.ts';
 
 /** 值得询问「是否重发」的失败码（瞬时故障；鉴权/参数类错误重发也不会变好） */
 export const RETRYABLE_FAILURE_CODES: ReadonlySet<string> = new Set([
@@ -103,34 +103,18 @@ export function buildRetryKeyboard(sessionId: string): InlineKeyboard {
   const rows: KeyboardRows = [
     {
       buttons: [
-        {
+        callbackButton({
           id: 'retry-resend',
-          render_data: { label: buttonLabel('🔁 重发'), visited_label: '✓ 已重发', style: 1 },
-          action: {
-            type: 1,
-            permission: { type: 2 },
-            click_limit: 1,
-            data: encodeButtonData({
-              t: 'retry',
-              s: sessionId,
-              d: 'resend',
-            }),
-          },
-        },
-        {
+          label: '🔁 重发',
+          visitedLabel: '✓ 已重发',
+          data: { t: 'retry', s: sessionId, d: 'resend' },
+        }),
+        callbackButton({
           id: 'retry-discard',
-          render_data: { label: buttonLabel('❌ 放弃'), visited_label: '✓ 已放弃', style: 1 },
-          action: {
-            type: 1,
-            permission: { type: 2 },
-            click_limit: 1,
-            data: encodeButtonData({
-              t: 'retry',
-              s: sessionId,
-              d: 'discard',
-            }),
-          },
-        },
+          label: '❌ 放弃',
+          visitedLabel: '✓ 已放弃',
+          data: { t: 'retry', s: sessionId, d: 'discard' },
+        }),
       ],
     },
   ];

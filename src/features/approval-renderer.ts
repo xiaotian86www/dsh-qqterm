@@ -6,7 +6,7 @@
 import type { InlineKeyboard } from '@tencent-connect/qqbot-nodejs';
 import type { ApprovalRequest } from './approval-channel.ts';
 import { sessionSourceHeader } from '../transport/session-source.ts';
-import { encodeButtonData } from './button-utils.ts';
+import { callbackButton } from './button-utils.ts';
 
 /** 渲染上下文：非当前会话的审批带来源行（id + 标题） */
 export interface ApprovalRenderContext {
@@ -57,31 +57,18 @@ export function buildApprovalText(
  * nonce 与 pending 匹配，旧卡片/其它会话卡片点击不 settle（#94-3）。
  */
 export function buildApprovalKeyboard(nonce: string, sessionId: string): InlineKeyboard {
-  const payload = (decision: 'allow' | 'deny'): string => encodeButtonData({
-    t: 'approval',
-    s: sessionId,
-    d: decision,
-    n: nonce,
-  });
-  const allow = {
+  const allow = callbackButton({
     id: 'approval-allow',
-    render_data: { label: '✅ 允许一次', visited_label: '✓ 已允许', style: 1 },
-    action: {
-      type: 1,
-      permission: { type: 2 },
-      click_limit: 1,
-      data: payload('allow'),
-    },
-  };
-  const deny = {
+    label: '✅ 允许一次',
+    visitedLabel: '✓ 已允许',
+    data: { t: 'approval', s: sessionId, d: 'allow', n: nonce },
+  });
+  const deny = callbackButton({
     id: 'approval-deny',
-    render_data: { label: '❌ 拒绝', visited_label: '✓ 已拒绝', style: 0 },
-    action: {
-      type: 1,
-      permission: { type: 2 },
-      click_limit: 1,
-      data: payload('deny'),
-    },
-  };
+    label: '❌ 拒绝',
+    visitedLabel: '✓ 已拒绝',
+    style: 0,
+    data: { t: 'approval', s: sessionId, d: 'deny', n: nonce },
+  });
   return { content: { rows: [{ buttons: [allow, deny] }] } };
 }
