@@ -286,13 +286,12 @@ function workspaceHeader(
  * 持有列表里的会话状态。
  *
  * 其它视图不展示状态，只标 `📌`；状态词只出现在 `/sessions` 默认视图。
- * 重启后还没打开的冷会话没有可报的状态，返回 undefined：不显示状态段，
- * 也不写成「空闲」（把没恢复说成空着会误导）。
+ * 重启后还没打开的会话没有生成现场，按「空闲」列出：列表里只有「生成中 /
+ * 空闲」两档，不存在「待恢复」这一档。
  */
-function statusOf(entry: WorkspaceSession): string | undefined {
+function statusOf(entry: WorkspaceSession): string {
   if (entry.subagent) return entry.live ? '生成中' : '空闲';
-  if (entry.held || entry.live) return entry.running ? '生成中' : '空闲';
-  return undefined;
+  return entry.running ? '生成中' : '空闲';
 }
 
 /** 一行会话的展示文本：`#9d2c4410 · 标题 · 生成中 · 3d 前 ✅` */
@@ -311,10 +310,7 @@ function renderRow(entry: WorkspaceSession, options: RowOptions = {}): string {
   body.push(shortTitle(entry));
   // 子会话紧跟父行，纯文本行没有缩进与按钮，用这个词说明自己不是独立会话
   if (entry.subagent) body.push('子会话');
-  if (options.showStatus) {
-    const status = statusOf(entry);
-    if (status !== undefined) body.push(status);
-  }
+  if (options.showStatus) body.push(statusOf(entry));
   const time = formatRelativeTime(entry.updatedAt);
   if (time !== '—') body.push(time);
   // 持有标记固定放行尾
@@ -803,10 +799,9 @@ function renderHeldList(
   // 当前项不在这一页时单独补一行：翻到第 2 页也能看到当前是哪个。
   // 指针指向的会话不在名单里（例如刚 /new 过或名册被清）就只给 id，不编状态。
   if (currentLineId !== undefined) {
-    const status = currentEntry === undefined ? undefined : statusOf(currentEntry);
-    fields.push(status === undefined
+    fields.push(currentEntry === undefined
       ? `**当前**: ${displayId(currentLineId)}`
-      : `**当前**: ${displayId(currentLineId)} · ${status}`);
+      : `**当前**: ${displayId(currentLineId)} · ${statusOf(currentEntry)}`);
   }
 
   const lines: string[] = [

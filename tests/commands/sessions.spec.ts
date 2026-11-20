@@ -258,7 +258,7 @@ describe('/sessions 持有视图', () => {
     expect(text).not.toContain(' ✅');
   });
 
-  it('重启后还没打开的会话列出但不显示状态（不说成空闲）', async () => {
+  it('重启后还没打开的会话也按空闲列出，不出现「待恢复」', async () => {
     const manager = makeManager({
       listHeldSessions: vi.fn(async () => [
         entry({ id: 'session-cold1111', title: '旧会话', held: false, live: false, running: false }),
@@ -266,9 +266,8 @@ describe('/sessions 持有视图', () => {
     });
     const text = await run(manager, '');
 
-    expect(text).toContain('#cold1111 · 旧会话');
+    expect(text).toContain('#cold1111 · 旧会话 · 空闲');
     expect(text).not.toContain('待恢复');
-    expect(text).not.toContain('空闲');
   });
 
   it('跨工作区的持有项按工作区分组，行内不重复工作区名', async () => {
