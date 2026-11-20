@@ -8,10 +8,12 @@
  * 只在 turn/end 的失败可重试（RETRYABLE_FAILURE_CODES）且拿到原文时挂按钮；
  * 卡片超时、会话回收、用户点「放弃」都会清掉待重发状态。
  */
-import type { InlineKeyboard, InteractionEvent } from '@tencent-connect/qqbot-nodejs';
+import type { InteractionEvent } from '@tencent-connect/qqbot-nodejs';
 import type { ChatScope, Logger, ReplyTarget } from '../types.ts';
+import type { Sender } from '../transport/send.ts';
 import { createQQUserMessage } from '../session/user-message.ts';
-import { sessionSourceHeader } from '../transport/session-source.ts';
+import { isOwner, errorMessage } from '../shared/utils.ts';
+import type { ChannelSender } from '../transport/send.ts';
 import { buildRetryKeyboard, formatRetryOffer, type TurnFailureInfo } from './retry-renderer.ts';
 import { decodeButtonData } from './button-utils.ts';
 
@@ -28,20 +30,9 @@ export interface RetrySessionRecordLike {
   agent: { followup(message: unknown): void };
 }
 
-export interface RetryChannelManagerLike {
-  getSessionRecord(scope: ChatScope, peerId: string): RetrySessionRecordLike | undefined;
-  /** 目标是不是当前聊天接的会话；缺省按 true */
-  isCurrentSession?(sessionId: string): boolean;
-  /** 会话标题（非当前会话的来源行用） */
-  sessionTitle?(sessionId: string): string | undefined;
-}
-
-export interface RetryChannelSenderLike {
-  sendMarkdown(target: ReplyTarget, content: string, opts?: { keyboard?: InlineKeyboard }): Promise<unknown>;
-}
-
 export interface RetryChannelConfigLike {
   retryOffer: { enabled: boolean; timeoutMs: number };
+  access: { owner: string };
 }
 
 interface PendingRetry {
@@ -52,18 +43,16 @@ interface PendingRetry {
 export class RetryChannel {
   /** 待确认的重发：sessionId → 状态（同一会话只留最新一张卡） */
   private readonly pending = new Map<string, PendingRetry>();
-  private readonly manager: RetryChannelManagerLike;
-  private readonly sender: RetryChannelSenderLike;
+  /** 卡片 / 文本 + 非当前会话署名：署名规则只在 sender 里实现一次 */
+  private readonly sender: ChannelSender & Pick<Sender, 'decorate'>;
   private readonly config: RetryChannelConfigLike;
   private readonly logger: Logger;
 
   public constructor(
-    manager: RetryChannelManagerLike,
-    sender: RetryChannelSenderLike,
+    sender: ChannelSender & Pick<Sender, 'decorate'>,
     config: RetryChannelConfigLike,
     logger: Logger,
   ) {
-    this.manager = manager;
     this.sender = sender;
     this.config = config;
     this.logger = logger;
@@ -95,20 +84,16 @@ export class RetryChannel {
 
     let delivered = false;
     try {
-      await this.sender.sendMarkdown(record.replyTarget, this.decorate(sessionId, formatRetryOffer(failure, retries, true)), {
-        keyboard: buildRetryKeyboard(sessionId),
-      });
+      // 带按钮的正文 + 无按钮兜底一起交给 sender：键盘不可用时正文仍有下一步（发 /retry）
+      await this.sender.card(
+        record.replyTarget,
+        this.sender.decorate(sessionId, formatRetryOffer(failure, retries, true)),
+        buildRetryKeyboard(sessionId),
+        this.sender.decorate(sessionId, formatRetryOffer(failure, retries, false)),
+      );
       delivered = true;
     } catch (err) {
-      // 键盘通道不可用时，正文仍然要有下一步（发 /retry），不能静默丢消息
-      console.warn('[qqterm] retry keyboard send failed:', err);
-      this.logger.warn(`qqterm: retry keyboard send failed, fallback to text: ${err instanceof Error ? err.message : String(err)}`);
-      try {
-        await this.sender.sendMarkdown(record.replyTarget, this.decorate(sessionId, formatRetryOffer(failure, retries, false)));
-        delivered = true;
-      } catch (fallbackErr) {
-        this.logger.error(`qqterm: retry notice send failed: ${fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)}`);
-      }
+      this.logger.error(`qqterm: retry notice send failed: ${errorMessage(err)}`);
     }
     // 降级成纯文本时不再有待确认状态：按钮不存在，等待也没有意义
     if (!delivered) return false;
@@ -126,6 +111,8 @@ export class RetryChannel {
   public handleInteraction(event: InteractionEvent): boolean {
     const peerId = event.user_openid;
     if (!peerId) return false;
+    // 重发卡也只认绑定用户：会话记录缺 peerId 时同样不能放行
+    if (!isOwner(this.config.access.owner, peerId)) return false;
 
     const raw = event.data?.resolved?.button_data;
     if (!raw) return false;
@@ -170,7 +157,7 @@ export class RetryChannel {
     try {
       record.agent.followup(createQQUserMessage(prompt));
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       this.logger.error(`qqterm: retry followup failed sessionId=${sessionId}: ${message}`);
       void this.send(record, sessionId, `⚠️ 重发失败: ${message}\n稍等片刻再发一次。`);
       return;
@@ -187,18 +174,12 @@ export class RetryChannel {
     this.logger.debug(`qqterm: retry offer expired sessionId=${sessionId}`);
   }
 
-  /** 会话内提示：非当前会话加来源行（与问答 / 审批同一套标记） */
-  private decorate(sessionId: string, body: string): string {
-    if (this.manager.isCurrentSession?.(sessionId) ?? true) return body;
-    return `${sessionSourceHeader(sessionId, this.manager.sessionTitle?.(sessionId))}\n\n${body}`;
-  }
-
   private send(record: RetrySessionRecordLike, sessionId: string, body: string): Promise<void> {
     return this.sender
-      .sendMarkdown(record.replyTarget, this.decorate(sessionId, body))
+      .text(record.replyTarget, this.sender.decorate(sessionId, body))
       .then(() => {})
       .catch((err: unknown) => {
-        this.logger.error(`qqterm: retry reply send failed: ${err instanceof Error ? err.message : String(err)}`);
+        this.logger.error(`qqterm: retry reply send failed: ${errorMessage(err)}`);
       });
   }
 }

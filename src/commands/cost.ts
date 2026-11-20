@@ -8,12 +8,7 @@
  *   assistant/message.data.usage.inputTokens/outputTokens/cacheReadTokens/cacheWriteTokens
  */
 import type { CommandDeps, SlashCommand } from './types.ts';
-import { getScopePeer, sendMarkdownChunked } from '../shared/index.ts';
-
-/** 千分位（不用本地化，避免不同环境分隔符不一致） */
-function num(n: number): string {
-  return n.toLocaleString('en-US');
-}
+import { getScopePeer, num, sendMarkdownChunked } from '../shared/index.ts';
 
 export function costCommand({ manager, config }: CommandDeps): SlashCommand {
   return {

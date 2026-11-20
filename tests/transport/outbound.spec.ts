@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createOutboundHandler } from '../../src/transport/outbound.ts';
+import { sessionTitleOf } from '../../src/transport/session-source.ts';
 import type { QQBotSender } from '../../src/transport/outbound.ts';
 import type { SessionManager, SessionRecord } from '../../src/session/index.ts';
 import type { QQTermConfig } from '../../src/config.ts';
@@ -67,6 +68,8 @@ function setup(opts?: {
     isCurrentSession: vi.fn(() => opts?.current ?? true),
     directoryForAgent: vi.fn(() => opts?.dir),
     workspaceRegistryAvailable: vi.fn(() => opts?.archivable ?? false),
+    // 真实 SessionManager 的标题来自会话日志；假 manager 也按同一来源给
+    sessionTitle: vi.fn((id: string) => (id === 'sess-qq' ? sessionTitleOf(record) : undefined)),
     ...(opts?.retryChannel !== undefined ? { retryChannel: opts.retryChannel } : {}),
   } as unknown as SessionManager;
   const outbound = createOutboundHandler(

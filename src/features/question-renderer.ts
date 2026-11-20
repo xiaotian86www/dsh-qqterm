@@ -6,7 +6,7 @@
 import type { InlineKeyboard } from '@tencent-connect/qqbot-nodejs';
 import type { UserQuestion } from './question-channel.ts';
 import { sessionReplyLink, sessionResumeLink, sessionSourceHeader } from '../transport/session-source.ts';
-import { BUTTONS_PER_ROW, buttonLabel, encodeButtonData } from './button-utils.ts';
+import { BUTTONS_PER_ROW, callbackButton } from './button-utils.ts';
 
 /** 渲染上下文：非当前会话加来源行（id + 标题），无按钮时给回答 / 恢复链接 */
 export interface QuestionRenderContext {
@@ -34,27 +34,14 @@ export function buildKeyboard(question: UserQuestion, sessionId: string): Inline
       rows.push({
         buttons: opts.slice(i, i + BUTTONS_PER_ROW).map((o, offset) => {
           const idx = i + offset;
-          return {
+          // 互斥交给状态机：首答即结算，后续点击因 pending 已清或问题 id
+          // 不匹配而被忽略，不需要键盘层面的分组约束。
+          return callbackButton({
             id: `q-${question.id}-opt-${idx}`,
-            render_data: {
-              label: buttonLabel(o.label),
-              visited_label: '✓ 已选',
-              style: 1,
-            },
-            action: {
-              type: 1,
-              permission: { type: 2 },
-              click_limit: 1,
-              data: encodeButtonData({
-                t: 'question',
-                s: sessionId,
-                q: question.id,
-                i: idx,
-              }),
-            },
-            // 互斥交给状态机：首答即结算，后续点击因 pending 已清或问题 id
-            // 不匹配而被忽略，不需要键盘层面的分组约束。
-          };
+            label: o.label,
+            visitedLabel: '✓ 已选',
+            data: { t: 'question', s: sessionId, q: question.id, i: idx },
+          });
         }),
       });
     }

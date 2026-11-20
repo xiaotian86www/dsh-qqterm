@@ -13,6 +13,7 @@ import * as dns from 'node:dns';
 import type { Logger, RawAttachment } from '../types.ts';
 import type { MediaConfig } from '../config.ts';
 import { MEDIA_ROOT } from '../media/media-cleaner.ts';
+import { errorMessage } from '../shared/utils.ts';
 
 /** 下载超时（毫秒） */
 const DOWNLOAD_TIMEOUT_MS = 120_000;
@@ -208,7 +209,7 @@ export async function downloadMediaAttachments(
     try {
       buf = await download(att.url, maxBytes);
     } catch (err) {
-      logger.warn(`qqterm: download failed: ${att.filename} — ${err instanceof Error ? err.message : String(err)}`);
+      logger.warn(`qqterm: download failed: ${att.filename} — ${errorMessage(err)}`);
       continue; // 下载失败不加入结果，由 buildDynamicCtx 回退为描述
     }
 

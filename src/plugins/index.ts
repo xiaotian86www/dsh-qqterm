@@ -25,6 +25,7 @@ import {
   type LoaderLike,
 } from '../shared/index.ts';
 import type { Logger } from '../types.ts';
+import type { SendText } from '../transport/send.ts';
 import {
   describePluginOpState,
   pluginOpStatePath,
@@ -91,6 +92,8 @@ export interface PluginInstaller {
 export interface PluginInstallerOptions {
   /** 状态文件路径（单测注入临时目录，避免读写真实的 ~/.dsh-qqterm） */
   statePath?: string;
+  /** 发结果通知用的函数（bootstrap 注入 sender.text：分片 + 网络类重试） */
+  notify?: SendText;
   /** 更新检查结果的路径（默认与状态文件同目录） */
   updatesPath?: string;
 }
@@ -150,6 +153,7 @@ export function createPluginInstaller(
   // 提前抓 loader：本插件被换掉之后旧 ctx 就不可再访问，而 loader 属于宿主
   const loader = services.get?.('loader') as LoaderLike | undefined;
   const statePath = options?.statePath ?? pluginOpStatePath(resolveProfileDir(ctx));
+  const notify = options?.notify;
   const updatesPath = options?.updatesPath ?? pluginUpdateCachePath(resolveProfileDir(ctx));
 
   /** 结果投递串行化：新 fiber 的 ready 与「下一条命令前补发」可能同时触发 */
@@ -164,7 +168,9 @@ export function createPluginInstaller(
     delivering = true;
     try {
       // 被动回复凭证由 ReplyStore 提供（msg_id 已落盘），这里只给投递目标
-      await bot.sendMarkdown({ scope: 'c2c', targetId: notice.targetId }, text);
+      // 注入过 notify 就走统一发送端口（分片 + 网络类重试）；命令层没有 sender 时退回原样
+      const send = notify ?? ((target: { scope: 'c2c'; targetId: string }, body: string) => bot.sendMarkdown(target, body));
+      await send({ scope: 'c2c', targetId: notice.targetId }, text);
       // 只清这一轮的 notify：发送期间可能已有新一轮写下了自己的通知
       const latest = readPluginOpState(statePath, logger);
       if (latest !== undefined && latest.startedAt === state.startedAt) {

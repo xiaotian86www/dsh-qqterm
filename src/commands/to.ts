@@ -14,6 +14,7 @@ import { getScopePeer, shortSessionId } from '../shared/index.ts';
 import { sessionTargetLabel, sessionTitleOf } from '../transport/session-source.ts';
 import { resolveSessionTarget } from './sessions.ts';
 import type { SessionRecord, WorkspaceGroup, WorkspaceSession } from '../session/index.ts';
+import { errorMessage } from '../shared/utils.ts';
 
 const USAGE = [
   '### 📖 /to 用法',
@@ -65,7 +66,7 @@ export function toCommand({ manager, logger }: CommandDeps): SlashCommand {
         const resolved = resolveSessionTarget(flattenGroups(groups), targetArg);
         if (resolved.ok) target = resolved.entry;
       } catch (err) {
-        logger?.warn(`/to 列举会话失败: ${err instanceof Error ? err.message : String(err)}`);
+        logger?.warn(`/to 列举会话失败: ${errorMessage(err)}`);
       }
 
       // 列表里没有（例如 live 但没有 cwd）时，允许直接用完整 id

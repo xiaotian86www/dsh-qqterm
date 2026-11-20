@@ -7,6 +7,7 @@
  */
 import type { CommandDeps, SlashCommand } from './types.ts';
 import { sendMarkdownChunked } from '../shared/index.ts';
+import { commandLink } from '../shared/inline.ts';
 
 /** 命令的主名：name 可能是数组，第一项是主名 */
 function primaryName(cmd: SlashCommand): string {
@@ -62,7 +63,7 @@ export function helpCommand(
         if (cmd.hidden) continue;
         const name = primaryName(cmd);
         // 点击填 `/help <命令>` 而不是直接执行：看用法不会误触发换会话、发文件
-        lines.push(`<qqbot-cmd-input text="/help ${name}" show="/${name}"/> ${cmd.description ?? ''}`);
+        lines.push(`${commandLink(`/help ${name}`, `/${name}`)} ${cmd.description ?? ''}`);
       }
 
       await sendMarkdownChunked(cmdCtx, lines.join('\n'), config.textChunkLimit);

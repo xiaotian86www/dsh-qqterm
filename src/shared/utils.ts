@@ -172,9 +172,19 @@ export function resolveProfileDir(ctxLike?: unknown): string | undefined {
   return getProfileDir() ?? undefined;
 }
 
+/** 千分位（固定 en-US，避免不同环境的本地化分隔符不一致） */
+export function num(n: number): string {
+  return n.toLocaleString('en-US');
+}
+
+/** 错误消息：日志与用户文案用完整消息，需要限长再用 errorText */
+export function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 /** 错误消息截断：状态文件只留够排障的一行，不落整个堆栈 */
 export function errorText(err: unknown, limit = 300): string {
-  const text = err instanceof Error ? err.message : String(err);
+  const text = errorMessage(err);
   return text.length <= limit ? text : `${text.slice(0, limit)}…`;
 }
 
@@ -218,6 +228,18 @@ export function formatRelativeTime(ts?: number): string {
  */
 export function optionalService<T>(ctxLike: unknown, name: string): T | undefined {
   return (ctxLike as { get(serviceName: string): unknown }).get(name) as T | undefined;
+}
+
+/**
+ * 唯一白名单用户判定
+ *
+ * 所有入站入口共用同一条 fail-closed 规则：owner 去空白后必须非空，
+ * 请求里的身份必须与它完全一致。owner 未配置、只填空格、身份缺失或
+ * 不匹配，一律不是 owner。
+ */
+export function isOwner(owner: string, openid: string | undefined): boolean {
+  const trimmed = owner.trim();
+  return trimmed !== '' && openid === trimmed;
 }
 
 /** 宿主 HMR 事务的 AsyncLocalStorage 形状（只用到判断与退出） */

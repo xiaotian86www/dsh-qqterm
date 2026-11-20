@@ -12,6 +12,7 @@ import type { DshAgentRegistry } from './session/index.ts';
 import { getProfileDir, outsideHmrTransaction, resolveEnv } from './shared/index.ts';
 import { ensureCredentials, persistCredentialsToProfile, registerBoundCredentialRoutes } from './setup/index.ts';
 import type { Logger } from './types.ts';
+import { errorMessage } from './shared/utils.ts';
 
 // ── Cordis 插件元数据 ──
 export const name = 'qqterm';
@@ -104,7 +105,7 @@ export async function apply(ctx: Context, config: QQTermConfig): Promise<void> {
             appSecret: credentials.appSecret,
           }, logger)).catch((err: unknown) => {
             boundAppId = null;
-            logger.error(`网关启动失败: ${err instanceof Error ? err.message : String(err)}`);
+            logger.error(`网关启动失败: ${errorMessage(err)}`);
           });
         };
 
@@ -123,7 +124,7 @@ export async function apply(ctx: Context, config: QQTermConfig): Promise<void> {
       })
       .catch((err: unknown) => {
         // 全兜：unhandled rejection 会被宿主 fail-loud 判致命
-        logger.error(`扫码绑定流程异常: ${err instanceof Error ? err.message : String(err)}`);
+        logger.error(`扫码绑定流程异常: ${errorMessage(err)}`);
       });
 
     // apply 立即完成，插件 fiber 进入 ACTIVE，Host ready 不再被阻塞

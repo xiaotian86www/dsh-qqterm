@@ -7,11 +7,13 @@
  * 都会作废旧卡片。
  *
  * 与 RetryChannel 同一套键盘协议（button_data 顶层 `t`），点击由
- * `dispatchInteraction` 路由过来；owner 校验在网关侧完成。
+ * `dispatchInteraction` 路由过来；网关先行过滤，通道内再复核一次 owner。
  */
 import type { InlineKeyboard, InteractionEvent } from '@tencent-connect/qqbot-nodejs';
 import type { Logger, ReplyTarget } from '../types.ts';
-import { buttonLabel, decodeButtonData, encodeButtonData } from './button-utils.ts';
+import { isOwner, errorMessage } from '../shared/utils.ts';
+import type { ChannelSender } from '../transport/send.ts';
+import { callbackButton, decodeButtonData } from './button-utils.ts';
 
 /** 确认卡有效期：过期的按钮点了没有任何反应 */
 const CONFIRM_TTL_MS = 5 * 60_000;
@@ -32,8 +34,8 @@ export interface SessionConfirmManagerLike {
   currentSessionId?(): string | undefined;
 }
 
-export interface SessionConfirmSenderLike {
-  sendMarkdown(target: ReplyTarget, content: string, opts?: { keyboard?: InlineKeyboard }): Promise<unknown>;
+export interface SessionConfirmConfigLike {
+  access: { owner: string };
 }
 
 interface PendingConfirm {
@@ -60,31 +62,19 @@ function confirmText(action: SessionConfirmAction): string {
 
 /** 两个按钮：确认 / 取消，button_data 带 nonce 与决策 */
 export function buildConfirmKeyboard(nonce: string): InlineKeyboard {
-  const payload = (decision: 'yes' | 'no'): string => encodeButtonData({ t: 'confirm', n: nonce, d: decision });
-  const confirm = {
+  const confirm = callbackButton({
     id: `confirm-yes-${nonce}`,
-    render_data: {
-      label: buttonLabel('✅ 确认'),
-      visited_label: '✓ 已确认',
-      style: 1,
-    },
-    action: {
-      type: 1,
-      permission: { type: 2 },
-      click_limit: 1,
-      data: payload('yes'),
-    },
-  };
-  const cancel = {
+    label: '✅ 确认',
+    visitedLabel: '✓ 已确认',
+    data: { t: 'confirm', n: nonce, d: 'yes' },
+  });
+  const cancel = callbackButton({
     id: `confirm-no-${nonce}`,
-    render_data: { label: buttonLabel('❌ 取消'), visited_label: '✓ 已取消', style: 0 },
-    action: {
-      type: 1,
-      permission: { type: 2 },
-      click_limit: 1,
-      data: payload('no'),
-    },
-  };
+    label: '❌ 取消',
+    visitedLabel: '✓ 已取消',
+    style: 0,
+    data: { t: 'confirm', n: nonce, d: 'no' },
+  });
   return { content: { rows: [{ buttons: [confirm, cancel] }] } };
 }
 
@@ -95,12 +85,19 @@ export class SessionConfirmChannel {
   /** 同一聊天只留最新一张卡：发新卡即作废旧卡 */
   private pending?: PendingConfirm & { nonce: string };
   private readonly manager: SessionConfirmManagerLike;
-  private readonly sender: SessionConfirmSenderLike;
+  private readonly sender: ChannelSender;
+  private readonly config: SessionConfirmConfigLike;
   private readonly logger: Logger;
 
-  public constructor(manager: SessionConfirmManagerLike, sender: SessionConfirmSenderLike, logger: Logger) {
+  public constructor(
+    manager: SessionConfirmManagerLike,
+    sender: ChannelSender,
+    config: SessionConfirmConfigLike,
+    logger: Logger,
+  ) {
     this.manager = manager;
     this.sender = sender;
+    this.config = config;
     this.logger = logger;
   }
 
@@ -114,11 +111,10 @@ export class SessionConfirmChannel {
     this.cancelPending();
     const nonce = `${Date.now().toString(36)}-${(nonceSeq++).toString(36)}`;
     try {
-      await this.sender.sendMarkdown(request.target, confirmText(request.action), {
-        keyboard: buildConfirmKeyboard(nonce),
-      });
+      // 不给纯文本兜底：没有按钮的确认卡点了也不会执行，发出去只会误导
+      await this.sender.card(request.target, confirmText(request.action), buildConfirmKeyboard(nonce));
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       this.logger.warn(`qqterm: session confirm send failed: ${message}`);
       return false;
     }
@@ -131,6 +127,9 @@ export class SessionConfirmChannel {
 
   /** 按钮点击：只认最新一张卡的 nonce，过期 / 旧卡片的点击直接忽略 */
   public handleInteraction(event: InteractionEvent): boolean {
+    // 确认卡只认绑定用户：网关之外再复核，分发层变化时也不至于失守
+    if (!isOwner(this.config.access.owner, event.user_openid)) return false;
+
     const raw = event.data?.resolved?.button_data;
     if (!raw) return false;
     const button = decodeButtonData(raw);
@@ -173,7 +172,7 @@ export class SessionConfirmChannel {
     try {
       await this.reply(pending.target, await pending.run());
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       this.logger.error(`qqterm: session confirm action failed: ${message}`);
       await this.reply(pending.target, `❌ 操作失败: ${message}\n稍等片刻再试一次。`);
     }
@@ -181,10 +180,10 @@ export class SessionConfirmChannel {
 
   private reply(target: ReplyTarget, text: string): Promise<void> {
     return this.sender
-      .sendMarkdown(target, text)
+      .text(target, text)
       .then(() => {})
       .catch((err: unknown) => {
-        this.logger.error(`qqterm: session confirm reply failed: ${err instanceof Error ? err.message : String(err)}`);
+        this.logger.error(`qqterm: session confirm reply failed: ${errorMessage(err)}`);
       });
   }
 }

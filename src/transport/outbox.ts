@@ -12,6 +12,7 @@
  * 说明整条渠道失效，交给 onChannelBroken 释放全部持有的会话。
  */
 import type { Logger } from '../types.ts';
+import { errorMessage } from '../shared/utils.ts';
 
 /** 失败分类：决定「重试一次」「就地降级」还是「渠道判死」 */
 export type DeliveryFailure = 'transient' | 'too-long' | 'blocked' | 'auth';
@@ -125,14 +126,14 @@ export function classifyDeliveryError(err: unknown): DeliveryFailure {
   const code = codeOf(err);
   if (code !== undefined && TRANSIENT_CODES.has(code)) return 'transient';
 
-  const message = err instanceof Error ? err.message : String(err);
+  const message = errorMessage(err);
   if (TOO_LONG_RE.test(message)) return 'too-long';
   if (BLOCKED_RE.test(message)) return 'blocked';
   return 'transient';
 }
 
 function errorText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
+  return errorMessage(err);
 }
 
 /**

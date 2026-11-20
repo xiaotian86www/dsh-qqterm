@@ -12,6 +12,7 @@ import type { Logger } from '../types.ts';
 import type { QrPresenter } from './presenters.ts';
 import { renderQrSvgDataUrl } from './qr-svg.ts';
 import type { SetupCredentials } from './persist.ts';
+import { errorMessage } from '../shared/utils.ts';
 
 /** connector 连接函数签名（可注入便于测试） */
 export type ConnectFn = (callbacks: QrConnectCallbacks, options?: QrConnectOptions) => () => void;
@@ -134,7 +135,7 @@ export class BindingService {
         credentials = await this.connectOnce(generation);
       } catch (err) {
         if (this.disposed) return null;
-        const reason = err instanceof Error ? err.message : String(err);
+        const reason = errorMessage(err);
         this.setPhase({ kind: 'failed', reason });
         console.error(`[qqterm] 扫码绑定失败: ${reason}`);
         return null;
@@ -196,7 +197,7 @@ export class BindingService {
     try {
       qrSvg = await this.renderQrFn(url);
     } catch (err) {
-      this.logger.warn(`qqterm: 二维码 SVG 渲染失败（页面将降级为链接）: ${err instanceof Error ? err.message : String(err)}`);
+      this.logger.warn(`qqterm: 二维码 SVG 渲染失败（页面将降级为链接）: ${errorMessage(err)}`);
     }
     // 渲染期间可能已被 refresh/dispose 淘汰
     if (generation !== this.runId || this.disposed) return;

@@ -13,6 +13,7 @@
  */
 import type { SessionEventLike, SessionRecord } from '../session/index.ts';
 import { shortSessionId } from '../shared/utils.ts';
+import { commandLink } from '../shared/inline.ts';
 
 /** 标题在来源行里的展示上限（日志标题可能很长，来源行要保持一行） */
 const TITLE_MAX = 20;
@@ -61,12 +62,12 @@ export function sessionSourceHeader(sessionId: string, title?: string): string {
  * `show` 只写动作，不再跟 `#短id`：id 已经在首行署名里，重复一遍只是噪音。
  */
 export function sessionReplyLink(sessionId: string, label = '回复'): string {
-  return `<qqbot-cmd-input text="/to #${shortSessionId(sessionId)} " show="${label}"/>`;
+  return commandLink(`/to #${shortSessionId(sessionId)} `, label);
 }
 
 /** 恢复链接：把这个会话切回当前（后续消息发给它）；`show` 同样只写动作 */
 export function sessionResumeLink(sessionId: string, label = '恢复'): string {
-  return `<qqbot-cmd-input text="/sessions resume #${shortSessionId(sessionId)}" show="${label}"/>`;
+  return commandLink(`/sessions resume #${shortSessionId(sessionId)}`, label);
 }
 
 /**
@@ -76,7 +77,7 @@ export function sessionResumeLink(sessionId: string, label = '恢复'): string {
  * 所以调用方要先问 `workspaceRegistryAvailable()` 再决定是否拼进尾部行。
  */
 export function sessionArchiveLink(sessionId: string, label = '归档'): string {
-  return `<qqbot-cmd-input text="/sessions archive #${shortSessionId(sessionId)}" show="${label}"/>`;
+  return commandLink(`/sessions archive #${shortSessionId(sessionId)}`, label);
 }
 
 /** 尾部链接行（正文下方独占一行）：回复 + 恢复 [+ 归档] */

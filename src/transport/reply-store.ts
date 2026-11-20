@@ -13,10 +13,12 @@
  * 写入按最多每秒一次合并，dispose 时强制冲盘：消息路径上不做同步全量读写，
  * 强杀最多丢最后一秒的用量（重新计数会比平台多放行一次）。
  */
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { writeJsonAtomic } from '../shared/json-file.ts';
 import { PLUGIN_HOME } from '../shared/dirs.ts';
 import type { ChatScope, Logger, ReplyTarget } from '../types.ts';
+import { errorMessage } from '../shared/utils.ts';
 
 /** 解析结果：在「发给谁」之上补被动凭证，只有装饰层看得到 */
 export interface ResolvedReplyTarget extends ReplyTarget {
@@ -305,13 +307,12 @@ export class ReplyStore {
         if (list.length > 0) this.targets.set(key, list.slice(-this.keep));
       }
     } catch (err) {
-      this.logger.warn(`被动回复缓存解析失败（按空处理）: ${err instanceof Error ? err.message : String(err)}`);
+      this.logger.warn(`被动回复缓存解析失败（按空处理）: ${errorMessage(err)}`);
     }
   }
 
   private persist(): void {
     try {
-      mkdirSync(dirname(this.file), { recursive: true });
       const merged = this.mergeFromDisk();
       const cutoff = this.now() - this.ttlMs;
       const targets: Record<string, PersistedTarget> = {};
@@ -327,11 +328,9 @@ export class ReplyStore {
         }
         if (ids.length > 0) targets[key] = { ids };
       }
-      const tmp = `${this.file}.${process.pid}.tmp`;
-      writeFileSync(tmp, JSON.stringify({ version: 1, targets } satisfies PersistedFile), 'utf8');
-      renameSync(tmp, this.file);
+      writeJsonAtomic(this.file, { version: 1, targets } satisfies PersistedFile);
     } catch (err) {
-      this.logger.warn(`被动回复缓存写入失败: ${err instanceof Error ? err.message : String(err)}`);
+      this.logger.warn(`被动回复缓存写入失败: ${errorMessage(err)}`);
     }
   }
 

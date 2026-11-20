@@ -16,10 +16,11 @@
  *   - 逐题推进：多问题时一次问一题，答完一题再问下一题
  *   - 完成 / 中断（abort / 超时 / 会话回收）：reject(ASK_ABORTED)
  */
-import type { InlineKeyboard, InteractionEvent } from '@tencent-connect/qqbot-nodejs';
+import type { InteractionEvent } from '@tencent-connect/qqbot-nodejs';
 import type { ChatScope, Logger, ReplyTarget } from '../types.ts';
-import { shortSessionId } from '../shared/utils.ts';
+import { isOwner, shortSessionId, errorMessage } from '../shared/utils.ts';
 import { sessionSourceHeader, sourceTitle } from '../transport/session-source.ts';
+import type { ChannelSender } from '../transport/send.ts';
 import { parseAnswer } from './answer-parser.ts';
 import { buildKeyboard, formatQuestion } from './question-renderer.ts';
 import { decodeButtonData } from './button-utils.ts';
@@ -81,10 +82,6 @@ export interface QuestionChannelManagerLike {
   isCurrentSession?(sessionId: string): boolean;
   /** 会话标题（非当前会话的来源行用）；缺省时来源行只有 id */
   sessionTitle?(sessionId: string): string | undefined;
-}
-
-export interface QuestionChannelSenderLike {
-  sendMarkdown(target: ReplyTarget, content: string, opts?: { keyboard?: InlineKeyboard }): Promise<unknown>;
 }
 
 export interface QuestionChannelConfigLike {
@@ -151,13 +148,13 @@ export class QuestionChannel {
   /** 投递期间收到释放请求的会话：首题发完立刻交回宿主 */
   private readonly handoffRequested = new Set<string>();
   private readonly manager: QuestionChannelManagerLike;
-  private readonly sender: QuestionChannelSenderLike;
+  private readonly sender: ChannelSender;
   private readonly config: QuestionChannelConfigLike;
   private readonly logger: Logger;
 
   public constructor(
     manager: QuestionChannelManagerLike,
-    sender: QuestionChannelSenderLike,
+    sender: ChannelSender,
     config: QuestionChannelConfigLike,
     logger: Logger,
   ) {
@@ -196,7 +193,7 @@ export class QuestionChannel {
         } catch (nextErr) {
           // 链上已没有 answerer（或请求已结束）：两条通道都投不出去，按中断结束，
           // 不能让这个 rejection 冒成宿主的未捕获错误（宿主里那是致命错误）。
-          const msg = nextErr instanceof Error ? nextErr.message : String(nextErr);
+          const msg = errorMessage(nextErr);
           self.logger.error(`qqterm: no answerer accepted the question after QQ delivery failed: ${msg}`);
           throw new QuestionChannelError(`question was not delivered on any channel: ${msg}`, ASK_ABORTED);
         }
@@ -345,8 +342,7 @@ export class QuestionChannel {
     if (!peerId) return false;
 
     // 按钮只认唯一绑定用户；未绑定或身份不匹配直接忽略
-    const owner = this.config.access.owner.trim();
-    if (owner === '' || peerId !== owner) return false;
+    if (!isOwner(this.config.access.owner, peerId)) return false;
 
     const data = event.data?.resolved?.button_data;
     if (!data) return false;
@@ -404,7 +400,7 @@ export class QuestionChannel {
         `⚠️ 有 ${sessionIds.length} 个会话在等回答，没有转发给当前会话`,
         '用各自问题里的按钮或 `/to <会话>` 回答。',
       ].join('\n');
-    void this.sender.sendMarkdown(target, text).catch(() => {});
+    void this.sender.text(target, text).catch(() => {});
   }
 
   /** 清理指向某会话的 answer target（整组结束/取消时） */
@@ -511,18 +507,18 @@ export class QuestionChannel {
     const keyboard = buildKeyboard(question, sessionId);
     try {
       if (keyboard) {
-        try {
-          await this.sender.sendMarkdown(record.replyTarget, formatQuestion(question, true, context), { keyboard });
-          return;
-        } catch (err) {
-          // 同上：宿主 logger 在 headless profile 不可见，stderr 才是唯一线索
-          console.warn('[qqterm] keyboard send failed:', err);
-          this.logger.warn(`qqterm: keyboard send failed, fallback to text: ${err instanceof Error ? err.message : String(err)}`);
-        }
+        // 带按钮的正文 + 无按钮兜底一起交给 sender：键盘通道不可用时自动降级
+        await this.sender.card(
+          record.replyTarget,
+          formatQuestion(question, true, context),
+          keyboard,
+          formatQuestion(question, false, context),
+        );
+        return;
       }
-      await this.sender.sendMarkdown(record.replyTarget, formatQuestion(question, false, context));
+      await this.sender.text(record.replyTarget, formatQuestion(question, false, context));
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = errorMessage(err);
       this.logger.error(`qqterm: question send failed sessionId=${sessionId}: ${msg}`);
       throw new QuestionDeliveryError(`failed to deliver question to QQ: ${msg}`);
     }
@@ -535,7 +531,7 @@ export class QuestionChannel {
     this.clearAnswerTargets(sessionId);
     this.removeAbort(entry);
     entry.timer = undefined;
-    void this.sender.sendMarkdown(
+    void this.sender.text(
       entry.record.replyTarget,
       this.noticeText(entry.record, '⚠️ 提问已超时，未收到回答。'),
     ).catch(() => {});

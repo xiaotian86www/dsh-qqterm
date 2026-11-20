@@ -11,6 +11,7 @@ import { stat } from 'node:fs/promises';
 import { basename, extname } from 'node:path';
 import type { ReplyTarget } from '../types.ts';
 import { resolveAgentCwd } from '../shared/dirs.ts';
+import { errorMessage } from '../shared/utils.ts';
 
 export { resolveAgentCwd };
 
@@ -77,6 +78,6 @@ export async function sendMediaFile(
       ...(result.message?.id !== undefined ? { messageId: result.message.id } : {}),
     };
   } catch (err) {
-    return { outcome: 'failed', error: err instanceof Error ? err.message : String(err) };
+    return { outcome: 'failed', error: errorMessage(err) };
   }
 }

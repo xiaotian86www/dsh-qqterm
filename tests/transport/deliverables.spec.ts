@@ -4,15 +4,18 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DeliverablesDeliverer } from '../../src/transport/deliverables.ts';
 import type { MediaSenderLike } from '../../src/media/send-media.ts';
-import type { QQBotSender } from '../../src/transport/outbound.ts';
+import type { DeliverablesSender } from '../../src/transport/deliverables.ts';
 import type { SessionRecord } from '../../src/session/index.ts';
 import type { QQTermConfig } from '../../src/config.ts';
 import type { Logger } from '../../src/types.ts';
 
 const logger: Logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 
-function createSender(): QQBotSender {
-  return { sendMarkdown: vi.fn().mockResolvedValue(undefined) };
+function createSender(): DeliverablesSender {
+  return {
+    text: vi.fn().mockResolvedValue(undefined),
+    decorate: vi.fn((_sessionId: string, body: string) => body),
+  };
 }
 
 function createMediaBot(): MediaSenderLike {
@@ -51,7 +54,7 @@ describe('DeliverablesDeliverer', () => {
 
     expect(mediaBot.sendImage).toHaveBeenCalledTimes(1);
     expect(mediaBot.sendFile).toHaveBeenCalledTimes(1);
-    expect(sender.sendMarkdown).not.toHaveBeenCalled(); // 全部送达，无需降级提示
+    expect(sender.text).not.toHaveBeenCalled(); // 全部送达，无需降级提示
   });
 
   it('缺失文件降级为文字提示，不阻断其余文件', async () => {
@@ -66,8 +69,8 @@ describe('DeliverablesDeliverer', () => {
     await deliverer.deliver(createRecord(), [{ path: ok }, { path: join(dir, 'gone.txt') }]);
 
     expect(mediaBot.sendFile).toHaveBeenCalledTimes(1); // 存在的那个已发送
-    expect(sender.sendMarkdown).toHaveBeenCalledTimes(1);
-    const text = (sender.sendMarkdown as ReturnType<typeof vi.fn>).mock.calls[0][1] as string;
+    expect(sender.text).toHaveBeenCalledTimes(1);
+    const text = (sender.text as ReturnType<typeof vi.fn>).mock.calls[0][1] as string;
     expect(text).toContain('未能直接发送');
     expect(text).toContain('gone.txt');
   });
@@ -103,7 +106,7 @@ describe('DeliverablesDeliverer', () => {
     await deliverer.deliver(createRecord(), files);
 
     expect(mediaBot.sendFile).toHaveBeenCalledTimes(2);
-    const text = (sender.sendMarkdown as ReturnType<typeof vi.fn>).mock.calls[0][1] as string;
+    const text = (sender.text as ReturnType<typeof vi.fn>).mock.calls[0][1] as string;
     expect(text).toContain('超出单轮投递上限');
     expect(text).toContain('c.txt');
   });
@@ -112,17 +115,14 @@ describe('DeliverablesDeliverer', () => {
     const dir = await mkdtemp(join(tmpdir(), 'dsh-qqterm-dlv-'));
     const mediaBot = createMediaBot();
     const sender = createSender();
-    const deliverer = new DeliverablesDeliverer(
-      sender,
-      mediaBot,
-      createConfig(),
-      logger,
-      (_record, text) => `HEAD\n\n${text}`,
+    (sender.decorate as ReturnType<typeof vi.fn>).mockImplementation(
+      (_sessionId: string, body: string) => `HEAD\n\n${body}`,
     );
+    const deliverer = new DeliverablesDeliverer(sender, mediaBot, createConfig(), logger);
 
     await deliverer.deliver(createRecord(), [{ path: join(dir, 'gone.txt') }]);
 
-    const text = (sender.sendMarkdown as ReturnType<typeof vi.fn>).mock.calls[0][1] as string;
+    const text = (sender.text as ReturnType<typeof vi.fn>).mock.calls[0][1] as string;
     expect(text.startsWith('HEAD\n\n')).toBe(true);
     expect(text).toContain('gone.txt');
   });

@@ -29,6 +29,7 @@ import {
   BIND_UNBIND_PATH,
   type BindStateWire,
 } from '../shared/bind-protocol.ts';
+import { errorMessage } from '../shared/utils.ts';
 
 // 协议单一来源：shared/bind-protocol.ts（类型 + 路径常量，客户端共用）
 export { BIND_CONFIG_PATH, BIND_MANUAL_PATH, BIND_REFRESH_PATH, BIND_STATE_PATH, BIND_UNBIND_PATH };
@@ -298,7 +299,7 @@ async function handleManual(
   try {
     body = await readJsonBody(req);
   } catch (err) {
-    sendJson(res, 400, { ok: false, error: `invalid request body: ${err instanceof Error ? err.message : String(err)}` });
+    sendJson(res, 400, { ok: false, error: `invalid request body: ${errorMessage(err)}` });
     return;
   }
   const credentials = parseCredentials(body);
@@ -379,7 +380,7 @@ async function handleConfig(req: IncomingMessage, res: ServerResponse, options: 
   try {
     body = await readJsonBody(req, MAX_CONFIG_BODY_BYTES);
   } catch (err) {
-    sendJson(res, 400, { ok: false, error: `invalid request body: ${err instanceof Error ? err.message : String(err)}` });
+    sendJson(res, 400, { ok: false, error: `invalid request body: ${errorMessage(err)}` });
     return;
   }
   if (typeof body !== 'object' || body === null) {

@@ -5,6 +5,7 @@ export {
   getProfileDir,
   resolveProfileDir,
   errorText,
+  num,
   resolveEnv,
   formatRelativeTime,
   buildUserAgent,
@@ -12,6 +13,7 @@ export {
   shortSessionId,
   outsideHmrTransaction,
   optionalService,
+  isOwner,
 } from './utils.ts';
 export { entryUids, changedEntries, entryReplaced, type LoaderLike } from './entries.ts';
 export { getScopePeer } from './scope.ts';

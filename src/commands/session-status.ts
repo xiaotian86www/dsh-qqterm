@@ -11,15 +11,12 @@
 import type { CommandDeps, SlashCommand } from './types.ts';
 import type { SessionContextUsage, SessionManager, SessionTurnProgress } from '../session/index.ts';
 import type { ChatScope } from '../types.ts';
-import { getScopePeer, sendMarkdownChunked } from '../shared/index.ts';
+import { getScopePeer, num, sendMarkdownChunked } from '../shared/index.ts';
+import { commandLink } from '../shared/inline.ts';
 import { sessionTargetLabel, sessionTitleOf } from '../transport/session-source.ts';
 import { effortLabel } from '../model/effort-label.ts';
 import { presetLabel } from './permission.ts';
-
-/** 千分位（与 /cost 一致，避免不同环境的本地化分隔符） */
-function num(n: number): string {
-  return n.toLocaleString('en-US');
-}
+import { errorMessage } from '../shared/utils.ts';
 
 /** 上下文占用：占用 / 窗口 / 剩余（窗口没上报时只给占用量） */
 function renderContext(ctx: SessionContextUsage): string | undefined {
@@ -144,7 +141,7 @@ async function renderStatus(
 
   // 生成中给一个可点击的停止入口：QQ 不能编辑消息，停止要能直接点到
   if (running) {
-    lines.push('', '<qqbot-cmd-input text="/stop" show="停止生成"/>');
+    lines.push('', commandLink('/stop', '停止生成'));
   }
 
   return lines.join('\n');
@@ -163,7 +160,7 @@ export function sessionStatusCommand({ manager, config, logger }: CommandDeps): 
       try {
         text = await renderStatus(manager, scope, peerId);
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
+        const message = errorMessage(err);
         logger?.warn(`/status 失败: ${message}`);
         text = `⚠️ 读取会话状态失败: ${message}`;
       }

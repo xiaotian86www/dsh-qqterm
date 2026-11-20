@@ -14,6 +14,9 @@
  * - 必须在 questionAnswer 之后：待答问题的答案优先，不能被守卫吃掉。
  */
 import type { Middleware, MiddlewareContext } from '@tencent-connect/qqbot-nodejs';
+import { commandLink } from '../shared/inline.ts';
+import { errorMessage } from '../shared/utils.ts';
+
 
 /** 指令前缀：半角 `/` 与中文输入法下很容易打出的全角 `／` */
 const PREFIXES = ['/', '／'] as const;
@@ -97,7 +100,7 @@ export function buildUnknownCommandReply(
   const text = [`⚠️ 没有 ${typed} 这个指令${candidate.prefix === '/' ? '' : '（前缀要半角 /）'}。`];
 
   if (suggestion !== undefined) {
-    markdown.push(`你想用的是不是 <qqbot-cmd-input text="/${suggestion}" show="/${suggestion}"/>？`);
+    markdown.push(`你想用的是不是 ${commandLink(`/${suggestion}`, `/${suggestion}`)}？`);
     text.push(`你想用的是不是 /${suggestion}？`);
   } else {
     markdown.push('如果只是普通文本，去掉开头的 `/` 再发；全部指令见 `/help`。');
@@ -117,9 +120,17 @@ export function collectCommandNames(commands: ReadonlyArray<{ name: string | str
   return names;
 }
 
+/**
+ * 发回复用的函数：目标用 SDK 的 ReplyTarget（scope 是 'c2c' | 'group'），
+ * bootstrap 传 sender.text 时把 scope 收窄成插件自己的 'c2c'。
+ */
+export type UnknownCommandSend = (target: MiddlewareContext['replyTarget'], body: string) => Promise<void>;
+
 export interface UnknownCommandGuardOptions {
   /** 已注册的指令名（含别名，不含前缀） */
   commandNames: readonly string[];
+  /** 发回复用的函数（bootstrap 注入 sender.text：分片 + 网络类重试） */
+  sendText: UnknownCommandSend;
 }
 
 /**
@@ -154,7 +165,7 @@ export function rejectUnknownCommands(options: UnknownCommandGuardOptions): Midd
     const reply = buildUnknownCommandReply(candidate, suggestion);
     ctx.log.debug?.(`[qqterm] unknown command: ${candidate.prefix}${candidate.raw}`);
 
-    if (!(await sendReply(ctx, reply))) {
+    if (!(await sendReply(ctx, reply, options.sendText))) {
       // markdown / 纯文本都发不出去：退回正常转发，至少别静默丢消息
       await next();
       return;
@@ -165,9 +176,13 @@ export function rejectUnknownCommands(options: UnknownCommandGuardOptions): Midd
 }
 
 /** 先走 markdown（带按钮），失败再退纯文本；都失败返回 false */
-async function sendReply(ctx: MiddlewareContext, reply: UnknownCommandReply): Promise<boolean> {
+async function sendReply(
+  ctx: MiddlewareContext,
+  reply: UnknownCommandReply,
+  sendText: UnknownCommandSend,
+): Promise<boolean> {
   try {
-    await ctx.bot.sendMarkdown(ctx.replyTarget, reply.markdown);
+    await sendText(ctx.replyTarget, reply.markdown);
     return true;
   } catch (err) {
     ctx.log.warn?.(`[qqterm] unknown-command markdown reply failed: ${errorMessage(err)}`);
@@ -202,6 +217,3 @@ function levenshtein(a: string, b: string): number {
   return previous[b.length] ?? 0;
 }
 
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}

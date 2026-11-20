@@ -9,10 +9,10 @@
  * web 与开发 profile 常同时开着，共用一份文件会互相覆盖通知与结果。
  */
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import { PLUGIN_HOME } from '../shared/dirs.ts';
-import { errorText, formatRelativeTime } from '../shared/utils.ts';
+import { readJsonFile, writeJsonFile } from '../shared/json-file.ts';
+import { formatRelativeTime } from '../shared/utils.ts';
 import type { Logger } from '../types.ts';
 
 export type PluginAction = 'install' | 'update';
@@ -75,8 +75,9 @@ export function pluginUpdateCachePath(profileDir?: string | null): string {
 
 /** 读检查结果：文件不存在或损坏当作「还没查过」，列表不显示版本箭头 */
 export function readPluginUpdateCache(path: string, logger?: Logger): PluginUpdateCache | undefined {
-  const parsed = readJson(path, logger, '插件更新检查结果');
+  const parsed = readJsonFile(path, '插件更新检查结果', logger);
   if (parsed === undefined) return undefined;
+  if (parsed === null || typeof parsed !== 'object') return undefined;
   const raw = (parsed as { versions?: unknown }).versions;
   if (typeof raw !== 'object' || raw === null) return undefined;
   const versions: Record<string, string> = {};
@@ -88,45 +89,13 @@ export function readPluginUpdateCache(path: string, logger?: Logger): PluginUpda
 }
 
 export function writePluginUpdateCache(path: string, cache: PluginUpdateCache, logger?: Logger): void {
-  writeJson(path, cache, logger, '插件更新检查结果');
-}
-
-/** 读 JSON：文件不存在或损坏一律当「没有记录」，不让排障信息挡住主流程 */
-function readJson(path: string, logger: Logger | undefined, label: string): unknown {
-  let text: string;
-  try {
-    text = readFileSync(path, 'utf8');
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-      logger?.warn(`读取${label}失败: ${errorText(err)}`);
-    }
-    return undefined;
-  }
-
-  try {
-    return JSON.parse(text);
-  } catch (err) {
-    logger?.warn(`解析${label}失败: ${errorText(err)}`);
-    return undefined;
-  }
-}
-
-/** 原子写：先写同目录临时文件再 rename，避免新 fiber 读到半个 JSON */
-function writeJson(path: string, value: unknown, logger: Logger | undefined, label: string): void {
-  try {
-    mkdirSync(dirname(path), { recursive: true });
-    const tmp = `${path}.${process.pid}.tmp`;
-    writeFileSync(tmp, JSON.stringify(value), 'utf8');
-    renameSync(tmp, path);
-  } catch (err) {
-    logger?.warn(`写入${label}失败: ${errorText(err)}`);
-  }
+  writeJsonFile(path, cache, { label: '插件更新检查结果', logger });
 }
 
 /** 读状态：文件不存在或损坏一律当「没有记录」，不让排障信息挡住主流程 */
 export function readPluginOpState(path: string, logger?: Logger): PluginOpState | undefined {
-  const parsed = readJson(path, logger, '插件操作状态') as Partial<PluginOpState> | undefined;
-  if (parsed === undefined) return undefined;
+  const parsed = readJsonFile(path, '插件操作状态', logger) as Partial<PluginOpState> | null | undefined;
+  if (parsed === null || typeof parsed !== 'object') return undefined;
   if (parsed.action !== 'install' && parsed.action !== 'update') return undefined;
   if (parsed.phase !== undefined && parsed.phase !== 'done' && parsed.phase !== 'failed') return undefined;
   return {
@@ -138,9 +107,9 @@ export function readPluginOpState(path: string, logger?: Logger): PluginOpState 
   };
 }
 
-/** 原子写：先写同目录临时文件再 rename，避免新 fiber 读到半个 JSON */
+/** 写状态：原子写，失败只 warn（结果通知丢了也不该挡住命令本身） */
 export function writePluginOpState(path: string, state: PluginOpState, logger?: Logger): void {
-  writeJson(path, state, logger, '插件操作状态');
+  writeJsonFile(path, state, { label: '插件操作状态', logger });
 }
 
 /** 状态的一句话描述（`/status` 用）；无记录时返回 undefined */

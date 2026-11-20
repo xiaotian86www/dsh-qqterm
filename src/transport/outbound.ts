@@ -4,12 +4,11 @@
  * 采用路由器模式：OutboundRouter 持有会话级状态（工具调用记录、交付文件），
  * 事件解析归一化在 events.ts，路由按事件类型分发到私有方法。
  */
-import type { InlineKeyboard } from '@tencent-connect/qqbot-nodejs';
 import type { SessionManager, SessionRecord } from '../session/index.ts';
 import type { QQTermConfig } from '../config.ts';
-import type { Logger, ReplyTarget } from '../types.ts';
-import { splitForLimit } from './chunker.ts';
-import { decorateSessionMessage, sessionTitleOf } from './session-source.ts';
+import type { Logger } from '../types.ts';
+import { createSender, type QQBotSender, type Sender, type SessionView } from './send.ts';
+import { Outbox } from './outbox.ts';
 import { formatToolResult, type ToolsRegistryLike, type ToolResultData } from './tool-presenter.ts';
 import type { DeliverablesDelivererLike } from './deliverables.ts';
 import {
@@ -20,7 +19,6 @@ import {
   type OutboundImages,
 } from './outbound-images.ts';
 import { rewriteLocalFileLinks } from './file-links.ts';
-import { Outbox } from './outbox.ts';
 import {
   RETRY_NOTICE_AFTER,
   RETRYABLE_FAILURE_CODES,
@@ -39,13 +37,12 @@ import {
   type RawSessionEvent,
   type RetryEvent,
 } from './events.ts';
+import { errorMessage } from '../shared/utils.ts';
 
 export type { ToolsRegistryLike } from './tool-presenter.ts';
 
-/** QQ Bot 发送接口：只发静态 markdown（被动凭证由 reply-bot 补齐） */
-export interface QQBotSender {
-  sendMarkdown(target: ReplyTarget, content: string, opts?: { keyboard?: InlineKeyboard }): Promise<unknown>;
-}
+/** 出站只用发送端口的这五个方法；具体能力见 send.ts 的路径对照表 */
+export type { QQBotSender } from './send.ts';
 
 /** 出站事件入口（注册到 ctx.on('session/event')） */
 export interface OutboundHandlers {
@@ -91,34 +88,31 @@ class OutboundRouter {
   /** 每会话本轮的重试次数（llm/retry 事件喂，turn/end 消费） */
   private readonly retryCounts = new Map<string, RetryEvent>();
   private readonly manager: SessionManager;
-  private readonly bot: QQBotSender;
+  /** 发送端口：署名 / 分片 / 入队重试全在它内部，路由只管事件与顺序 */
+  private readonly sender: Sender;
   private readonly config: QQTermConfig;
   private readonly logger: Logger;
   private readonly toolsRegistry: ToolsRegistryLike | undefined;
   private readonly deliverer: DeliverablesDelivererLike | undefined;
   /** assistant/message 里的 image 块 → QQ 图片；未注入时不发图 */
   private readonly images: OutboundImages | undefined;
-  /** 发送失败后的重试与等待：同一会话保持顺序，等网关信号再补发 */
-  private readonly outbox: Outbox;
 
   public constructor(
     manager: SessionManager,
-    bot: QQBotSender,
+    sender: Sender,
     config: QQTermConfig,
     logger: Logger,
     toolsRegistry: ToolsRegistryLike | undefined,
     deliverer?: DeliverablesDelivererLike,
     images?: OutboundImages,
-    onChannelBroken?: (reason: string) => void,
   ) {
     this.manager = manager;
-    this.bot = bot;
+    this.sender = sender;
     this.config = config;
     this.logger = logger;
     this.toolsRegistry = toolsRegistry;
     this.deliverer = deliverer;
     this.images = images;
-    this.outbox = new Outbox({ logger, onChannelBroken });
   }
 
   /** 事件分发入口 */
@@ -187,7 +181,12 @@ class OutboundRouter {
       if (segment.text.trim() === '') continue;
       this.trackText(
         sessionId,
-        this.enqueue(sessionId, () => this.sendNow(record, this.compose(record, segment.text), 'sendMarkdown')),
+        this.enqueue(sessionId, () => this.sender.session(
+          sessionId,
+          record.replyTarget,
+          this.compose(record, segment.text),
+          'sendMarkdown',
+        )),
       );
     }
   }
@@ -294,17 +293,22 @@ class OutboundRouter {
       if (await channel.offer(record, failure, retries)) return;
     }
     const canRetry = RETRYABLE_FAILURE_CODES.has(failure.code) && (record.lastPrompt ?? '').trim() !== '';
-    await this.sendNow(record, this.compose(record, formatTurnFailure(failure, canRetry)), 'sendTurnEndError');
+    await this.sender.session(
+      record.sessionId,
+      record.replyTarget,
+      this.compose(record, formatTurnFailure(failure, canRetry)),
+      'sendTurnEndError',
+    );
   }
 
   /**
    * 每会话发送链：同一会话的分片连续发送，不与别的会话交错。
-   * 任务内部不要再调用 `send()`（会再次入队并等待自己），用 `sendNow()`。
+   * 任务内部不要再调用 `send()`（会再次入队并等待自己），直接调 sender。
    */
   private enqueue(sessionId: string, task: () => Promise<void>): Promise<void> {
     const previous = this.sendChains.get(sessionId) ?? Promise.resolve();
     const next = previous.then(task).catch((err: unknown) => {
-      this.logger.error(`qqterm: send chain failed: ${err instanceof Error ? err.message : String(err)}`);
+      this.logger.error(`qqterm: send chain failed: ${errorMessage(err)}`);
     });
     this.sendChains.set(sessionId, next);
     void next.then(() => {
@@ -313,94 +317,71 @@ class OutboundRouter {
     return next;
   }
 
-  /** 组装完整消息：本地文件链接换成 /get 命令，非当前会话加来源行与尾部动作行 */
-  private compose(record: SessionRecord, text: string): string {
-    // 本地文件链接换成 /get 命令：QQ 点不开本地路径
-    const body = rewriteLocalFileLinks(text, this.manager.directoryForAgent(record.agent));
-    if (this.manager.isCurrentSession(record.sessionId)) return body;
-    // 归档入口只在部署有 workspaceRegistry 时给：没有该服务时命令不认这个子命令
-    return decorateSessionMessage(
-      body,
-      record.sessionId,
-      sessionTitleOf(record),
-      this.manager.workspaceRegistryAvailable(),
-    );
-  }
-
-  /** 统一发送：入队 → 组装 → 切分发送 */
-  private send(record: SessionRecord, text: string, tag: string): Promise<void> {
-    return this.enqueue(record.sessionId, () => this.sendNow(record, this.compose(record, text), tag));
-  }
-
   /**
-   * 在当前发送链内发送：只做切分、逐片发送与失败重试。
+   * 组装正文：本地文件链接换成 /get 命令。
    *
-   * 收到的是拼好的整条消息（含来源行 / 尾部行），这里不区分正文与装饰，
-   * 只保证每片不超过上限、内容一个字都不丢：超长就按本条长度减半重切。
+   * 署名不在这里做——sender.session 统一加来源行与尾部动作行，避免两条路径各写一遍。
    */
-  private async sendNow(record: SessionRecord, message: string, tag: string): Promise<void> {
-    if (message === '') return;
-    const queue = splitForLimit(message, this.config.textChunkLimit);
-    const send = (value: string): Promise<unknown> => this.bot.sendMarkdown(record.replyTarget, value);
-    let blockedNotified = false;
+  private compose(record: SessionRecord, text: string): string {
+    return rewriteLocalFileLinks(text, this.manager.directoryForAgent(record.agent));
+  }
 
-    while (queue.length > 0) {
-      const part = queue.shift()!;
-      const outcome = await this.outbox.deliver(record.sessionId, tag, () => send(part));
-
-      // 暂不可用：本条与后续分片一起排队，恢复后按原顺序补发
-      if (outcome === 'queued') {
-        for (const rest of queue) this.outbox.enqueue(record.sessionId, tag, () => send(rest));
-        return;
-      }
-      // 渠道判死：后续分片已经没有任何意义
-      if (outcome === 'broken') return;
-      if (outcome === 'sent') continue;
-
-      // 内容类失败：超长按本条长度减半重切，风控只告知一次
-      if (outcome === 'too-long') {
-        const smaller = splitForLimit(part, Math.floor(part.length / 2));
-        if (smaller.length > 1) {
-          queue.unshift(...smaller);
-          continue;
-        }
-      }
-      if (!blockedNotified) {
-        blockedNotified = true;
-        await this.outbox.deliver(
-          record.sessionId,
-          'sendBlockedNotice',
-          () => send('❌ 上一条消息被 QQ 拦截，未送达。原文见 Web 会话。'),
-        );
-      }
-    }
+  /** 统一发送：入队 → 组装 → 交给发送端口（署名 / 分片 / 入队重试都在端口里） */
+  private send(record: SessionRecord, text: string, tag: string): Promise<void> {
+    return this.enqueue(record.sessionId, () => this.sender.session(
+      record.sessionId,
+      record.replyTarget,
+      this.compose(record, text),
+      tag,
+    ));
   }
 
   /** 网络恢复：把积压在队列里的消息按原顺序补发 */
   public async flushPending(): Promise<void> {
-    await this.outbox.flush();
+    await this.sender.flush();
   }
 
   /** 渠道失效：积压消息不会再送达 */
   public clearPending(): void {
-    this.outbox.clear();
+    this.sender.clear();
   }
 
   public hasPendingDelivery(sessionId?: string): boolean {
-    return this.outbox.hasPending(sessionId);
+    return this.sender.hasPending(sessionId);
   }
+}
+
+/** 传入的是发送端口还是裸 bot：端口有 session/text，裸 bot 只有 sendMarkdown */
+function isSender(value: Sender | QQBotSender): value is Sender {
+  return typeof (value as Sender).session === 'function' && typeof (value as Sender).text === 'function';
+}
+
+/** 从 SessionManager 取署名需要的三件事（可选服务缺失时按单会话部署兜底） */
+function sessionViewOf(manager: SessionManager): SessionView {
+  const optional = manager as unknown as {
+    sessionTitle?(sessionId: string): string | undefined;
+    workspaceRegistryAvailable?(): boolean;
+  };
+  return {
+    isCurrent: (sessionId) => manager.isCurrentSession(sessionId),
+    titleOf: (sessionId) => optional.sessionTitle?.(sessionId),
+    // 归档入口只在部署有 workspaceRegistry 时给：没有该服务时命令不认这个子命令
+    canArchive: () => optional.workspaceRegistryAvailable?.() ?? false,
+  };
 }
 
 /**
  * 创建出站事件处理器
  *
  * 返回事件入口，注册到 ctx.on('session/event')。
+ * sender 传 Sender（bootstrap 用）或裸 bot（单测 / 旧调用方）：裸 bot 会在内部
+ * 组装发送端口与失败队列，行为与 bootstrap 一致。
  * toolsRegistry 用于工具结果的结构化展示；deliverer 用于轮末投递 present 声明的交付文件；
  * images 用于把 assistant/message 里的 image 块与正文引用的本地图片发成 QQ 图片。
  */
 export function createOutboundHandler(
   manager: SessionManager,
-  bot: QQBotSender,
+  sender: Sender | QQBotSender,
   config: QQTermConfig,
   logger: Logger,
   toolsRegistry?: ToolsRegistryLike,
@@ -408,15 +389,24 @@ export function createOutboundHandler(
   images?: OutboundImages,
   onChannelBroken?: (reason: string) => void,
 ): OutboundHandlers {
+  // 旧调用方只给 bot：内部自建端口与队列，鉴权失败仍能通过 onChannelBroken 上报
+  const port = isSender(sender)
+    ? sender
+    : createSender({
+      bot: sender,
+      config,
+      logger,
+      sessions: sessionViewOf(manager),
+      outbox: new Outbox({ logger, ...(onChannelBroken === undefined ? {} : { onChannelBroken }) }),
+    });
   const router = new OutboundRouter(
     manager,
-    bot,
+    port,
     config,
     logger,
     toolsRegistry,
     deliverer,
     images,
-    onChannelBroken,
   );
   return {
     routeSessionEvent: (session, event) => router.route(session, event),

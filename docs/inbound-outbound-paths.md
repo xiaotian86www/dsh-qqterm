@@ -44,7 +44,7 @@
 | O8 | 审批卡 | `approval/request` → `park`（`src/features/approval-channel.ts:250`） | 命令摘要与选项渲染、`sender.card` 带键盘（无纯文本兜底）、发送失败交回宿主答案者、点击校验 owner 与 nonce |
 | O9 | 重试卡与确认卡 | `retry-channel.offer`（`src/features/retry-channel.ts:83`）、`session-confirm.offer`（`src/features/session-confirm.ts:113`） | 重试卡 `sender.card` 带纯文本兜底、确认卡 `sender.card` 无兜底；回执 `sender.text`、超时定时器、nonce、署名（`sender.decorate`）；确认卡投递失败直接放弃动作 |
 | O10 | 启动与公告 | `ready` 恢复失败（`bootstrap.ts:239`，走 `sender.text`）、`reload/index.ts:145`、`plugins/index.ts:167` | 恢复失败分片 + transient 重试一次；热重载 / 插件结果仍是单条直发；`qqbot-cmd-input` 按钮、目标取自持久化的 `targets` |
-| O11 | 未知指令与入站兜底 | I4、I1 的 `followup` 失败（`inbound.ts:106`）、工作树回执（`inbound.ts:118`） | markdown → 纯文本降级、单条发送 |
+| O11 | 未知指令与入站兜底 | I4、I1 的 `followup` 失败（`inbound.ts:107`）、工作树回执（`inbound.ts:119`） | 都走 `SendText`（即 `Sender.text`）：分片 + transient 重试一次；未知指令另带 markdown → 纯文本降级 |
 | O12 | 文件与媒体 | `/get`、交付物 | 路径存在性与普通文件校验、`sendFile` / `sendImage`、大小与数量限制 |
 | O13 | 平台操作 | `typingIndicator`（`middleware-setup.ts:110`）、按钮 `ack`、面板同步（`bootstrap.ts:259`）、菜单同步（`bootstrap.ts:270`） | 非聊天消息的 API 调用，失败只记日志 |
 
@@ -66,7 +66,7 @@
 | O8 | 审批卡 | ✓ | ✓ | ✓ | — | ✓ | △ | ✓ | — |
 | O9 | 重试卡与确认卡 | ✓ | ✓ | ✓ | — | ✓ | △ | ✓ | — |
 | O10 | 启动与公告 | ✓ | — | △ | — | △ | — | — | — |
-| O11 | 未知指令与兜底 | ✓ | — | — | — | — | △ | — | — |
+| O11 | 未知指令与兜底 | ✓ | — | ✓ | — | ✓ | △ | — | — |
 | O12 | 文件与媒体 | ✓ | — | — | — | — | — | — | ✓ |
 | O13 | 平台操作 | — | — | — | — | — | — | — | — |
 
@@ -77,7 +77,7 @@
 - O8：没有纯文本降级，键盘发送失败交回宿主答案者。
 - O9：重试卡有纯文本降级；确认卡失败直接放弃动作。
 - O10：恢复失败的通知走 `sender.text`（分片 + 重试）；热重载 / 插件结果仍是单条直发，所以分片与重试记为 △。
-- O11：有 markdown → 纯文本的格式降级，没有键盘降级，也还没接 `sender`。
+- O11：已有 markdown → 纯文本的格式降级（仅未知指令；入站兜底没有第二版文案），没有键盘降级。
 - O1–O9 的发送动作都收敛到 `src/transport/send.ts`：`text` / `card` / `session` / `decorate` 四个入口，路径按需取用。
 - O1–O3 的媒体列是 △：内嵌图片与会话正文里的本地图片走 O5。
 - O13 不产生聊天消息，只做 `ack`、输入状态、面板与菜单同步。
@@ -107,9 +107,9 @@
 | 目标解析 | 全部聊天发送 |
 | 非当前会话署名 | O1–O4、O7–O9（统一实现：`send.ts` 的 `decorate`） |
 | 本地链接改写 | O1–O4 |
-| 按 4500 分片 | O1–O4、O6–O9（O4 仅提示文本，O10 仅恢复失败通知） |
+| 按 4500 分片 | O1–O4、O6–O9、O11（O4 仅提示文本，O10 仅恢复失败通知） |
 | 按会话串行 | O1–O5 |
-| 失败分类与后续动作 | O1–O4 入队；O6–O9 网络类重试一次；O10 恢复失败重试一次，公告不重试 |
+| 失败分类与后续动作 | O1–O4 入队；O6–O9、O11 网络类重试一次；O10 恢复失败与公告都重试一次 |
 | 键盘与纯文本降级 | O7–O9 |
 | 状态机、超时、nonce | O7–O9 |
 | 媒体发送 | O4、O5、O12 |
@@ -120,8 +120,7 @@
 ## 7. 已知不一致
 
 1. 交付物的文件本身不过 Outbox：`deliverables.ts` 的 `sendMediaFile` 直接发，断线不入队，失败只在轮末聚合成一条文字（提示文本已走 `sender.text`）。
-2. 热重载 / 插件结果公告仍是单条直发（`reload/index.ts:145`、`plugins/index.ts:167`）：不分片、不重试。
-3. 入站兜底与未知指令仍是裸 `bot.sendMarkdown`（`inbound.ts:106`、`:118`、`unknown-command.ts:170`），自带 markdown → 纯文本降级，但没接 `sender` 的分片与重试。
+2. 热重载 / 插件结果公告由 `bootstrap` 注入 `notify = sender.text`（`reload/index.ts:145`、`plugins/index.ts:167`）；未注入时退回裸 `bot.sendMarkdown`，只出现在独立构造的场景（测试、命令层没有 sender）。
 4. 审批卡没有纯文本降级（`approval-channel.ts` 的 `sender.card` 不传 fallback），确认卡同理。
 5. 媒体与平台操作（O5、O12、O13）不是聊天文本，仍直接用 SDK 的 `sendFile` / `sendImage` / `ack`。
 
@@ -133,7 +132,7 @@
 | 入站 | 按钮 | `src/gateway/bootstrap.ts:194` |
 | 入站 | 中间件顺序 | `src/gateway/middleware-setup.ts:33` |
 | 出站 | 事件路由 | `src/transport/outbound.ts:125` |
-| 出站 | 统一发送层 | `src/transport/send.ts:95` 的 `createSender`（`text` / `card` / `session` / `decorate`）、`sendChunkedText`（`:73`） |
+| 出站 | 统一发送层 | `src/transport/send.ts:95` 的 `createSender`（`text` / `card` / `session` / `decorate`）、`sendChunkedText`（`:73`）、`SendText` 类型（`:61`） |
 | 出站 | 发送与入队 | `src/transport/send.ts` 的 `session`（分片 → Outbox → 超长减半 → 拦截提示） |
 | 出站 | 凭证 | `src/transport/reply-bot.ts:41`、`src/transport/reply-store.ts` |
 | 出站 | 分片 | `src/transport/chunker.ts:92` |

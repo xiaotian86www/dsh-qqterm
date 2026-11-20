@@ -20,6 +20,7 @@ import type { Logger } from '../types.ts';
 import type { ModelRoute, ModelEntry, EffortOption, ReasoningInfo } from './types.ts';
 import { PrefsStore } from './prefs-store.ts';
 import { SettingsReader } from './settings-reader.ts';
+import { errorMessage } from '../shared/utils.ts';
 
 /** ctx.llm 服务的最小接口（listProviders 同步，listModels / resolveModelInfo 异步） */
 interface LlmServiceLike {
@@ -176,7 +177,7 @@ export class ModelResolver {
       };
     } catch (err) {
       this.logger?.debug(
-        `ModelResolver: ${route.provider}/${route.model} 思考强度元数据获取失败: ${err instanceof Error ? err.message : String(err)}`,
+        `ModelResolver: ${route.provider}/${route.model} 思考强度元数据获取失败: ${errorMessage(err)}`,
       );
       return undefined;
     }
@@ -217,7 +218,7 @@ export class ModelResolver {
       } catch (err) {
         // 单个 provider 失败，跳过
         this.logger?.debug(
-          `ModelResolver: provider ${providerId} 模型列表获取失败: ${err instanceof Error ? err.message : String(err)}`,
+          `ModelResolver: provider ${providerId} 模型列表获取失败: ${errorMessage(err)}`,
         );
       }
     }

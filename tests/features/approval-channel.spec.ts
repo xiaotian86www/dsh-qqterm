@@ -22,9 +22,13 @@ interface SentMessage {
 }
 
 function createSender(sent: SentMessage[]) {
+  const deliver = vi.fn(async (_target: ReplyTarget, content: string, o?: { keyboard?: unknown }) => {
+    sent.push({ text: content, opts: o });
+  });
   return {
-    sendMarkdown: vi.fn(async (_target: ReplyTarget, content: string, o?: { keyboard?: unknown }) => {
-      sent.push({ text: content, opts: o });
+    text: vi.fn(async (target: ReplyTarget, content: string) => deliver(target, content)),
+    card: vi.fn(async (target: ReplyTarget, content: string, keyboard?: unknown) => {
+      await deliver(target, content, { keyboard });
     }),
   };
 }
@@ -386,7 +390,10 @@ describe('ApprovalChannel.cancelPending', () => {
   it('QQ 投递失败时把审批交回链上其他通道，不吞掉请求', async () => {
     const ch = new ApprovalChannel(
       createManager({ findBySessionId: (id) => (id === 'sess-qq' ? makeRecord(sessionKey('c2c', 'peer-qq')) : undefined) }),
-      { sendMarkdown: vi.fn(async () => { throw new Error('network down'); }) },
+      {
+        text: vi.fn(async () => { throw new Error('network down'); }),
+        card: vi.fn(async () => { throw new Error('network down'); }),
+      },
       makeConfig(),
       createLogger(),
     );
@@ -400,7 +407,10 @@ describe('ApprovalChannel.cancelPending', () => {
   it('链上也没有 answerer 时按未决策结束，不让 rejection 冒泡', async () => {
     const ch = new ApprovalChannel(
       createManager({ findBySessionId: (id) => (id === 'sess-qq' ? makeRecord(sessionKey('c2c', 'peer-qq')) : undefined) }),
-      { sendMarkdown: vi.fn(async () => { throw new Error('network down'); }) },
+      {
+        text: vi.fn(async () => { throw new Error('network down'); }),
+        card: vi.fn(async () => { throw new Error('network down'); }),
+      },
       makeConfig(),
       createLogger(),
     );

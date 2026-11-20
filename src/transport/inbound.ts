@@ -12,14 +12,16 @@
  */
 import { WorktreeError, worktreeErrorText, type SessionManager } from '../session/index.ts';
 import { createQQUserMessage } from '../session/user-message.ts';
-import type { ChatScope, Logger, QuotedAttachment, RawAttachment, ReplyTarget } from '../types.ts';
+import type { ChatScope, Logger, RawAttachment, ReplyTarget } from '../types.ts';
 import {
   classifyContentType,
   isVoiceContentType,
-  type DownloadedFile,
   type MediaKind,
 } from './attachment.ts';
 import type { MiddlewareContext } from '@tencent-connect/qqbot-nodejs';
+import { errorMessage } from '../shared/utils.ts';
+import type { SendText } from './send.ts';
+import type { InboundAttachmentState, InboundQuoteState, InboundState } from './inbound-state.ts';
 
 // ── 类型定义 ──
 
@@ -35,32 +37,12 @@ interface ProcessedMessage {
   [key: string]: unknown;
 }
 
-interface ResolvedQuote {
-  text?: string;
-  entry?: { senderId?: string; content?: string };
-  attachments?: QuotedAttachment[];
-}
-
-interface MiddlewareState {
-  quote?: ResolvedQuote;
-  processedAttachments?: ProcessedAttachment[];
-  downloadedFiles?: DownloadedFile[];
-  downloadedQuoteFiles?: DownloadedFile[];
-  [key: string]: unknown;
-}
-
-interface ProcessedAttachment {
-  type: 'voice' | 'image' | 'video' | 'file' | 'unknown';
-  filename?: string;
-  url?: string;
-  localPath?: string;
-  voiceText?: string;
-  voiceSource?: 'stt' | 'asr' | 'fallback';
-  duration?: number;
-  width?: number;
-  height?: number;
-  size?: number;
-}
+/** 引用消息（中间件写入 ctx.state.quote） */
+type ResolvedQuote = InboundQuoteState;
+/** 语音 / 媒体预处理结果 */
+type ProcessedAttachment = InboundAttachmentState;
+/** 中间件链共享的 ctx.state 形状（见 inbound-state.ts） */
+type MiddlewareState = InboundState;
 
 // ── 主处理函数 ──
 
@@ -71,10 +53,11 @@ export async function handleInbound(
   ctx: MiddlewareContext,
   manager: SessionManager,
   logger: Logger,
+  /** 发提示文本用的函数（bootstrap 注入 sender.text：分片 + 网络类重试） */
+  sendText: SendText,
 ): Promise<void> {
   const msg = ctx.message as unknown as ProcessedMessage;
   const mwState = ctx.state as MiddlewareState;
-  const { bot } = ctx;
 
   const scope: ChatScope = 'c2c';
   const peerId = msg.senderId;
@@ -93,7 +76,7 @@ export async function handleInbound(
   try {
     record = await manager.getOrCreate(scope, peerId, msg.senderId, replyTarget);
   } catch (err) {
-    logger.error(`ERROR creating session: ${err instanceof Error ? err.message : String(err)}`);
+    logger.error(`ERROR creating session: ${errorMessage(err)}`);
     // 宿主 logger 在 headless profile 里不进终端，补一条 stderr：会话打不开时
     // 用户只看到兜底文案，没有这一行就无法定位（如 SessionAlreadyOwnedError）。
     console.error('[qqterm] getOrCreate failed:', err);
@@ -103,9 +86,9 @@ export async function handleInbound(
       const text = err instanceof WorktreeError
         ? worktreeErrorText(err)
         : '⚠️ 处理消息时出现异常，请稍后重试。';
-      await bot.sendMarkdown(replyTarget, text);
+      await sendText(replyTarget, text);
     } catch (sendErr) {
-      logger.error(`fallback reply failed: ${sendErr instanceof Error ? sendErr.message : String(sendErr)}`);
+      logger.error(`fallback reply failed: ${errorMessage(sendErr)}`);
     }
     return;
   }
@@ -115,9 +98,9 @@ export async function handleInbound(
     const notice = record.worktreeNotice;
     delete record.worktreeNotice;
     try {
-      await bot.sendMarkdown(replyTarget, notice);
+      await sendText(replyTarget, notice);
     } catch (sendErr) {
-      logger.warn(`worktree notice failed: ${sendErr instanceof Error ? sendErr.message : String(sendErr)}`);
+      logger.warn(`worktree notice failed: ${errorMessage(sendErr)}`);
     }
   }
 

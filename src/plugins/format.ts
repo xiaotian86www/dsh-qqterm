@@ -7,9 +7,8 @@
 import type { BundleInfoLike, PluginVersionLike } from './types.ts';
 import type { PluginOpState } from './state.ts';
 import { quoteArg } from '../commands/args.ts';
-
-/** 一页展示多少条插件 */
-const PAGE_SIZE = 10;
+import { cleanInline, clip, commandLink } from '../shared/inline.ts';
+import { pageLinks, pageSlice } from '../shared/paging.ts';
 
 /** 失败原因码 → 一句话（能直说的不摆原始 code） */
 const ERROR_REASON: Record<string, string> = {
@@ -30,30 +29,6 @@ const ERROR_REASON: Record<string, string> = {
   timeout: '操作超时，没有返回结果',
   cancelled: '已取消',
 };
-
-/** 行内展示净化：换行会打散列表，markdown / 属性字符会破坏渲染 */
-function cleanInline(raw: string): string {
-  return raw
-    .replace(/[\r\n]+/g, ' ')
-    .replace(/[`*_~<>"']/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-/** 超长文本截断（带省略号） */
-function clip(raw: string, max: number): string {
-  return raw.length > max ? `${raw.slice(0, max)}…` : raw;
-}
-
-/** XML 属性值转义（`&` 在 QQ 的指令标签里必须先转义） */
-function attrValue(raw: string): string {
-  return raw.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
-}
-
-/** 可点击命令：QQ 渲染成按钮，点一下把 `command` 填进输入框 */
-function commandLink(command: string, show: string): string {
-  return `<qqbot-cmd-input text="${attrValue(command)}" show="${attrValue(cleanInline(show) || command)}"/>`;
-}
 
 /** 失败原因：能映射的用固定文案，其余保留宿主诊断（截断一行） */
 export function errorReason(code: string | undefined, detail?: string): string {
@@ -113,16 +88,13 @@ export function renderPluginList(
   latest: Readonly<Record<string, string>> = {},
 ): string {
   const entries = thirdParty(bundles);
-  const pages = Math.max(1, Math.ceil(entries.length / PAGE_SIZE));
-  const current = Math.min(Math.max(page, 1), pages);
-  const start = (current - 1) * PAGE_SIZE;
-  const shown = entries.slice(start, start + PAGE_SIZE);
+  const { page: current, pages, shown } = pageSlice(entries, page);
 
   const lines: string[] = [`### 🔌 已安装插件（${entries.length} 个）`, ''];
   for (const bundle of shown) lines.push(bundleLine(bundle, latest));
 
   lines.push('');
-  if (pages > 1) lines.push(pageLinks(current, pages).join(' · '), '');
+  if (pages > 1) lines.push(pageLinks(current, pages, (next) => `/plugins ${next}`).join(' · '), '');
   lines.push(footerLinks());
   return lines.join('\n');
 }
@@ -134,15 +106,6 @@ function footerLinks(): string {
     commandLink('/plugins update', '更新插件'),
     commandLink('/plugins reload', '热重载'),
   ].join(' · ');
-}
-
-/** 分页导航：多页时给出 上一页 · 第 x/y 页 · 下一页，缺哪边省略哪边 */
-function pageLinks(page: number, pages: number): string[] {
-  const links: string[] = [];
-  if (page > 1) links.push(commandLink(`/plugins ${page - 1}`, '上一页'));
-  links.push(`第 ${page}/${pages} 页`);
-  if (page < pages) links.push(commandLink(`/plugins ${page + 1}`, '下一页'));
-  return links;
 }
 
 /** 一次操作的结果文案；还在跑（没有 phase）时返回 undefined */

@@ -71,7 +71,9 @@ async function inbound(host: Host, manager: Manager, bot: Bot, text: string): Pr
     },
     state: {},
   } as unknown as Parameters<typeof handleInbound>[0];
-  await handleInbound(mCtx, manager, host.logger);
+  await handleInbound(mCtx, manager, host.logger, async (target, body) => {
+    await bot.sendMarkdown(target as never, body);
+  });
 }
 
 /** 宿主 assistant/message 事件（正文是一个 text 内容块） */

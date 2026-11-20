@@ -9,9 +9,9 @@
  * 开发 profile 经常同时开着，共用一份文件会互相覆盖 notify 与结果。
  */
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import { PLUGIN_HOME } from '../shared/dirs.ts';
+import { readJsonFile, writeJsonFile } from '../shared/json-file.ts';
 import { errorText, formatRelativeTime } from '../shared/utils.ts';
 import type { Logger } from '../types.ts';
 
@@ -48,42 +48,21 @@ export function reloadStatePath(profileDir?: string | null): string {
 
 /** 读状态：文件不存在或损坏一律当「没有记录」，不让排障信息挡住重载主流程 */
 export function readReloadState(path: string, logger?: Logger): ReloadState | undefined {
-  let text: string;
-  try {
-    text = readFileSync(path, 'utf8');
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-      logger?.warn(`读取热重载状态失败: ${errorText(err)}`);
-    }
+  const parsed = readJsonFile(path, '热重载状态', logger) as Partial<ReloadState> | null | undefined;
+  if (parsed === null || typeof parsed !== 'object') return undefined;
+  if (parsed.phase !== undefined && parsed.phase !== 'done' && parsed.phase !== 'failed') {
     return undefined;
   }
-
-  try {
-    const parsed = JSON.parse(text) as Partial<ReloadState>;
-    if (parsed.phase !== undefined && parsed.phase !== 'done' && parsed.phase !== 'failed') {
-      return undefined;
-    }
-    return {
-      ...parsed,
-      phase: parsed.phase,
-      startedAt: typeof parsed.startedAt === 'number' ? parsed.startedAt : 0,
-    };
-  } catch (err) {
-    logger?.warn(`解析热重载状态失败: ${errorText(err)}`);
-    return undefined;
-  }
+  return {
+    ...parsed,
+    phase: parsed.phase,
+    startedAt: typeof parsed.startedAt === 'number' ? parsed.startedAt : 0,
+  };
 }
 
-/** 原子写：先写同目录临时文件再 rename，避免新 fiber 读到半个 JSON */
+/** 写状态：原子写，失败只 warn（结果通知丢了也不该挡住重载本身） */
 export function writeReloadState(path: string, state: ReloadState, logger?: Logger): void {
-  try {
-    mkdirSync(dirname(path), { recursive: true });
-    const tmp = `${path}.${process.pid}.tmp`;
-    writeFileSync(tmp, JSON.stringify(state), 'utf8');
-    renameSync(tmp, path);
-  } catch (err) {
-    logger?.warn(`写入热重载状态失败: ${errorText(err)}`);
-  }
+  writeJsonFile(path, state, { label: '热重载状态', logger });
 }
 
 /** 状态的一句话描述（`/status` 用）；无记录时返回 undefined */

@@ -11,6 +11,7 @@ import { parseArgs } from './args.ts';
 import type { SessionConfirmAction } from '../features/session-confirm.ts';
 import { WorktreeError, worktreeErrorText, type ChangeWorkspaceOutcome } from '../session/index.ts';
 import { getScopePeer, shortSessionId } from '../shared/index.ts';
+import { errorMessage } from '../shared/utils.ts';
 
 /**
  * 有会话时的二次确认。
@@ -176,7 +177,7 @@ export function newCommand({ manager, config }: CommandDeps): SlashCommand {
           });
         } catch (err) {
           if (err instanceof WorktreeError) return worktreeErrorText(err);
-          const message = err instanceof Error ? err.message : String(err);
+          const message = errorMessage(err);
           return `❌ 没能开启会话: ${message}\n稍后再试一次。`;
         }
         const short = shortSessionId(started.sessionId);
@@ -220,7 +221,7 @@ export function newCommand({ manager, config }: CommandDeps): SlashCommand {
           notice = started.worktreeNotice;
         } catch (err) {
           if (err instanceof WorktreeError) return worktreeErrorText(err);
-          const message = err instanceof Error ? err.message : String(err);
+          const message = errorMessage(err);
           return `❌ 没能开启会话: ${message}\n稍后再试一次。`;
         }
         const lines = notice === undefined ? ['✅ 已开启新会话，提示词已发出'] : [notice];
