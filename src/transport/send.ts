@@ -60,8 +60,11 @@ export interface Sender {
 /** 通道只需要「发卡片」和「发提示」，测试可以只实现这两个 */
 export type ChannelSender = Pick<Sender, 'text' | 'card'>;
 
-/** 风控拦截后的替代文案（只发一次） */
-const BLOCKED_NOTICE = '❌ 上一条消息被 QQ 拦截，未送达。原文见 Web 会话。';
+/** 风控拦截后的替代文案（只发一次）：只写事实，不把 Web 会话当兜底 */
+const BLOCKED_NOTICE = '❌ 上一条消息被 QQ 拦截，未送达。';
+
+/** 超长且切到最小分片仍被拒：换掉的不是风控，别复用「被拦截」的措辞 */
+const TOO_LONG_NOTICE = '❌ 上一条消息超过长度上限，切到最小分片仍被拒，未送达。';
 
 /** 一次发送的失败分类：只对网络类重试，其它原样抛给调用方 */
 async function sendOnceWithRetry(run: () => Promise<unknown>): Promise<void> {
@@ -122,7 +125,7 @@ export function createSender(options: CreateSenderOptions): Sender {
    * 会话输出：
    *   - 非当前会话先署名，再按上限切分（切分点感知 qqbot-cmd-input 标签）；
    *   - 每片交给 Outbox：网络抖动重试一次、仍失败入队并停发后续分片；
-   *   - 超长按本条长度减半重切；风控拦截只发一次替代文案。
+   *   - 超长按本条长度减半重切，切不动时按「超长」而非「被拦截」告知；内容类失败只告知一次。
    */
   const session = async (
     sessionId: string,
@@ -134,7 +137,7 @@ export function createSender(options: CreateSenderOptions): Sender {
     const composed = decorate(sessionId, body);
     const queue = splitForLimit(composed, config.textChunkLimit);
     const send = (value: string): Promise<unknown> => bot.sendMarkdown(target, value);
-    let blockedNotified = false;
+    let notified = false;
 
     while (queue.length > 0) {
       const part = queue.shift()!;
@@ -149,17 +152,19 @@ export function createSender(options: CreateSenderOptions): Sender {
       if (outcome === 'broken') return;
       if (outcome === 'sent') continue;
 
-      // 内容类失败：超长按本条长度减半重切，风控只告知一次
+      // 内容类失败：超长按本条长度减半重切；切不动才告知，风控与超长各用自己的措辞
+      let notice = BLOCKED_NOTICE;
       if (outcome === 'too-long') {
         const smaller = splitForLimit(part, Math.floor(part.length / 2));
         if (smaller.length > 1) {
           queue.unshift(...smaller);
           continue;
         }
+        notice = TOO_LONG_NOTICE;
       }
-      if (!blockedNotified) {
-        blockedNotified = true;
-        await outbox.deliver(sessionId, 'sendBlockedNotice', () => send(BLOCKED_NOTICE));
+      if (!notified) {
+        notified = true;
+        await outbox.deliver(sessionId, 'sendBlockedNotice', () => send(notice));
       }
     }
   };

@@ -131,7 +131,14 @@ describe('session：会话输出', () => {
     const { sender, calls } = makeSender([apiError(40034006)]);
     await sender.session('sess-1', TARGET, '正文', 'assistant');
     expect(calls).toHaveLength(1);
-    expect(calls[0]?.body).toBe('❌ 上一条消息被 QQ 拦截，未送达。原文见 Web 会话。');
+    expect(calls[0]?.body).toBe('❌ 上一条消息被 QQ 拦截，未送达。');
+  });
+
+  it('超长且切不动：告知超长，不冒充风控拦截', async () => {
+    const { sender, calls } = makeSender([apiError(40054007)]);
+    await sender.session('sess-1', TARGET, 'A', 'assistant');
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.body).toBe('❌ 上一条消息超过长度上限，切到最小分片仍被拒，未送达。');
   });
 
   it('空正文不发', async () => {
