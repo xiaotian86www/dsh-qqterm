@@ -116,6 +116,7 @@ export async function bootstrapGateway(
       isCurrent: (sessionId) => manager.isCurrentSession(sessionId),
       titleOf: (sessionId) => manager.sessionTitle(sessionId),
       canArchive: () => manager.workspaceRegistryAvailable(),
+      isRunning: (sessionId) => manager.isRunningSession(sessionId),
     },
     outbox,
   });

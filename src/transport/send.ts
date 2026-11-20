@@ -30,6 +30,8 @@ export interface SessionView {
   isCurrent(sessionId: string): boolean;
   titleOf(sessionId: string): string | undefined;
   canArchive(): boolean;
+  /** 会话是否正在生成：给了才在尾部加「停止」入口，缺省视为空闲 */
+  isRunning?(sessionId: string): boolean;
 }
 
 /**
@@ -104,7 +106,13 @@ export function createSender(options: CreateSenderOptions): Sender {
 
   const decorate = (sessionId: string, body: string): string => (sessions.isCurrent(sessionId)
     ? body
-    : decorateSessionMessage(body, sessionId, sessions.titleOf(sessionId), sessions.canArchive()));
+    : decorateSessionMessage(
+      body,
+      sessionId,
+      sessions.titleOf(sessionId),
+      sessions.canArchive(),
+      sessions.isRunning?.(sessionId) ?? false,
+    ));
 
   const text = async (target: ReplyTarget, body: string): Promise<void> => {
     await sendChunkedText(bot, target, body, config.textChunkLimit);

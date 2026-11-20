@@ -70,6 +70,9 @@ function setup(opts?: {
     workspaceRegistryAvailable: vi.fn(() => opts?.archivable ?? false),
     // 真实 SessionManager 的标题来自会话日志；假 manager 也按同一来源给
     sessionTitle: vi.fn((id: string) => (id === 'sess-qq' ? sessionTitleOf(record) : undefined)),
+    // 停止入口只在会话正在生成时给
+    isRunningSession: vi.fn((id: string) => id === 'sess-qq'
+      && (record.agent as unknown as { status?: string }).status === 'running'),
     ...(opts?.retryChannel !== undefined ? { retryChannel: opts.retryChannel } : {}),
   } as unknown as SessionManager;
   const outbound = createOutboundHandler(
@@ -113,6 +116,24 @@ describe('OutboundRouter: 多会话标记', () => {
       c2cTarget,
       `${sourceOf('sess-qq')}\n\nhello\n\n${footerOf('sess-qq')}`
         + ' · <qqbot-cmd-input text="/sessions archive #sess-qq" show="归档"/>',
+    );
+  });
+
+  it('会话正在生成时尾部多一个停止入口', async () => {
+    const record = createRecord(c2cTarget);
+    (record.agent as unknown as { status: string }).status = 'running';
+    const { outbound, bot } = setup({ current: false, record });
+
+    outbound.routeSessionEvent({ header: { id: 'sess-qq' } }, {
+      type: 'assistant/message',
+      data: { message: { content: [{ type: 'text', text: 'hello' }] } },
+    });
+    await Promise.resolve();
+
+    expect(bot.sendMarkdown).toHaveBeenCalledWith(
+      c2cTarget,
+      `${sourceOf('sess-qq')}\n\nhello\n\n${footerOf('sess-qq')}`
+        + ' · <qqbot-cmd-input text="/stop #sess-qq" show="停止"/>',
     );
   });
 

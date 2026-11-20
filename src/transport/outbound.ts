@@ -361,12 +361,15 @@ function sessionViewOf(manager: SessionManager): SessionView {
   const optional = manager as unknown as {
     sessionTitle?(sessionId: string): string | undefined;
     workspaceRegistryAvailable?(): boolean;
+    isRunningSession?(sessionId: string): boolean;
   };
   return {
     isCurrent: (sessionId) => manager.isCurrentSession(sessionId),
     titleOf: (sessionId) => optional.sessionTitle?.(sessionId),
     // 归档入口只在部署有 workspaceRegistry 时给：没有该服务时命令不认这个子命令
     canArchive: () => optional.workspaceRegistryAvailable?.() ?? false,
+    // 停止入口只在会话确实在生成时给：空闲会话点了也没东西可停
+    isRunning: (sessionId) => optional.isRunningSession?.(sessionId) ?? false,
   };
 }
 

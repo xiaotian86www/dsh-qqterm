@@ -1,7 +1,7 @@
 /**
- * `/stop` 命令：只中止 current；`/stop all` 交给 manager 批量中止已获取会话。
+ * `/stop` 命令：裸命令停当前、`<id>` 停指定已获取会话、`all` 批量中止。
  *
- * manager 用替身，只验证命令层的参数解析与文案；批量中止的筛选与 pending
+ * manager 用替身，只验证命令层的目标解析与文案；批量中止的筛选与 pending
  * 清理由 session-admin.spec.ts 覆盖。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -13,12 +13,20 @@ import { stopCommand } from '../../src/commands/misc.ts';
 
 const PEER = 'user1';
 const CURRENT = 'session-9d2c4410-2222-2222-2222-222222222222';
+const OTHER = 'session-04de1556-8c54-4b78-93e1-5714e079fca6';
 
-function record(status: 'idle' | 'running') {
+function record(
+  status: 'idle' | 'running',
+  opts: { sessionId?: string; title?: string } = {},
+) {
   const cancel = vi.fn();
+  const sessionId = opts.sessionId ?? CURRENT;
+  const events = opts.title === undefined
+    ? []
+    : [{ type: 'session/title', data: { title: opts.title } }];
   const value = {
-    sessionId: CURRENT,
-    agent: { status, cancel },
+    sessionId,
+    agent: { status, cancel, session: { id: sessionId, snapshotEvents: () => events } },
   } as unknown as SessionRecord;
   return { value, cancel };
 }
@@ -26,10 +34,12 @@ function record(status: 'idle' | 'running') {
 function makeManager(over: {
   current?: SessionRecord;
   cancelled?: string[];
+  acquired?: SessionRecord[];
 } = {}) {
   return {
     getSessionRecord: vi.fn(() => over.current),
     cancelAllRunning: vi.fn(() => over.cancelled ?? []),
+    listAcquiredSessions: vi.fn(() => over.acquired ?? []),
   } as unknown as SessionManager;
 }
 
@@ -69,6 +79,52 @@ describe('/stop', () => {
   });
 });
 
+describe('/stop <id>', () => {
+  it('按 8 位短 id 中止指定会话，回执带标题与 id', async () => {
+    const { value, cancel } = record('running', { sessionId: OTHER, title: '修登录' });
+    const manager = makeManager({ acquired: [value] });
+
+    expect(await run(manager, '04de1556')).toBe('⛔ 已中止「修登录」 · #04de1556');
+    expect(cancel).toHaveBeenCalledWith({ kind: 'user' });
+    // 目标命令不碰当前会话，也不批量中止
+    expect(manager.getSessionRecord).not.toHaveBeenCalled();
+    expect(manager.cancelAllRunning).not.toHaveBeenCalled();
+  });
+
+  it('带 # 的完整 id 同样能选中，没有标题时只回 id', async () => {
+    const { value, cancel } = record('running', { sessionId: OTHER });
+    const manager = makeManager({ acquired: [value] });
+
+    expect(await run(manager, '#' + OTHER)).toBe('⛔ 已中止 #04de1556');
+    expect(cancel).toHaveBeenCalledWith({ kind: 'user' });
+  });
+
+  it('目标会话空闲时只提示，不 cancel', async () => {
+    const { value, cancel } = record('idle', { sessionId: OTHER });
+    const manager = makeManager({ acquired: [value] });
+
+    expect(await run(manager, '04de1556')).toBe('⚠️ 没有进行中的生成 · #04de1556');
+    expect(cancel).not.toHaveBeenCalled();
+  });
+
+  it('找不到目标时给原因与下一步，不 cancel 任何会话', async () => {
+    const { value, cancel } = record('running', { sessionId: OTHER });
+    const manager = makeManager({ acquired: [value] });
+
+    expect(await run(manager, 'deadbeef'))
+      .toBe('⚠️ 没有匹配的会话: deadbeef · 用 /sessions 查看会话');
+    expect(cancel).not.toHaveBeenCalled();
+  });
+
+  it('太短的参数按 id 报错，不再回旧的用法行', async () => {
+    const manager = makeManager({ acquired: [] });
+
+    expect(await run(manager, 'now'))
+      .toBe('⚠️ id 至少 4 位，列表里的 8 位短 id 直接可用 · 用 /sessions 查看会话');
+    expect(manager.listAcquiredSessions).toHaveBeenCalledWith();
+  });
+});
+
 describe('/stop all', () => {
   it('批量中止，并用数量回执', async () => {
     const manager = makeManager({ cancelled: ['session-a', 'session-b'] });
@@ -83,13 +139,5 @@ describe('/stop all', () => {
 
     expect(await run(manager, 'all')).toBe('⚠️ 当前没有进行中的生成');
     expect(manager.cancelAllRunning).toHaveBeenCalledWith();
-  });
-
-  it('其它子命令只回用法，不做任何中止', async () => {
-    const manager = makeManager();
-
-    expect(await run(manager, 'now')).toBe('⚠️ 用法: /stop 或 /stop all');
-    expect(manager.cancelAllRunning).not.toHaveBeenCalled();
-    expect(manager.getSessionRecord).not.toHaveBeenCalled();
   });
 });

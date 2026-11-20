@@ -953,6 +953,11 @@ export class SessionManager {
     return this.currentSessionId() === sessionId;
   }
 
+  /** 会话是否正在生成：非当前会话的署名据此决定给不给「停止」入口 */
+  isRunningSession(sessionId: string): boolean {
+    return this.findBySessionId(sessionId)?.agent.status === 'running';
+  }
+
   /**
    * 会话标题（非当前会话的消息头 / 提问 / 审批共用）。
    *
@@ -1841,9 +1846,8 @@ export class SessionManager {
   /**
    * `/to <会话> <文本>`：向指定会话发 prompt，或在它等答案时提交答案。
    *
-   * 目标必须已经在已获取集合里，或者至少有一个 live agent（`agents.get` 命中）。
-   * 冷会话（只在磁盘上）拒绝，不在这里 resume——resume 是 `/sessions resume` 的事。
-   * 无论哪种情况都不改 current。
+   * 目标还没打开时先按 id 打开，走 `/sessions resume` 同一条路；只是不把指针挪过去，
+   * 回复别的会话不改「当前会话」。打开失败如实报错，绝不 create。
    */
   async sendTo(
     scope: ChatScope,
@@ -1853,50 +1857,46 @@ export class SessionManager {
     text: string,
     replyTarget: ReplyTarget,
   ): Promise<SendToOutcome> {
-    const key = this.sessionKey();
     const body = text.trim();
 
+    // 归档是界面上已有的状态，/to 不替人改它：已归档的会话直接拒发，
+    // 要不要接回来由 /sessions unarchive 决定
+    if (this.host.archivedSessionIds().has(sessionId)) {
+      return { ok: false, reason: 'archived', sessionId };
+    }
+
     let record = this.findBySessionId(sessionId);
-    // current 是聊天自己的会话：重启后尚未打开时，允许走普通消息同一条打开路径。
-    // 其它冷会话仍然拒绝，避免 /to 偷偷复活一个任意的磁盘会话。
-    if (!record && sessionId === this.currentSessionId()) {
-      try {
-        record = await this.getOrCreate(scope, peerId, senderId, replyTarget);
-      } catch (err) {
-        const message = errorText(err);
-        this.logger.warn(`/to current session open failed: sessionId=${sessionId} err=${message}`);
-        return { ok: false, reason: 'failed', sessionId, message };
-      }
+    // 借来的记录没有 handle，只能靠 registry 判断是否还活着；已死的当作没获取过，
+    // 下面重新打开一遍
+    if (record && record.handle === undefined && this.agents.get(sessionId) === undefined) {
+      this.records.delete(sessionId);
+      this.cancelPendingFor(sessionId);
+      record = undefined;
     }
     if (record) {
-      // 借来的记录没有 handle，只能靠 registry 判断是否还活着；已死的不要往里发
-      if (record.handle === undefined && this.agents.get(sessionId) === undefined) {
-        this.records.delete(sessionId);
-        this.cancelPendingFor(sessionId);
-        return { ok: false, reason: 'not-running', sessionId };
-      }
       if (record.peerId !== peerId) {
         return { ok: false, reason: 'forbidden', sessionId };
       }
       this.touch(record, scope, peerId, senderId, replyTarget);
     } else {
-      const live = this.agents.get(sessionId);
-      if (!live) return { ok: false, reason: 'not-running', sessionId };
-      const agentPreset = await this.resolvePersistedPreset(sessionId);
-      record = {
-        sessionKey: key,
-        sessionId,
-        agent: live,
-        replyTarget,
-        scope,
-        peerId,
-        senderId,
-        ...(agentPreset ? { agentPreset } : {}),
-        acquiredAt: Date.now(),
-      };
-      this.records.set(sessionId, record);
-      this.rememberHeld(sessionId);
-      this.logger.info(`session acquired via /to: sessionId=${sessionId}`);
+      // 回复是使用方明确要做的动作，不该先让他去 `/sessions resume` 走一趟：
+      // 目标只在磁盘上也照样接回来，只是不把它变成当前会话。
+      const opened = await this.switchSession(scope, peerId, sessionId, senderId, replyTarget, { openOnly: true });
+      if (!opened.ok) {
+        const message = opened.message === undefined ? {} : { message: opened.message };
+        switch (opened.reason) {
+          case 'not-found':
+            return { ok: false, reason: 'not-found', sessionId };
+          case 'archived':
+            return { ok: false, reason: 'archived', sessionId };
+          case 'locked':
+            return { ok: false, reason: 'locked', sessionId };
+          default:
+            return { ok: false, reason: 'failed', sessionId, ...message };
+        }
+      }
+      record = this.findBySessionId(sessionId);
+      if (!record) return { ok: false, reason: 'failed', sessionId };
     }
 
     const questions = this.questionChannel;
@@ -2147,7 +2147,7 @@ export class SessionManager {
    * 顺序是「当前 → 活记录按获取时间倒序 → 冷行（名册顺序）」；宿主列表暂时
    * 没有返回的持有会话也保留（用 agent 的目录与获取时间兜底），避免刚切过去就
    * 从列表消失。冷行是重启前获取过、这次还没打开的会话：标题 / 时间 / 目录都
-   * 取宿主快照，没有运行状态。标题读取失败不影响列表本身，取不到就显示
+   * 取宿主快照，状态按空闲列出。标题读取失败不影响列表本身，取不到就显示
    * 「未命名会话」。
    *
    * @param scope 当前 chat 作用域（用于标记 current）
@@ -2275,7 +2275,7 @@ export class SessionManager {
       };
     });
 
-    // 冷行：没有运行状态可报，held / live / running 全 false，标题与时间取宿主快照
+    // 冷行：held / live / running 全 false，状态层按空闲展示，标题与时间取宿主快照
     for (const id of cold) {
       const info = byId.get(id);
       const directory = info?.cwd;
@@ -2612,6 +2612,7 @@ export class SessionManager {
    * 只改 current 指针：旧会话不 cancel、不 dispose、不退出已获取集合，仍继续
    * 把输出发回 QQ（带 `#短id`）。目标已在内存里就直接接上；不在就 `agents.get`
    * 拿 live agent，拿不到才 `agents.resume`。**resume 失败只报错，不 create**。
+   * `openOnly` 只把人接进已获取集合，指针留在原处（`/to` 用）。
    *
    * 目标若已归档，先取消归档再恢复：归档的会话会被宿主的 `agent/pre-step`
    * 闸门拒绝，「恢复」本来就意味着让它重新可用。
@@ -2621,6 +2622,7 @@ export class SessionManager {
    * @param sessionId 目标会话 id
    * @param senderId 当前发送者（记录进会话记录）
    * @param replyTarget 回复目标（后续出站用）
+   * @param options.openOnly 只接进已获取集合、不切指针（`/to` 用）
    */
   async switchSession(
     scope: ChatScope,
@@ -2628,11 +2630,15 @@ export class SessionManager {
     sessionId: string,
     senderId: string,
     replyTarget: ReplyTarget,
+    options: { openOnly?: boolean } = {},
   ): Promise<SwitchSessionOutcome> {
     const key = this.sessionKey();
+    const openOnly = options.openOnly === true;
 
-    // 归档即不可用：恢复前先取消归档，失败则如实报错（此时还没动映射）
+    // 归档即不可用：恢复前先取消归档，失败则如实报错（此时还没动映射）。
+    // `/to` 不替人改归档状态，已归档就拒发，由人决定要不要接回来。
     const unarchived = this.host.archivedSessionIds().has(sessionId);
+    if (unarchived && openOnly) return { ok: false, reason: 'archived' };
     if (unarchived) {
       const restored = await this.host.unarchiveSession(sessionId);
       if (!restored.ok) {
@@ -2651,17 +2657,15 @@ export class SessionManager {
     const existing = this.findBySessionId(sessionId);
     if (existing) {
       this.touch(existing, scope, peerId, senderId, replyTarget);
-      this.setCurrent(key, sessionId);
-      this.setChatDir(this.headerCwd(existing.agent) ?? this.host.sessionDirectory(existing.agent.session) ?? this.chatDir);
+      if (!openOnly) {
+        this.setCurrent(key, sessionId);
+        this.setChatDir(this.headerCwd(existing.agent) ?? this.host.sessionDirectory(existing.agent.session) ?? this.chatDir);
+      }
       this.logger.info(`session switched (already acquired): key=${key} sessionId=${sessionId}`);
       return wasCurrent
         ? (unarchived ? { ok: true, reason: 'same', unarchived: true } : { ok: true, reason: 'same' })
         : (unarchived ? { ok: true, unarchived: true } : { ok: true });
     }
-
-    // 存在性求证：undefined = 宿主没有 stat 能力，按存在处理（交给 resume 判定）
-    const exists = await this.host.sessionExists(sessionId);
-    if (exists === false) return { ok: false, reason: 'not-found' };
 
     let agent: DshAgent;
     let handle: DshAgentHandle | undefined;
@@ -2672,6 +2676,10 @@ export class SessionManager {
       agent = live;
       agentPreset = await this.resolvePersistedPreset(sessionId);
     } else {
+      // 存在性求证：live agent 已经在上面接住了，走到这里只能从盘上恢复。
+      // undefined = 宿主没有 stat 能力，按存在处理（交给 resume 判定）
+      const exists = await this.host.sessionExists(sessionId);
+      if (exists === false) return { ok: false, reason: 'not-found' };
       const presetId = await this.resolvePersistedPreset(sessionId);
       const composed = await this.composePreset(presetId);
       agentPreset = composed.agentPreset;
@@ -2718,8 +2726,10 @@ export class SessionManager {
     };
     this.records.set(sessionId, record);
     this.rememberHeld(sessionId);
-    this.setCurrent(key, sessionId);
-    this.setChatDir(this.headerCwd(agent) ?? directory);
+    if (!openOnly) {
+      this.setCurrent(key, sessionId);
+      this.setChatDir(this.headerCwd(agent) ?? directory);
+    }
     // 挂工作区用 header.cwd（工作树会话即主仓库根），传运行期目录（树路径）会凭空长出一个以树名命名的工作区
     const attachCwd = this.headerCwd(agent) ?? directory;
     if (attachCwd) void this.host.attachSessionToWorkspace(sessionId, attachCwd);

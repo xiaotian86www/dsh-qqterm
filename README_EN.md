@@ -237,9 +237,9 @@ A workspace *is* the session's `cwd`. It is written into the session header when
 
 | Usage | Description |
 |------|------|
-| `/sessions` | List working sessions grouped by workspace (current first); group headers show the workspace path; each row shows `生成中` / `空闲`, and the current row ends with `✅`; sessions acquired before a restart are also listed, without a status; if the current pointer is not in the list, one extra line shows its id only; rows start with the 8-char short id and are never numbered; 10 per page |
+| `/sessions` | List working sessions grouped by workspace (current first); group headers show the workspace path; each row shows `生成中` / `空闲`, and the current row ends with `✅`; sessions acquired before a restart are also listed and shown as `空闲`; if the current pointer is not in the list, one extra line shows its id only; rows start with the 8-char short id and are never numbered; rows end with Reply / Stop / Archive actions (`/to #short-id`, `/stop #short-id` only while the session is running, `/sessions archive #short-id`; the current session gets no Reply); 10 per page |
 | `/sessions <page>` | Next page of the working-session list, e.g. `/sessions 2`; the footer shows `上一页 · 第 1/2 页 · 下一页` |
-| `/sessions all` | List every session grouped by workspace (pinned first inside a group); acquired sessions are marked `📌`, with no current marker; groups show only short ids; 10 per page |
+| `/sessions all` | List every session grouped by workspace (pinned first inside a group); acquired sessions are marked `📌`, with no current marker; groups show only short ids; working rows carry the same Reply / Stop / Archive actions (archived rows get none); 10 per page |
 | `/sessions all <page>` | Next page of the all-sessions view; the workspace title of the first session on the page is repeated; same footer format |
 | `/sessions resume <id>` | Rebind this chat to that session and continue its history (an archived target is unarchived on the way); the workspace follows; targets are 8-char short ids |
 | `/sessions rename <id> <title>` | Rename a session; the title is pinned against automatic titles. The target must already be open (use `/sessions resume` first) |
@@ -254,7 +254,7 @@ Notes:
 
 - **Handle rule**: every target is an 8-char short id (like `#3f2a9b1c`; the `#` is optional). Lists are never numbered, so paging and grouping cannot desync from "row N".
 - **Paging**: multi-page views use `上一页 · 第 1/2 页 · 下一页` in the footer, omitting the missing direction; the page number is not in the title and "N more" is not shown.
-- Status words appear only in the working-session list: `生成中` (agent running) and `空闲` (open and idle); sessions acquired before a restart show no status (never "idle"). After `/new` there is no current pointer, so no such line is added. Other views only mark acquired sessions with `📌` (QQ holds it), with no current marker and no status.
+- Status words appear only in the working-session list: `生成中` (agent running) and `空闲` (not running, including sessions acquired before a restart); there is no "pending resume" state. After `/new` there is no current pointer, so no such line is added. Other views only mark acquired sessions with `📌` (QQ holds it), with no current marker and no status.
 - Private chat only, and the operator must be the single bound user (`access.owner`) — titles and archive state touch other chats' data; with no owner configured the command is disabled.
 - Archiving goes through the host `workspaceRegistry.archiveSession` and only writes the registry-global archive set — **no file is deleted**. This plugin offers no hard delete; clean up on disk from the Web side or by hand.
 - `workspaceRegistry` is optional: a profile without it still groups sessions by directory (path-only headers, no pin / archive), and the archive subcommands are treated as unknown, like any other misspelling.
