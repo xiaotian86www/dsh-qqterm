@@ -1,9 +1,9 @@
 /**
  * `/to <会话> <文本>` — 向指定会话发 prompt，或在它等答案时提交答案。
  *
- * 目标必须是 live 或已经获取过的会话（普通消息 / `/sessions resume` / 之前的
- * `/to`）；冷会话拒绝，先 `/sessions resume`。命令不改 current：发完仍回到
- * 原来的会话，输出照样回 QQ（非 current 带来源行与回复链接）。
+ * 目标可以是当前会话、已获取的会话，或只在磁盘上的会话——最后一种先按 id 接回来
+ * 再发（与 `/sessions resume` 同一条路）。命令不改 current：发完仍回到原来的
+ * 会话，输出照样回 QQ（非 current 带来源行与回复链接）。
  *
  * 目标正在等 `ask_user_question` 时，文本必须走答案通道，不能当新 prompt
  * 排在问题后面——否则永远答不上。空文本进入「下一条消息作为回答」模式。
@@ -19,7 +19,7 @@ const USAGE = [
   '### 📖 /to 用法',
   '',
   '`/to <会话> <文本>` 向会话发消息',
-  '目标在等答案时，文本作为回答；目标须已获取',
+  '目标在等答案时，文本作为回答；没打开的会话会先接回来',
 ].join('\n');
 
 /** 把分组列表摊平成可解析的会话清单 */
@@ -76,9 +76,6 @@ export function toCommand({ manager, logger }: CommandDeps): SlashCommand {
         await manager.fillSessionTitles([target]);
         sessionId = target.id;
         title = target.title;
-        if (target.archived) {
-          return `⚠️ 该会话已归档: ${sessionTargetLabel(sessionId, title)}\n先 /sessions unarchive ${displayId(sessionId)}。`;
-        }
       } else {
         const candidate = targetArg.replace(/^#/, '');
         if (candidate.length < 4 || !manager.hasLiveSession(candidate)) {
@@ -115,8 +112,12 @@ export function toCommand({ manager, logger }: CommandDeps): SlashCommand {
       }
 
       switch (outcome.reason) {
-        case 'not-running':
-          return `⚠️ 会话未运行: ${label}\n先 /sessions resume ${displayId(sessionId)}，或在 Web 打开它。`;
+        case 'not-found':
+          return `⚠️ 没有这个会话: ${label}`;
+        case 'locked':
+          return `⚠️ 这个会话正在别处使用: ${label}\n等它释放后再发一次。`;
+        case 'archived':
+          return `⚠️ 该会话已归档: ${label}\n先 /sessions unarchive ${displayId(sessionId)}。`;
         case 'forbidden':
           return `⚠️ 这个会话属于另一个用户: ${label}`;
         case 'empty':

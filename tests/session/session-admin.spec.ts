@@ -1189,14 +1189,49 @@ describe('多会话：已获取集合 / /to / 切走不释放', () => {
     expect(manager.getSessionRecord('c2c', PEER)?.sessionId).toBe(current.sessionId);
   });
 
-  it('/to 目标不 live 时拒绝，不创建记录', async () => {
+  it('/to 目标还没打开时先接回来再发，不改 current', async () => {
+    const { registry } = createRegistry();
+    const ctx = createCtx({
+      sessions: [{ id: 'session-current', cwd: WORKSPACE() }, { id: 'session-cold', cwd: WORKSPACE() }],
+    });
+    const { manager } = createManager(ctx, registry);
+
+    const current = await manager.getOrCreate('c2c', PEER, PEER, REPLY);
+    const outcome = await manager.sendTo('c2c', PEER, PEER, 'session-cold', '接着改', REPLY);
+
+    expect(outcome).toEqual({ ok: true, kind: 'sent', sessionId: 'session-cold' });
+    expect(registry.resume).toHaveBeenCalledWith(expect.objectContaining({ resumeSessionId: 'session-cold' }));
+    const acquired = manager.findBySessionId('session-cold');
+    expect(acquired).toBeDefined();
+    expect(acquired?.agent.followup).toHaveBeenCalledTimes(1);
+    // 回复别的会话不改「当前会话」
+    expect(manager.getSessionRecord('c2c', PEER)?.sessionId).toBe(current.sessionId);
+  });
+
+  it('/to 目标不在盘上时回 not-found，不创建记录', async () => {
     const ctx = createCtx({ sessions: [] });
     const { manager } = createManager(ctx);
 
     const outcome = await manager.sendTo('c2c', PEER, PEER, 'session-cold', 'hi', REPLY);
 
-    expect(outcome).toMatchObject({ ok: false, reason: 'not-running' });
+    expect(outcome).toMatchObject({ ok: false, reason: 'not-found' });
     expect(manager.findBySessionId('session-cold')).toBeUndefined();
+    expect(manager.size).toBe(0);
+  });
+
+  it('/to 目标已归档时拒发，不替人取消归档', async () => {
+    const { registry } = createRegistry();
+    const ctx = createCtx({
+      sessions: [{ id: 'session-archived', cwd: WORKSPACE() }],
+      archived: ['session-archived'],
+    });
+    const { manager } = createManager(ctx, registry);
+
+    const outcome = await manager.sendTo('c2c', PEER, PEER, 'session-archived', 'hi', REPLY);
+
+    expect(outcome).toMatchObject({ ok: false, reason: 'archived' });
+    expect(archivedIds.has('session-archived')).toBe(true);
+    expect(registry.resume).not.toHaveBeenCalled();
     expect(manager.size).toBe(0);
   });
 
