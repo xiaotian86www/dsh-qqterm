@@ -61,7 +61,6 @@ function makeRecord(sessionId: string, status: 'idle' | 'running' = 'running'): 
     scope: 'c2c',
     peerId: 'u1',
     senderId: 'u1',
-    acquiredAt: Date.now(),
   };
   return { record, followup, whenIdle };
 }

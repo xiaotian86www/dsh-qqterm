@@ -285,8 +285,6 @@ export interface SessionRecord {
    * 入站发完即清，后续消息不重复。
    */
   worktreeNotice?: string;
-  /** 加入已获取集合的时间（运行期排序 / 排查用） */
-  acquiredAt: number;
 }
 
 /** 会话所在的工作树（/status 用；只有会话日志里有建树记录的会话才有） */
