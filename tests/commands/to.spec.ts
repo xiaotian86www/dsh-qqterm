@@ -135,11 +135,12 @@ describe('/to', () => {
   });
 
   it('已归档的目标拒绝，并给取消归档入口', async () => {
-    const manager = makeManager({ groups: groups([entry({ archived: true })]) });
+    const manager = makeManager({ sendTo: { ok: false, reason: 'archived', sessionId: TARGET } });
     const text = await run(manager, '#3f2a9b1c hi');
-    expect(text).toContain('已归档');
+    expect(text).toContain('该会话已归档');
     expect(text).toContain('/sessions unarchive #3f2a9b1c');
-    expect(manager.sendTo).not.toHaveBeenCalled();
+    // 归档与否由会话层判定，命令层不预读
+    expect(manager.sendTo).toHaveBeenCalledTimes(1);
   });
 
   it('列表里没有、也没有 live agent 时给短 id 提示', async () => {

@@ -404,7 +404,7 @@ export interface WorkspaceSession {
 /** 切换会话结果 */
 export interface SwitchSessionOutcome {
   ok: boolean;
-  reason?: 'same' | 'not-found' | 'locked' | 'failed';
+  reason?: 'same' | 'not-found' | 'locked' | 'archived' | 'failed';
   message?: string;
   /** 目标会话原先已归档，本次恢复时顺带取消了归档 */
   unarchived?: boolean;
@@ -439,6 +439,7 @@ export type RestoreOutcome =
  * - answer-mode：目标在等答案，已进入「下一条消息作为回答」模式；
  * - not-found：盘上没有这个会话；
  * - locked：会话被别的客户端占着写句柄，稍后能再试；
+ * - archived：会话已归档（不替人取消归档）；
  * - empty：没有待答问题，也没给文本；
  * - failed：打开 / followup / 答案解析失败。
  */
@@ -446,7 +447,7 @@ export type SendToOutcome =
   | { ok: true; kind: 'sent' | 'answered' | 'answer-mode'; sessionId: string }
   | {
     ok: false;
-    reason: 'not-found' | 'locked' | 'empty' | 'forbidden' | 'failed';
+    reason: 'not-found' | 'locked' | 'archived' | 'empty' | 'forbidden' | 'failed';
     sessionId: string;
     message?: string;
   };

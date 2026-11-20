@@ -1219,6 +1219,22 @@ describe('多会话：已获取集合 / /to / 切走不释放', () => {
     expect(manager.size).toBe(0);
   });
 
+  it('/to 目标已归档时拒发，不替人取消归档', async () => {
+    const { registry } = createRegistry();
+    const ctx = createCtx({
+      sessions: [{ id: 'session-archived', cwd: WORKSPACE() }],
+      archived: ['session-archived'],
+    });
+    const { manager } = createManager(ctx, registry);
+
+    const outcome = await manager.sendTo('c2c', PEER, PEER, 'session-archived', 'hi', REPLY);
+
+    expect(outcome).toMatchObject({ ok: false, reason: 'archived' });
+    expect(archivedIds.has('session-archived')).toBe(true);
+    expect(registry.resume).not.toHaveBeenCalled();
+    expect(manager.size).toBe(0);
+  });
+
   it('/to 目标在等答案时走答案通道，不再 followup', async () => {
     const { agent, registry } = liveRegistry();
     const ctx = createCtx({ sessions: [] });

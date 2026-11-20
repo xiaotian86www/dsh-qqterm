@@ -76,7 +76,7 @@ qqterm 是通道，不是能力所有者：目标是从 QQ 接入的超级终端
 - `ask_user_question` / `approval` 走宿主 waterfall，不退回 `userQuestions.ask` 探测。投递失败按键盘 → 纯文本降级；仍失败按「暂不可用」挂起，等 `ready` / `resumed` 或新入站消息后重发，不判成 `unavailable`。插件卸载或渠道失效时把挂起项 `handoffPending` 交还宿主；借来的会话不 cancel、不 dispose。
 - 聊天会话 key 固定 `qqterm:${appId}:chat`，全 bot 只有一个「当前会话」；已获取会话可以有多份，输出全部回 QQ。非当前会话的署名见 §4.9。
 - `/sessions` 默认按工作区分组列工作中会话（重启后尚未打开的也在列），`all` 看全部、只标 `📌`。两个列表视图的每行行尾都给「回复」（`/to #短id `，非当前会话一律给：列表不区分会话是否已打开）与「归档」（`/sessions archive #短id`，没有 `workspaceRegistry` 时不给）快捷链接。`resume` 只改指针；`/new` 清指针、不停旧会话；`/clear`（别名 `/reset`）停当前再开新，`/clear all` 停全部；`/stop` 停当前，`/stop all` 停全部生成中。`/clear` 与 `/clear all` 先发确认卡（5 分钟过期，卡片发不出去就放弃动作），`/new` 直接执行。
-- `/to` 的目标没打开时先按 id 接回来再发（与 `resume` 同一条路），只是不切指针；打开失败按 `not-found` / `locked` 如实回，不 create。
+- `/to` 的目标没打开时先按 id 接回来再发（与 `resume` 同一条路），只是不切指针；打开失败按 `not-found` / `locked` 如实回，不 create。已归档的会话不接回来（归档是界面已有的状态，`/to` 不替人改），回「已归档」并给取消归档入口。
 - `/new` 的参数：工作区用 `--dir`（`-d`），其余非参数词按顺序连成提示词直接发出去；`--worktree`（`-w`）让这条提示词先建树，`--background`（`-b`）另开一条会话、不动当前指针与聊天工作区且必须带提示词。
 - 启动恢复：QQ `ready` 后按 prefs 指针 `getOrCreate`（singleflight）；盘上已无则跳过并清指针，**恢复失败绝不新建**；占用 / 后端故障时指针保持原样。回复目标存 `model-prefs.json` 的 `targets`，值变化才写；恢复失败（locked / 宿主报错）用它推 `⚠️ 上次的会话没能恢复` + `/sessions resume` 按钮，`not-found` 静默。持久化写在消息路径上，不写卸载钩子（强杀不执行）。
 - 模型 / 思考强度 / preset 沿用宿主核心行为，插件不另立配置：`/model`、`/reasoning` 有活跃会话时调 `agent.model.select` 写进该会话（不 fork 不重建，下轮生效），同时把同一份选择写成部署默认值；无会话只写默认值（`agentDefaultModel.saveSelection`，`/permission` 走 `settings.update`）。整段读改写走 `serializeSelection`，同一会话的 QQ 侧写入串行，不为切换拉起会话。`/preset` 写 `agent-preset-registry.selectedDefault`，对新建会话生效，插件不存 preset。查看视图显示当前值并标 `✅`，不造「全局」标签。

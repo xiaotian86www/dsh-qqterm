@@ -76,9 +76,6 @@ export function toCommand({ manager, logger }: CommandDeps): SlashCommand {
         await manager.fillSessionTitles([target]);
         sessionId = target.id;
         title = target.title;
-        if (target.archived) {
-          return `⚠️ 该会话已归档: ${sessionTargetLabel(sessionId, title)}\n先 /sessions unarchive ${displayId(sessionId)}。`;
-        }
       } else {
         const candidate = targetArg.replace(/^#/, '');
         if (candidate.length < 4 || !manager.hasLiveSession(candidate)) {
@@ -119,6 +116,8 @@ export function toCommand({ manager, logger }: CommandDeps): SlashCommand {
           return `⚠️ 没有这个会话: ${label}`;
         case 'locked':
           return `⚠️ 这个会话正在别处使用: ${label}\n等它释放后再发一次。`;
+        case 'archived':
+          return `⚠️ 该会话已归档: ${label}\n先 /sessions unarchive ${displayId(sessionId)}。`;
         case 'forbidden':
           return `⚠️ 这个会话属于另一个用户: ${label}`;
         case 'empty':

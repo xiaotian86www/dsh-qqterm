@@ -1853,6 +1853,12 @@ export class SessionManager {
   ): Promise<SendToOutcome> {
     const body = text.trim();
 
+    // 归档是界面上已有的状态，/to 不替人改它：已归档的会话直接拒发，
+    // 要不要接回来由 /sessions unarchive 决定
+    if (this.host.archivedSessionIds().has(sessionId)) {
+      return { ok: false, reason: 'archived', sessionId };
+    }
+
     let record = this.findBySessionId(sessionId);
     // 借来的记录没有 handle，只能靠 registry 判断是否还活着；已死的当作没获取过，
     // 下面重新打开一遍
@@ -1875,6 +1881,8 @@ export class SessionManager {
         switch (opened.reason) {
           case 'not-found':
             return { ok: false, reason: 'not-found', sessionId };
+          case 'archived':
+            return { ok: false, reason: 'archived', sessionId };
           case 'locked':
             return { ok: false, reason: 'locked', sessionId };
           default:
@@ -2621,8 +2629,10 @@ export class SessionManager {
     const key = this.sessionKey();
     const openOnly = options.openOnly === true;
 
-    // 归档即不可用：恢复前先取消归档，失败则如实报错（此时还没动映射）
+    // 归档即不可用：恢复前先取消归档，失败则如实报错（此时还没动映射）。
+    // `/to` 不替人改归档状态，已归档就拒发，由人决定要不要接回来。
     const unarchived = this.host.archivedSessionIds().has(sessionId);
+    if (unarchived && openOnly) return { ok: false, reason: 'archived' };
     if (unarchived) {
       const restored = await this.host.unarchiveSession(sessionId);
       if (!restored.ok) {
