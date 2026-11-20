@@ -27,6 +27,7 @@ import type { SlashCommand } from '../commands/types.ts';
 import { attachmentProcessor } from '../middleware/attachment.ts';
 import { questionAnswer } from '../middleware/question-answer.ts';
 import { replyRecorder } from '../middleware/reply-recorder.ts';
+import { preserveMultilineCommands, restoreMultilineCommands } from '../middleware/multiline-command.ts';
 import {
   collectCommandNames,
   rejectUnknownCommands,
@@ -86,7 +87,11 @@ export function setupMiddlewares(
   bot.use(rateLimiter());
 
   // 6. 斜杠命令（在 concurrencyGuard 之前，命令匹配后不排队直接响应）
-  const commandList = buildCommandList({ manager, config, logger, bot, reloader, installer });
+  // 命令 handler 执行前把换行占位符还原（见 middleware/multiline-command.ts）
+  const commandList = restoreMultilineCommands(
+    buildCommandList({ manager, config, logger, bot, reloader, installer }),
+  );
+  const commandNames = collectCommandNames(commandList);
   const slash = slashCommand({
     // 关闭 autoHelp：help 命令由 qqbot 自己注册为 /help，
     // 避免 SDK 再自动注册一个同名命令造成重复
@@ -95,6 +100,9 @@ export function setupMiddlewares(
     prefixes: ['/', '／'],
     commands: commandList,
   });
+  // 6.1. 多行指令：SDK 的匹配正则不跨行，先把正文里的换行换成占位符（出栈还原），
+  //      否则 /new、/to 这类带换行的命令会漏成普通提问。
+  bot.use(preserveMultilineCommands(commandNames));
   bot.use(slash.middleware);
 
   // 6.5. 待答问题截获（在 concurrencyGuard 之前，答案消息不排队直接作答）
@@ -103,7 +111,7 @@ export function setupMiddlewares(
   // 6.6. 未知指令兜底（在 questionAnswer 之后：答案优先，别被守卫吃掉）
   //      拼错的 /xxx 直接回「没有这个指令」，不再当成提问转发给大模型
   bot.use(rejectUnknownCommands({
-    commandNames: collectCommandNames(commandList),
+    commandNames,
     sendText: sendText ?? (async (target, body) => {
       await bot.sendMarkdown(target, body);
     }),
