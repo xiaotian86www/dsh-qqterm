@@ -229,7 +229,8 @@ export function newCommand({ manager, config }: CommandDeps): SlashCommand {
         return lines.join('\n');
       }
 
-      const head = worktree ? '✅ 已开启带工作树的会话' : '✅ 已开启新会话';
+      // 树要到下一条消息才建，这里不预告：建好那一刻由建树回执交代
+      const head = '✅ 已开启新会话';
       return label === undefined ? head : `${head}\n${label}`;
     },
   };

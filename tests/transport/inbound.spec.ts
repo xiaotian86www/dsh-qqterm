@@ -61,7 +61,6 @@ function makeRecord(sessionId: string, status: 'idle' | 'running' = 'running'): 
     scope: 'c2c',
     peerId: 'u1',
     senderId: 'u1',
-    acquiredAt: Date.now(),
   };
   return { record, followup, whenIdle };
 }
@@ -201,13 +200,13 @@ describe('handleInbound：工作树', () => {
 
   it('新会话建了树：回执只发一次，之后不再重复', async () => {
     const { record } = makeRecord('session-a');
-    record.worktreeNotice = '✅ 已在新工作树 `dsh-x` 里开启会话\n路径: `D:\\repo\\.agents\\worktrees\\dsh-x`';
+    record.worktreeNotice = '✅ 已在新工作树 `dsh-x` 里开启会话\n🌿 从 `main` 拉出 · 路径: `D:\\repo\\.agents\\worktrees\\dsh-x`';
     const manager = managerOf([record]);
     const first = makeCtx('一');
 
     await handleInbound(first, manager, logger, sendTextOf(first));
 
-    expect(sent(first).some(([, text]) => text === '✅ 已在新工作树 `dsh-x` 里开启会话\n路径: `D:\\repo\\.agents\\worktrees\\dsh-x`')).toBe(true);
+    expect(sent(first).some(([, text]) => text === '✅ 已在新工作树 `dsh-x` 里开启会话\n🌿 从 `main` 拉出 · 路径: `D:\\repo\\.agents\\worktrees\\dsh-x`')).toBe(true);
     expect(record.worktreeNotice).toBeUndefined();
 
     const second = makeCtx('二');

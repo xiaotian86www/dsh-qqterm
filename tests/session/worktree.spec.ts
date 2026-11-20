@@ -145,25 +145,25 @@ describe('worktreeFailureText', () => {
 });
 
 describe('回执文案', () => {
-  it('两行：分支与基点，路径另起一行', () => {
+  it('两行：首行只说会话与分支，次行说基点与路径', () => {
     expect(worktreeNotice({
       branch: 'dsh-1a2b3c4d-9f0e',
       baseCommit: '6b1f02c0ffee',
       path: 'D:\\repo\\.agents\\worktrees\\dsh-1a2b3c4d-9f0e',
     })).toBe(
-      '✅ 已在新工作树 `dsh-1a2b3c4d-9f0e` 里开启会话 · 基点 `6b1f02c`\n'
-      + '路径: `D:\\repo\\.agents\\worktrees\\dsh-1a2b3c4d-9f0e`',
+      '✅ 已在新工作树 `dsh-1a2b3c4d-9f0e` 里开启会话\n'
+      + '🌿 基点 `6b1f02c` · 路径: `D:\\repo\\.agents\\worktrees\\dsh-1a2b3c4d-9f0e`',
     );
   });
 
-  it('知道父分支：说成「从 `main` 拉出」，不重复基点', () => {
+  it('知道父分支：次行说成「从 `main` 拉出」，不重复基点', () => {
     expect(worktreeNotice({
       branch: 'dsh-x',
       baseCommit: '6b1f02c0ffee',
       path: 'D:\\repo\\.agents\\worktrees\\dsh-x',
     }, 'main')).toBe(
-      '✅ 已在新工作树 `dsh-x` 里开启会话 · 从 `main` 拉出\n'
-      + '路径: `D:\\repo\\.agents\\worktrees\\dsh-x`',
+      '✅ 已在新工作树 `dsh-x` 里开启会话\n'
+      + '🌿 从 `main` 拉出 · 路径: `D:\\repo\\.agents\\worktrees\\dsh-x`',
     );
   });
 
