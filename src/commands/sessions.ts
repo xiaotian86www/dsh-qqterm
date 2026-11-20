@@ -736,7 +736,7 @@ function groupHeldEntries(
 }
 
 /**
- * 持有列表的展示顺序：按工作区分组，组内保持「当前 → 获取时间倒序」。
+ * 持有列表的展示顺序：按工作区分组，组内保持传入顺序（最近人类消息时间倒序）。
  */
 function groupHeldOrder(entries: readonly WorkspaceSession[]): WorkspaceSession[] {
   return groupHeldEntries(entries).flatMap((group) => group.rows);
@@ -748,7 +748,7 @@ function groupHeldOrder(entries: readonly WorkspaceSession[]): WorkspaceSession[
  * 这里才是「QQ 正在使用哪些会话」：按工作区分组（组标题与 `/sessions all`
  * 同一套写法），组内展示生成状态与当前项；目标一律用 8 位短 id。
  *
- * @param entries 已持有会话（已按工作区分组，当前优先，再按获取时间倒序）
+ * @param entries 已持有会话（已按工作区分组，组内按最近人类消息时间倒序）
  * @param currentId 当前指针；不在持有列表里时单独补一行
  * @param page 页码（1 起）
  * @param archivable 部署里有没有 registry（决定页脚是否给归档入口）

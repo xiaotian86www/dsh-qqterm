@@ -1524,7 +1524,6 @@ export class SessionManager {
       peerId,
       senderId,
       ...(agentPreset ? { agentPreset } : {}),
-      acquiredAt: Date.now(),
     };
 
     if (worktree !== undefined) {
@@ -2013,7 +2012,6 @@ export class SessionManager {
       peerId: input.peerId,
       senderId: input.senderId,
       ...(composed.agentPreset ? { agentPreset: composed.agentPreset } : {}),
-      acquiredAt: Date.now(),
     };
     this.records.set(sessionId, record);
     this.rememberHeld(sessionId);
@@ -2144,8 +2142,9 @@ export class SessionManager {
   /**
    * 列出 QQ 已获取的会话（跨工作区，`/sessions` 默认视图）。
    *
-   * 顺序是「当前 → 活记录按获取时间倒序 → 冷行（名册顺序）」；宿主列表暂时
-   * 没有返回的持有会话也保留（用 agent 的目录与获取时间兜底），避免刚切过去就
+   * 顺序是「最近人类消息时间倒序 → 同时间按 id 升序」，与 `/sessions all`、
+   * Web 侧栏同一口径；活记录与冷行混排，时间未知（0）的沉底。宿主列表暂时
+   * 没有返回的持有会话也保留（目录取 agent 的，时间留空），避免刚切过去就
    * 从列表消失。冷行是重启前获取过、这次还没打开的会话：标题 / 时间 / 目录都
    * 取宿主快照，状态按空闲列出。标题读取失败不影响列表本身，取不到就显示
    * 「未命名会话」。
@@ -2157,12 +2156,9 @@ export class SessionManager {
     const key = this.sessionKey();
     const currentId = this.currentSessionId(key);
     const archived = this.host.archivedSessionIds();
+    // 行顺序在最后统一按 updatedAt 排；这里只决定冷行过滤与取标题的先后
     const ordered = [...this.records.values()]
-      .filter((record) => !archived.has(record.sessionId))
-      .sort((left, right) => {
-        const currentDiff = Number(right.sessionId === currentId) - Number(left.sessionId === currentId);
-        return currentDiff !== 0 ? currentDiff : right.acquiredAt - left.acquiredAt;
-      });
+      .filter((record) => !archived.has(record.sessionId));
 
     // 重启后已获取集合是空的：名册里剩下的会话当冷行列出，用户能看到、能 resume。
     // 盘上已经明确不存在的摘掉；读不出来就留着——一次读失败不能当「会话没了」。
@@ -2259,8 +2255,10 @@ export class SessionManager {
       return {
         id: record.sessionId,
         ...(titles.has(record.sessionId) ? { title: titles.get(record.sessionId) } : {}),
-        createdAt: info?.createdAt ?? record.acquiredAt,
-        updatedAt: info?.updatedAt ?? info?.createdAt ?? record.acquiredAt,
+        // 宿主列表暂时没返回这条：时间未知按 0 处理（沉底、不显示时间），
+        // 不拿本地加入时间顶替——那不是会话的活动时间
+        createdAt: info?.createdAt ?? 0,
+        updatedAt: info?.updatedAt ?? info?.createdAt ?? 0,
         current: record.sessionId === currentId,
         live: true,
         held: true,
@@ -2303,8 +2301,12 @@ export class SessionManager {
       });
     }
 
-    // 当前项排最前（冷当前行同样适用）；其余保持「活记录按获取时间倒序、冷行按名册顺序」
-    return rows.sort((left, right) => Number(right.current) - Number(left.current));
+    // 与 `/sessions all`、Web 侧栏一致：最近人类消息时间倒序，同时间按 id 升序。
+    // 当前项不置顶——列表按活跃度说话，当前行只靠 ✅ 标记；活记录与冷行混排，
+    // 时间未知（0）的沉底
+    return rows.sort((left, right) =>
+      (right.updatedAt - left.updatedAt)
+      || (left.id < right.id ? -1 : 1));
   }
 
   /**
@@ -2722,7 +2724,6 @@ export class SessionManager {
       peerId,
       senderId,
       ...(agentPreset ? { agentPreset } : {}),
-      acquiredAt: Date.now(),
     };
     this.records.set(sessionId, record);
     this.rememberHeld(sessionId);

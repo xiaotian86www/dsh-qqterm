@@ -528,7 +528,7 @@ describe('resolveWorkspace', () => {
 });
 
 describe('listHeldSessions', () => {
-  it('跨工作区列出持有会话，当前项优先并带标题 / 工作区', async () => {
+  it('跨工作区列出持有会话并带标题 / 工作区', async () => {
     const current = 'session-current';
     const other = join(env.home, 'other-ws');
     mkdirSync(other, { recursive: true });
@@ -565,6 +565,53 @@ describe('listHeldSessions', () => {
     expect(entries[0]?.title).toContain('标题-');
   });
 
+  it('按最近人类消息时间倒序，当前项不置顶', async () => {
+    const current = 'session-current';
+    const ctx = createCtx({
+      withQuery: true,
+      sessions: [
+        { id: current, cwd: WORKSPACE(), createdAt: 1 },
+        { id: 'session-older', cwd: WORKSPACE(), createdAt: 2 },
+        { id: 'session-newer', cwd: WORKSPACE(), createdAt: 3 },
+      ],
+      // 获取顺序与活跃时间相反：先拿 older，再拿 newer，最后切成 current
+      recency: { [current]: 50, 'session-older': 900, 'session-newer': 700 },
+    });
+    const { manager } = createManager(ctx);
+
+    await manager.switchSession('c2c', PEER, 'session-older', PEER, REPLY);
+    await manager.switchSession('c2c', PEER, 'session-newer', PEER, REPLY);
+    await manager.switchSession('c2c', PEER, current, PEER, REPLY);
+
+    const entries = await manager.listHeldSessions('c2c', PEER);
+    expect(entries.map((entry) => entry.id)).toEqual(['session-older', 'session-newer', current]);
+  });
+
+  it('冷行按 updatedAt 参与排序，不再一律排在活记录之后', async () => {
+    const ctx = createCtx({
+      withQuery: true,
+      sessions: [
+        { id: 'session-current', cwd: WORKSPACE(), createdAt: 1 },
+        { id: 'session-cold', cwd: WORKSPACE(), createdAt: 2 },
+        { id: 'session-live', cwd: WORKSPACE(), createdAt: 3 },
+      ],
+      recency: { 'session-current': 1000, 'session-cold': 900, 'session-live': 100 },
+    });
+    // 上次运行获取过、这次还没打开的会话只留在名册里
+    new PrefsStore().setHeld(KEY, ['session-cold']);
+    const { manager } = createManager(ctx);
+
+    await manager.switchSession('c2c', PEER, 'session-live', PEER, REPLY);
+    await manager.switchSession('c2c', PEER, 'session-current', PEER, REPLY);
+
+    const entries = await manager.listHeldSessions('c2c', PEER);
+    expect(entries.map((entry) => [entry.id, entry.held])).toEqual([
+      ['session-current', true],
+      ['session-cold', false],
+      ['session-live', true],
+    ]);
+  });
+
   it('工作区目录已不存在时标记 missing，并用目录名兜底标题', async () => {
     const gone = join(env.home, 'gone-ws');
     const ctx = createCtx({
@@ -584,7 +631,7 @@ describe('listHeldSessions', () => {
     });
   });
 
-  it('宿主列表暂时没有返回的持有会话也保留（用获取时间兜底）', async () => {
+  it('宿主列表暂时没有返回的持有会话也保留，时间留空', async () => {
     const ctx = createCtx({ sessions: [] });
     const { manager } = createManager(ctx);
 
@@ -597,6 +644,8 @@ describe('listHeldSessions', () => {
       current: true,
       held: true,
       live: true,
+      createdAt: 0,
+      updatedAt: 0,
     });
   });
 
@@ -697,7 +746,7 @@ describe('listHeldSessions', () => {
     expect(new PrefsStore().getHeld(KEY)).toEqual(['session-kept']);
   });
 
-  it('名册里的当前会话排最前并标 current', async () => {
+  it('名册里的会话按时间排，当前项只标 current', async () => {
     const ctx = createCtx({
       sessions: [
         { id: 'session-a', cwd: WORKSPACE(), createdAt: 1 },
