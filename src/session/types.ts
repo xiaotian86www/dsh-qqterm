@@ -437,15 +437,16 @@ export type RestoreOutcome =
  * - sent：作为普通 prompt 交给目标会话；
  * - answered：目标在等答案，文本已作为答案提交；
  * - answer-mode：目标在等答案，已进入「下一条消息作为回答」模式；
- * - not-running：目标既不在已获取集合里，也没有 live agent；
+ * - not-found：盘上没有这个会话；
+ * - locked：会话被别的客户端占着写句柄，稍后能再试；
  * - empty：没有待答问题，也没给文本；
- * - failed：followup / 答案解析失败。
+ * - failed：打开 / followup / 答案解析失败。
  */
 export type SendToOutcome =
   | { ok: true; kind: 'sent' | 'answered' | 'answer-mode'; sessionId: string }
   | {
     ok: false;
-    reason: 'not-running' | 'empty' | 'forbidden' | 'failed';
+    reason: 'not-found' | 'locked' | 'empty' | 'forbidden' | 'failed';
     sessionId: string;
     message?: string;
   };

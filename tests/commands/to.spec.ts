@@ -102,12 +102,19 @@ describe('/to', () => {
     );
   });
 
-  it('目标不 live 时拒绝，并提示先 resume', async () => {
-    const manager = makeManager({ sendTo: { ok: false, reason: 'not-running', sessionId: TARGET } });
+  it('没有这个会话时给短 id 提示，不再让人先 resume', async () => {
+    const manager = makeManager({ sendTo: { ok: false, reason: 'not-found', sessionId: TARGET } });
     const text = await run(manager, `#3f2a9b1c hi`);
-    expect(text).toContain('会话未运行');
+    expect(text).toContain('没有这个会话');
     expect(text).toContain('「目标会话」 · `#3f2a9b1c`');
-    expect(text).toContain('/sessions resume #3f2a9b1c');
+    expect(text).not.toContain('/sessions resume');
+  });
+
+  it('目标被别的客户端占着时给原因与下一步', async () => {
+    const manager = makeManager({ sendTo: { ok: false, reason: 'locked', sessionId: TARGET } });
+    const text = await run(manager, `#3f2a9b1c hi`);
+    expect(text).toContain('正在别处使用');
+    expect(text).toContain('等它释放后再发一次');
   });
 
   it('列表里没有、但有 live 会话时，名字从会话日志的标题取', async () => {
