@@ -106,22 +106,28 @@ function usageFor(archivable: boolean): string {
   ].join('\n');
 }
 
-/** 目标解析结果 */
-export type SessionTargetResult =
-  | { ok: true; entry: WorkspaceSession }
+/** 目标解析结果（任意带 id 的清单） */
+export type SessionIdMatch<T> =
+  | { ok: true; entry: T }
   | { ok: false; error: string };
 
+/** 目标解析结果（会话清单版本） */
+export type SessionTargetResult = SessionIdMatch<WorkspaceSession>;
+
 /**
- * 把用户输入解析成列表中的一条会话。
+ * 把用户输入解析成清单里的一条目标。
  *
  * 句柄只有一种：id。完整 id、带 `session-` 前缀的 id、列表里那 8 位短 id 都认，
  * 前面可以带 `#`。短 id 可能是纯数字（uuid 前 8 位恰好都是数字的概率约 2%），
  * 所以数字串同样按 id 前缀处理，不再有「第几个」的含义。
+ *
+ * 泛型版本让 `/stop <id>` 这类「在别的清单里找目标」的命令复用同一套匹配与报错，
+ * 不在命令里另写一份前缀规则。
  */
-export function resolveSessionTarget(
-  entries: readonly WorkspaceSession[],
+export function matchSessionTarget<T extends { id: string }>(
+  entries: readonly T[],
   raw: string,
-): SessionTargetResult {
+): SessionIdMatch<T> {
   const arg = raw.trim().replace(/^#/, '');
   const printable = safeArg(raw.trim());
   if (arg === '') return { ok: false, error: '缺少目标（会话短 id）' };
@@ -143,6 +149,14 @@ export function resolveSessionTarget(
   if (matches.length > 1) return { ok: false, error: `id 前缀匹配到 ${matches.length} 个会话，多写几位再试` };
   const entry = matches[0];
   return entry ? { ok: true, entry } : { ok: false, error: `没有匹配的会话: ${printable}` };
+}
+
+/** 会话清单版：规则与 `matchSessionTarget` 同一份 */
+export function resolveSessionTarget(
+  entries: readonly WorkspaceSession[],
+  raw: string,
+): SessionTargetResult {
+  return matchSessionTarget(entries, raw);
 }
 
 /**
@@ -272,13 +286,12 @@ function workspaceHeader(
  * 持有列表里的会话状态。
  *
  * 其它视图不展示状态，只标 `📌`；状态词只出现在 `/sessions` 默认视图。
- * 重启后还没打开的冷会话没有可报的状态，返回 undefined：不显示状态段，
- * 也不写成「空闲」（把没恢复说成空着会误导）。
+ * 重启后还没打开的会话没有生成现场，按「空闲」列出：列表里只有「生成中 /
+ * 空闲」两档，不存在「待恢复」这一档。
  */
-function statusOf(entry: WorkspaceSession): string | undefined {
+function statusOf(entry: WorkspaceSession): string {
   if (entry.subagent) return entry.live ? '生成中' : '空闲';
-  if (entry.held || entry.live) return entry.running ? '生成中' : '空闲';
-  return undefined;
+  return entry.running ? '生成中' : '空闲';
 }
 
 /** 一行会话的展示文本：`#9d2c4410 · 标题 · 生成中 · 3d 前 ✅` */
@@ -297,10 +310,7 @@ function renderRow(entry: WorkspaceSession, options: RowOptions = {}): string {
   body.push(shortTitle(entry));
   // 子会话紧跟父行，纯文本行没有缩进与按钮，用这个词说明自己不是独立会话
   if (entry.subagent) body.push('子会话');
-  if (options.showStatus) {
-    const status = statusOf(entry);
-    if (status !== undefined) body.push(status);
-  }
+  if (options.showStatus) body.push(statusOf(entry));
   const time = formatRelativeTime(entry.updatedAt);
   if (time !== '—') body.push(time);
   // 持有标记固定放行尾
@@ -333,21 +343,25 @@ function commandLink(command: string, show: string): string {
 }
 
 /**
- * 会话行尾的快捷操作：不改当前指针的两个动作。
+ * 会话行尾的快捷操作：不改当前指针的三个动作，只给工作中的会话。
  *
  * - `回复`：把 `/to #短id ` 填进输入框，给这个会话发消息。当前会话本来就在跟它
  *   说话，不给；其余一律给——列表不区分会话是否已打开，不给入口等于把「冷会话」
  *   这个概念漏到界面上（会话还没打开时 `/to` 会请先恢复）。
+ * - `停止`：`/stop #短id`，只给正在生成的会话；空闲时没有可停的东西。
  * - `归档`：`/sessions archive #短id`，从列表与 Web 侧栏收走（日志保留，可取消归档）。
  *   部署没有 `workspaceRegistry` 时这条命令按未知子命令处理，所以也不给入口。
  *
- * 与行首的恢复按钮同处一行，用 ` · ` 分隔；子会话不是独立目标，不挂这些链接。
+ * 只有工作中的会话才走到这里：两个列表都滤掉已归档的行（它们在 `/sessions archived`
+ * 里各有「取消归档」入口）。与行首的恢复按钮同处一行，用 ` · ` 分隔；子会话不是
+ * 独立目标，不挂这些链接。
  */
 function quickLinks(entry: WorkspaceSession, archivable: boolean): string {
   const links: string[] = [];
   if (!entry.current) {
     links.push(commandLink(`/to ${displayId(entry.id)} `, '回复'));
   }
+  if (entry.running) links.push(commandLink(`/stop ${displayId(entry.id)}`, '停止'));
   if (archivable) links.push(commandLink(`/sessions archive ${displayId(entry.id)}`, '归档'));
   return links.join(' · ');
 }
@@ -810,10 +824,9 @@ function renderHeldList(
   // 当前项不在这一页时单独补一行：翻到第 2 页也能看到当前是哪个。
   // 指针指向的会话不在名单里（例如刚 /new 过或名册被清）就只给 id，不编状态。
   if (currentLineId !== undefined) {
-    const status = currentEntry === undefined ? undefined : statusOf(currentEntry);
-    fields.push(status === undefined
+    fields.push(currentEntry === undefined
       ? `**当前**: ${displayId(currentLineId)}`
-      : `**当前**: ${displayId(currentLineId)} · ${status}`);
+      : `**当前**: ${displayId(currentLineId)} · ${statusOf(currentEntry)}`);
   }
 
   const lines: string[] = [

@@ -205,13 +205,14 @@ describe('/sessions 持有视图', () => {
     expect(text).not.toContain('修复登录 bug');
   });
 
-  it('行尾给回复与归档入口：当前会话不重复给回复，没打开的会话同样给', async () => {
+  it('行尾给回复、停止与归档入口：当前会话不重复给回复，没打开的会话同样给', async () => {
     const manager = makeManager({
       listHeldSessions: vi.fn(async () => [
         entry({
           id: 'session-cccc1111',
           current: true,
           held: true,
+          running: true,
           title: '当前会话',
           workspace: 'repo',
           workspacePath: '/repo',
@@ -220,6 +221,7 @@ describe('/sessions 持有视图', () => {
           id: 'session-dddd2222',
           held: true,
           live: true,
+          running: true,
           title: '后台会话',
           workspace: 'repo',
           workspacePath: '/repo',
@@ -237,17 +239,21 @@ describe('/sessions 持有视图', () => {
     const text = await run(manager, '');
     const lineOf = (id: string): string => text.split('\n').find((line) => line.includes(id)) ?? '';
 
-    // 已获取的后台会话：回复 + 归档，与恢复按钮同一行
+    // 已获取的后台会话：回复 + 停止 + 归档，与恢复按钮同一行
     expect(lineOf('#dddd2222')).toContain(
       '<qqbot-cmd-input text="/to #dddd2222 " show="回复"/>'
+        + ' · <qqbot-cmd-input text="/stop #dddd2222" show="停止"/>'
         + ' · <qqbot-cmd-input text="/sessions archive #dddd2222" show="归档"/>',
     );
-    // 当前会话本来就在跟它说话，只留归档
+    // 当前会话本来就在跟它说话，不给回复；正在生成时仍有停止
     expect(lineOf('#cccc1111')).not.toContain('show="回复"');
+    expect(lineOf('#cccc1111')).toContain('text="/stop #cccc1111" show="停止"');
     expect(lineOf('#cccc1111')).toContain('text="/sessions archive #cccc1111"');
     // 还没打开的会话也照给：列表不区分打开与否，点了由 /to 提示先恢复
     expect(lineOf('#eeee3333')).toContain('text="/to #eeee3333 " show="回复"');
     expect(lineOf('#eeee3333')).toContain('text="/sessions archive #eeee3333"');
+    // 空闲会话没有可停的东西，不给停止入口
+    expect(lineOf('#eeee3333')).not.toContain('show="停止"');
   });
 
   it('持有会话下的子会话紧跟父行展示，不做成可恢复目标', async () => {
@@ -303,7 +309,7 @@ describe('/sessions 持有视图', () => {
     expect(text).not.toContain(' ✅');
   });
 
-  it('重启后还没打开的会话列出但不显示状态（不说成空闲）', async () => {
+  it('重启后还没打开的会话也按空闲列出，不出现「待恢复」', async () => {
     const manager = makeManager({
       listHeldSessions: vi.fn(async () => [
         entry({ id: 'session-cold1111', title: '旧会话', held: false, live: false, running: false }),
@@ -311,9 +317,8 @@ describe('/sessions 持有视图', () => {
     });
     const text = await run(manager, '');
 
-    expect(text).toContain('#cold1111 · 旧会话');
+    expect(text).toContain('#cold1111 · 旧会话 · 空闲');
     expect(text).not.toContain('待恢复');
-    expect(text).not.toContain('空闲');
   });
 
   it('跨工作区的持有项按工作区分组，行内不重复工作区名', async () => {
@@ -606,7 +611,7 @@ describe('/sessions all', () => {
     expect(text).not.toContain('空闲');
   });
 
-  it('全部会话同样在行尾给回复与归档入口', async () => {
+  it('全部会话同样在行尾给回复、停止与归档入口', async () => {
     const manager = makeManager({
       listWorkspaceGroups: vi.fn(async () => [{
         id: 'ws-1',
@@ -614,7 +619,7 @@ describe('/sessions all', () => {
         path: '/repo',
         missing: false,
         sessions: [
-          entry({ id: 'session-held', held: true, live: true, title: '持有会话', workspace: 'repo' }),
+          entry({ id: 'session-held', held: true, live: true, running: true, title: '持有会话', workspace: 'repo' }),
           entry({ id: 'session-cold', title: '未打开的会话', workspace: 'repo' }),
         ],
       }]),
@@ -623,11 +628,15 @@ describe('/sessions all', () => {
     const text = await run(manager, 'all');
     const lineOf = (id: string): string => text.split('\n').find((line) => line.includes(id)) ?? '';
 
-    expect(lineOf('#held')).toContain('text="/to #held " show="回复"');
-    expect(lineOf('#held')).toContain('text="/sessions archive #held" show="归档"');
-    // 还没打开的会话也照给，列表不区分打开与否
+    expect(lineOf('#held')).toContain(
+      '<qqbot-cmd-input text="/to #held " show="回复"/>'
+        + ' · <qqbot-cmd-input text="/stop #held" show="停止"/>'
+        + ' · <qqbot-cmd-input text="/sessions archive #held" show="归档"/>',
+    );
+    // 还没打开的会话也照给，列表不区分打开与否；它没在生成，不给停止
     expect(lineOf('#cold')).toContain('text="/to #cold " show="回复"');
     expect(lineOf('#cold')).toContain('text="/sessions archive #cold" show="归档"');
+    expect(lineOf('#cold')).not.toContain('show="停止"');
   });
 
   it('按工作区分组列出：只给短 id，不编号', async () => {
@@ -767,6 +776,8 @@ describe('/sessions all', () => {
     expect(text).toContain('**收工的项目**');
     expect(text).toContain('1 个会话全部已归档');
     expect(text).toContain('/sessions archived');
+    // 已归档的行不进列表，也就不该出现任何快捷链接
+    expect(text).not.toContain('#fff99999');
   });
 
   it('没有工作区会话时给出引导', async () => {

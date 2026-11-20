@@ -138,7 +138,7 @@ export async function bootstrapGateway(
     mediaSender,
     config,
     logger,
-    // 非当前会话：来源头 + 尾部链接行（回复 / 恢复 / 归档），与普通消息同一套装饰
+    // 非当前会话：来源头 + 尾部链接行（回复 / 恢复 / 停止 / 归档），与普通消息同一套装饰
     (record, text) => (manager.isCurrentSession(record.sessionId)
       ? text
       : decorateSessionMessage(
@@ -146,6 +146,7 @@ export async function bootstrapGateway(
         record.sessionId,
         sessionTitleOf(record),
         manager.workspaceRegistryAvailable(),
+        record.agent.status === 'running',
       )),
   );
 

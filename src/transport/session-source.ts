@@ -2,14 +2,14 @@
  * 非当前会话消息的来源标注与快捷回复入口。
  *
  * 多个已获取会话的输出都回同一个 QQ 聊天：正文前标会话（短 id + 标题），
- * 正文后空一行给「回复」「恢复」「归档」三个行内指令链接。来源行独占一行、
- * 与正文之间空一行——不能把标记直接拼在正文前面，否则会和 markdown 标题、
- * 列表、代码块粘成一段。
+ * 正文后空一行给「回复」「恢复」「停止」「归档」四个行内指令链接。来源行
+ * 独占一行、与正文之间空一行——不能把标记直接拼在正文前面，否则会和
+ * markdown 标题、列表、代码块粘成一段。
  *
- * 三个链接都必须保留：`回复` 把 `/to #短id ` 填进输入框，`恢复` 直接切走
- * 当前指针，`归档` 把这个后台会话从列表里收走。三者独占一行、正文之后空一行，
- * 位置固定好找；归档只在部署有 workspaceRegistry 时出现（没有归档能力时不给
- * 点了没用的入口）。
+ * `回复` 把 `/to #短id ` 填进输入框，`恢复` 直接切走当前指针，`停止` 中止这个
+ * 后台会话正在生成的回合，`归档` 把这个后台会话从列表里收走。四者独占一行、
+ * 正文之后空一行，位置固定好找；停止只在会话确实在生成时出现，归档只在部署有
+ * workspaceRegistry 时出现（没有对应能力时不给点了没用的入口）。
  */
 import type { SessionEventLike, SessionRecord } from '../session/index.ts';
 import { shortSessionId } from '../shared/utils.ts';
@@ -79,9 +79,20 @@ export function sessionArchiveLink(sessionId: string, label = '归档'): string 
   return `<qqbot-cmd-input text="/sessions archive #${shortSessionId(sessionId)}" show="${label}"/>`;
 }
 
-/** 尾部链接行（正文下方独占一行）：回复 + 恢复 [+ 归档] */
-export function sessionLinkRow(sessionId: string, archivable = false): string {
+/**
+ * 停止链接：中止这个后台会话正在生成的回合。
+ *
+ * 只在该会话确实在生成时拼进尾部行：消息发出去时已经空闲的会话没有可停的东西，
+ * 给了入口也只会回一句「没有进行中的生成」。
+ */
+export function sessionStopLink(sessionId: string, label = '停止'): string {
+  return `<qqbot-cmd-input text="/stop #${shortSessionId(sessionId)}" show="${label}"/>`;
+}
+
+/** 尾部链接行（正文下方独占一行）：回复 + 恢复 [+ 停止] [+ 归档] */
+export function sessionLinkRow(sessionId: string, archivable = false, stoppable = false): string {
   const links = [sessionReplyLink(sessionId), sessionResumeLink(sessionId)];
+  if (stoppable) links.push(sessionStopLink(sessionId));
   if (archivable) links.push(sessionArchiveLink(sessionId));
   return links.join(' · ');
 }
@@ -152,8 +163,9 @@ export function decorateSessionMessage(
   sessionId: string,
   title?: string,
   archivable = false,
+  stoppable = false,
 ): string {
   const body = text.trim();
   if (body === '') return '';
-  return `${sessionSourceHeader(sessionId, title)}\n\n${body}\n\n${sessionLinkRow(sessionId, archivable)}`;
+  return `${sessionSourceHeader(sessionId, title)}\n\n${body}\n\n${sessionLinkRow(sessionId, archivable, stoppable)}`;
 }
