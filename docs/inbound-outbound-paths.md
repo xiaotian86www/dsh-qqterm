@@ -32,6 +32,8 @@
 
 ## 4. 出站路径
 
+> 流程图：[outbound-flow.svg](./outbound-flow.svg)。① 事件入口 → ② 路由 → ③a/③b 分支 → ④ `Sender.session`（署名 / 分片 / 逐片投递）→ ⑤ `Outbox.deliver`（失败判定与队列）→ ⑥ `reply-bot` 凭证层；右侧是不经 Outbox 的旁路出口。
+
 | # | 路径 | 触发与入口 | 要做的事 |
 |---|---|---|---|
 | O1 | assistant 正文 | `session/event` 的 `assistant/message` → `outbound.route`（`src/transport/outbound.ts:125`） | 事件解析、文本与内嵌图片分段、非当前会话署名、本地文件链接改写、按 `textChunkLimit` 分片、按会话串行、失败分类、transient 重试一次、断网入队补发、超长减半重切、被拦截时提示 |
