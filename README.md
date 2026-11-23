@@ -170,6 +170,8 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqterm/cordis.dev.yml
 
 排队只发生在同一会话内部：同一会话的消息按到达顺序执行；不同会话互不阻塞。会话不按闲置时间回收，只要进程还在、agent 还没卸载就一直可用。
 
+会话正在生成时再发提示词，落点由宿主的 `ui-conversation.busyEnter` 决定：默认排队到本轮结束（回执 `✅ 已排队`，带 `/steer` 插话入口）；宿主设为插话时在下一步消费（回执 `✅ 已插话`）。`/steer` 只改一条排队消息的落点，不中止当前生成；`/stop` 才是中止，并会丢弃排队中的消息。
+
 ### 工作区
 
 工作区是宿主的 `workspaceRegistry` 概念，dsh-qqterm 不维护自己的目录列表。
@@ -226,7 +228,8 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqterm/cordis.dev.yml
 | `/permission` | 查看或切换当前会话的权限预设（仅绑定用户） |
 | `/cost` | 查看当前会话的 token 消耗 |
 | `/status` | 查看会话状态：会话、状态、工作区、工作树、模型、思考强度、preset、权限、上下文 |
-| `/stop` | 中止当前生成；`/stop <id>` 停指定已获取会话；`/stop all` 停全部 |
+| `/stop` | 中止当前生成；`/stop <id>` 停指定已获取会话；`/stop all` 停全部；排队中的消息一并丢弃 |
+| `/steer` | 把排队中的提示词改成插话（下一步生效）；不带参数用当前会话最近一条，`<id>` 指定已获取会话，`<id> <消息id>` 指定具体消息 |
 | `/retry` | 重发当前会话上一条用户消息 |
 | `/help` | 查看所有指令；`/help <命令>` 查看参数与用法 |
 | `/plugins` | 插件管理：列出、`install` / `update`、`check`、`reload`（仅绑定用户） |

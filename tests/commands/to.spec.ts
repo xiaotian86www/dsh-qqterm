@@ -11,6 +11,14 @@ import type { SessionManager, SessionRecord, WorkspaceGroup, WorkspaceSession } 
 import type { Logger } from '../../src/types.ts';
 import { toCommand } from '../../src/commands/to.ts';
 
+const state = vi.hoisted(() => ({ sent: [] as string[] }));
+
+vi.mock('../../src/shared/send-helper.ts', () => ({
+  sendMarkdownChunked: async (_ctx: unknown, content: string): Promise<void> => {
+    state.sent.push(content);
+  },
+}));
+
 const config = ConfigSchema({ appId: 'app', appSecret: 'secret' } as QQTermConfig);
 const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
 
@@ -44,12 +52,16 @@ function makeManager(over: {
   sendTo?: SendToResult;
   live?: boolean;
   record?: SessionRecord;
+  current?: boolean;
+  canSteer?: boolean;
 } = {}) {
   return {
     listWorkspaceGroups: vi.fn(async () => over.groups ?? groups()),
     fillSessionTitles: vi.fn(async () => {}),
     hasLiveSession: vi.fn(() => over.live ?? true),
     findBySessionId: vi.fn(() => over.record),
+    isCurrentSession: vi.fn(() => over.current ?? false),
+    canSteer: vi.fn(() => over.canSteer ?? true),
     sendTo: vi.fn(async () => over.sendTo ?? { ok: true, kind: 'sent', sessionId: TARGET }),
   } as unknown as SessionManager;
 }
@@ -62,9 +74,10 @@ function makeCtx(raw: string): SlashCommandHandlerContext {
 }
 
 async function run(manager: SessionManager, raw: string): Promise<string> {
+  state.sent.length = 0;
   const command = toCommand({ manager, config, logger });
   const result = await command.handler(makeCtx(raw));
-  return typeof result === 'string' ? result : '';
+  return typeof result === 'string' ? result : state.sent.at(-1) ?? '';
 }
 
 beforeEach(() => {
@@ -86,6 +99,44 @@ describe('/to', () => {
       '继续修登录',
       { scope: 'c2c', targetId: 'user1' },
     );
+  });
+
+  it('目标正在生成时按排队回执，带这条消息的插话入口', async () => {
+    const manager = makeManager({
+      current: true,
+      sendTo: { ok: true, kind: 'queued', sessionId: TARGET, messageId: 'm-1' },
+    });
+
+    const text = await run(manager, '#3f2a9b1c 继续修登录');
+
+    expect(text).toContain('✅ 已排队 · 本轮结束后发送');
+    expect(text).toContain('/steer #3f2a9b1c m-1');
+    expect(text).toContain('插话');
+    // 命令的纯文本回复不渲染标签，排队回执必须走 markdown
+    expect(state.sent.at(-1)).toBe(text);
+  });
+
+  it('目标正在生成且核心设为插话：回执说已插话，不给入口', async () => {
+    const manager = makeManager({
+      current: true,
+      sendTo: { ok: true, kind: 'steered', sessionId: TARGET, messageId: 'm-1' },
+    });
+
+    const text = await run(manager, '#3f2a9b1c 继续修登录');
+
+    expect(text).toBe('✅ 已插话 · 下一步生效');
+    expect(text).not.toContain('/steer');
+    expect(state.sent.at(-1)).toBe(text);
+  });
+
+  it('别的会话排队：回执带标题与短 id，不冒充当前会话', async () => {
+    const manager = makeManager({
+      canSteer: false,
+      sendTo: { ok: true, kind: 'queued', sessionId: TARGET, messageId: 'm-1' },
+    });
+
+    expect(await run(manager, '#3f2a9b1c hi'))
+      .toBe('✅ 已排队 · 「目标会话」 · `#3f2a9b1c`');
   });
 
   it('目标在等答案时回「已回答」，不冒充新 prompt', async () => {

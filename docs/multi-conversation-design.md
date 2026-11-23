@@ -233,8 +233,9 @@ class SessionManager {
 | `/reset all` | cancel + 释放全部已获取会话，清空集合，再铸新 id |
 | `/sessions archive` | 取消归档 / 归档由宿主处理；该 sessionId 的 pending 清理；有 handle 的可 dispose |
 | 插件卸载 | 有 handle 的 dispose；没 handle 的只清引用；不 cancel 借来的 |
-| `/stop` | 只 cancel current 的 agent；即使是借来的也 cancel（接受的语义） |
+| `/stop` | cancel current 的 agent（`<id>` / `all` 指定会话）；即使是借来的也 cancel（接受的语义）；排队输入一并丢弃 |
 | `/stop all` | cancel 所有 running 的已获取会话；顺带清对应 pending |
+| `/steer` | 把一条仍排队的 prompt 改成插话（`sessionController.updateQueue`）；不 cancel、不改 current；可指定已获取会话 |
 | agent 被外部 dispose | `agent/disposed` 事件摘掉记录；兜底再比对 `agents.get(id)` 是否换成了另一个 agent |
 
 ---

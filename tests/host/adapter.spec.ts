@@ -268,6 +268,51 @@ describe('workspaceRegistry 可选', () => {
   });
 });
 
+describe('排队消息改成插话（sessionController.updateQueue）', () => {
+  it('没有 sessionController / updateQueue 时不可用', () => {
+    expect(createHostAdapter(makeCtx()).supportsQueueSteer()).toBe(false);
+    expect(createHostAdapter(makeCtx({
+      sessionController: { list: async () => ({}) },
+    })).supportsQueueSteer()).toBe(false);
+  });
+
+  it('有 updateQueue 时可用，并原样传会话、消息与 steer 动作', async () => {
+    const updateQueue = vi.fn(async () => ({ accepted: true }));
+    const adapter = createHostAdapter(makeCtx({ sessionController: { updateQueue } }));
+
+    expect(adapter.supportsQueueSteer()).toBe(true);
+    expect(await adapter.steerQueuedMessage('session-a', 'm-1')).toEqual({ ok: true });
+    expect(updateQueue).toHaveBeenCalledWith({
+      sessionId: 'session-a',
+      itemId: 'm-1',
+      action: { kind: 'steer' },
+    });
+  });
+
+  it('宿主拒绝 accepted=false：按失败处理，不冒充成功', async () => {
+    const adapter = createHostAdapter(makeCtx({
+      sessionController: { updateQueue: async () => ({ accepted: false }) },
+    }));
+
+    expect(await adapter.steerQueuedMessage('s', 'm')).toEqual({ ok: false, reason: 'failed' });
+  });
+
+  it('宿主错误码归一成 not-found / steer-unavailable，其它保留原因', async () => {
+    const withCode = (code: string) => createHostAdapter(makeCtx({
+      sessionController: {
+        updateQueue: async () => { throw Object.assign(new Error('nope'), { code }); },
+      },
+    }));
+
+    expect(await withCode('session/queue-item-not-found').steerQueuedMessage('s', 'm'))
+      .toEqual({ ok: false, reason: 'not-found' });
+    expect(await withCode('session/steer-unavailable').steerQueuedMessage('s', 'm'))
+      .toEqual({ ok: false, reason: 'steer-unavailable' });
+    expect(await withCode('EIO').steerQueuedMessage('s', 'm'))
+      .toMatchObject({ ok: false, reason: 'failed' });
+  });
+});
+
 describe('读当前分支（headOf）', () => {
   function fakeSubprocess(reply: (argv: readonly string[]) => { code: number; text: string }) {
     const calls: Array<{ argv: readonly string[]; cwd: string; env?: Readonly<Record<string, string>> }> = [];

@@ -70,6 +70,13 @@ export interface DshAgent {
   };
   cancel(cause: { kind: string }): void;
   followup(message: unknown): void;
+  /** 插话：把消息交给最近一步消费（不中止当前轮） */
+  steer(message: unknown): void;
+  /** 宿主 inbox：排队项与下一步项，插话前用它判消息是否还在队列 */
+  readonly inbox: {
+    readonly nextTurn: readonly { id: string }[];
+    readonly nextStep: readonly { id: string }[];
+  };
   whenIdle(): Promise<void>;
   /**
    * 选择模型 / 思考强度（宿主 dsh-agent 的 `agent.model`）
@@ -200,6 +207,14 @@ export interface PresetEntry {
 export interface SettingsLike {
   /** 合并写入某个插件条目的 volatile 字段（expectedRevision 省略时不做冲突检查） */
   update(ns: string, patch: Record<string, unknown>, expectedRevision?: number): Promise<void>;
+  /** 读出各命名空间的生效值（只读；宿主 ui-conversation 的 busyEnter 从这里取） */
+  describe(): readonly SettingsDescriptorLike[];
+}
+
+/** 一个已注册设置命名空间的生效值（只取读 busyEnter 需要的字段） */
+export interface SettingsDescriptorLike {
+  readonly ns: string;
+  readonly value?: Record<string, unknown>;
 }
 
 /**
@@ -429,10 +444,21 @@ export type RestoreOutcome =
     message?: string;
   };
 
+/** 一条 prompt 的落点：新开一轮 / 排队等本轮结束 / 插话到下一步 */
+export type PromptPlacement = 'started' | 'queued' | 'steered';
+
+/** 交给宿主后的回执依据：消息 id 用于精确插话，落点用于回执 */
+export interface PromptSubmission {
+  messageId: string;
+  placement: PromptPlacement;
+}
+
 /**
  * 向指定会话发 prompt / 回答的结果。
  *
- * - sent：作为普通 prompt 交给目标会话；
+ * - sent：目标空闲，作为普通 prompt 开了一轮；
+ * - queued：目标正在生成，prompt 排在 next-turn 队列；
+ * - steered：目标正在生成，prompt 插到下一步；
  * - answered：目标在等答案，文本已作为答案提交；
  * - answer-mode：目标在等答案，已进入「下一条消息作为回答」模式；
  * - not-found：盘上没有这个会话；
@@ -442,7 +468,9 @@ export type RestoreOutcome =
  * - failed：打开 / followup / 答案解析失败。
  */
 export type SendToOutcome =
-  | { ok: true; kind: 'sent' | 'answered' | 'answer-mode'; sessionId: string }
+  | { ok: true; kind: 'sent'; sessionId: string }
+  | { ok: true; kind: 'queued' | 'steered'; sessionId: string; messageId: string }
+  | { ok: true; kind: 'answered' | 'answer-mode'; sessionId: string }
   | {
     ok: false;
     reason: 'not-found' | 'locked' | 'archived' | 'empty' | 'forbidden' | 'failed';
@@ -474,7 +502,7 @@ export type RenameSessionOutcome =
  * - failed：followup 抛错。
  */
 export type RetryPromptOutcome =
-  | { ok: true; sessionId: string }
+  | ({ ok: true; sessionId: string } & PromptSubmission)
   | { ok: false; reason: 'no-session' | 'no-prompt' | 'failed'; message?: string };
 
 /** 归档 / 取消归档结果 */
@@ -534,4 +562,7 @@ export interface WorkspaceGroup {
   /** 组内会话（先置顶、再按记账/创建时间顺序） */
   sessions: WorkspaceSession[];
 }
-
+/** 把一条排队消息改成插话的结果（错误码已归一，不区分宿主服务缺失） */
+export type SteerQueuedOutcome =
+  | { ok: true }
+  | { ok: false; reason: 'not-found' | 'steer-unavailable' | 'failed'; message?: string };
