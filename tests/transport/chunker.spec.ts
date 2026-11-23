@@ -33,6 +33,29 @@ describe('splitForLimit', () => {
     }
   });
 
+  it('末片只剩行内标签时，从上一片让一段正文过来', () => {
+    // 正文顶到上限，尾部链接行被单独切出来：只有标签的消息在 QQ 端是空的
+    const chunks = splitForLimit(decorateSessionMessage('a'.repeat(800), id, '修登录', true), 400);
+
+    expect(chunks.length).toBeGreaterThan(1);
+    for (const chunk of chunks) {
+      expect(chunk.length).toBeLessThanOrEqual(400);
+      expect(chunk.replace(/<qqbot-cmd-input[^>]*\/>/g, '').trim()).not.toBe('');
+    }
+    expect(chunks[chunks.length - 1]!.startsWith('<qqbot-cmd-input')).toBe(false);
+    expect(chunks[chunks.length - 1]!).toContain('show="恢复"');
+  });
+
+  it('末片只有标签、上一片余量够时，直接并进上一片', () => {
+    // 单行正文硬切后，末片只剩一小截正文 + 标签行，合进来比再切一刀更省一条消息
+    const chunks = splitForLimit(decorateSessionMessage('a'.repeat(500), id, '修登录'), 400);
+
+    expect(chunks.length).toBe(3);
+    expect(chunks[2]!.startsWith('a')).toBe(true);
+    expect(chunks[2]).toContain('show="恢复"');
+    for (const chunk of chunks) expect(chunk.length).toBeLessThanOrEqual(400);
+  });
+
   it('单行超长时按字符硬切，不切断行内标签', () => {
     const tag = '<qqbot-cmd-input text="/get 报告.md" show="报告.md"/>';
     const text = `${'a'.repeat(180)}${tag}${'b'.repeat(120)}`;
