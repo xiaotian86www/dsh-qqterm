@@ -229,7 +229,7 @@ Workspaces are the host's `workspaceRegistry` concept; dsh-qqterm keeps no direc
 | `/stop` | Abort the current generation; `/stop <id>` stops a given acquired session; `/stop all` stops everything |
 | `/retry` | Resend the current session's previous user message |
 | `/help` | Show all commands; `/help <command>` shows arguments and usage |
-| `/plugins` | Plugin management: list, `install` / `update`, `reload` (bound user only) |
+| `/plugins` | Plugin management: list, `install` / `update`, `check`, `reload` (bound user only) |
 
 Notes:
 
@@ -283,9 +283,10 @@ Notes:
 
 - Lists plugin packages in the registry; entries with a new version carry "→ New version" and an update link.
 - `install` / `update` call the host reconcile immediately: install a new version; on update pick the latest compatible one and roll back to the old version on failure; packages with build scripts pause first for a "Continue install" button.
+- `check` queries the registry for updatable plugins right away instead of waiting for the scheduled check; the receipt reports how many plugins were checked, how many can be updated, and how many lookups failed.
 - `reload` replaces changed items by the on-disk identity of loaded modules and reports no changes when the disk has not changed.
 - For a local tgz dev package, run `pnpm dev:reload` first to snapshot and install it into the dev profile, then send `/plugins reload`.
-- Update checks run once 2 minutes after startup and every 6 hours after that; only the bound user can run the command.
+- Update checks run automatically once 2 minutes after startup and every 6 hours after that; `check` is a manual trigger of the same check. Only the bound user can run the command.
 
 ## Core modules
 

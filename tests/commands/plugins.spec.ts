@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { SlashCommandHandlerContext } from '@tencent-connect/qqbot-nodejs';
 import { ConfigSchema, type QQTermConfig } from '../../src/config.ts';
 import type { PluginInstaller } from '../../src/plugins/index.ts';
-import type { PluginOpState } from '../../src/plugins/state.ts';
+import type { PluginOpState, PluginUpdateCheck } from '../../src/plugins/state.ts';
 import type { BundleInfoLike } from '../../src/plugins/types.ts';
 import type { Reloader } from '../../src/reload/index.ts';
 import type { SessionManager } from '../../src/session/index.ts';
@@ -36,6 +36,7 @@ interface Harness {
   find: ReturnType<typeof vi.fn>;
   reloadAnnounce: ReturnType<typeof vi.fn>;
   reloadRun: ReturnType<typeof vi.fn>;
+  checkUpdates: ReturnType<typeof vi.fn>;
   order: string[];
   bot: { sendMarkdown: ReturnType<typeof vi.fn> };
 }
@@ -46,6 +47,7 @@ function harness(options?: {
   info?: BundleInfoLike;
   noInstaller?: boolean;
   reloadAvailable?: boolean;
+  check?: () => Promise<PluginUpdateCheck>;
 }): Harness {
   const order: string[] = [];
   const announce = vi.fn(async () => {
@@ -63,6 +65,7 @@ function harness(options?: {
   const list = vi.fn(async () => options?.bundles ?? [bundle({ name: 'dsh-x', version: '1.0.0' })]);
   const find = vi.fn(async () => options?.info ?? bundle({ name: 'dsh-x', version: '1.0.0' }));
   const pending = vi.fn(() => options?.running);
+  const checkUpdates = vi.fn(options?.check ?? (async () => ({ checked: 0, versions: {}, failed: [] })));
   const bot = {
     sendMarkdown: vi.fn(async () => {
       order.push('ack');
@@ -80,7 +83,7 @@ function harness(options?: {
       describe: vi.fn(),
       // 列表直接读后台检查的缓存：这里给空结果，渲染不出现版本箭头
       updates: vi.fn(() => undefined),
-      checkUpdates: vi.fn(),
+      checkUpdates,
     } as unknown as PluginInstaller;
   const reloader = {
     available: options?.reloadAvailable ?? true,
@@ -96,6 +99,7 @@ function harness(options?: {
     find,
     reloadAnnounce,
     reloadRun,
+    checkUpdates,
     order,
     bot,
   };
@@ -240,6 +244,51 @@ describe('/plugins update', () => {
   });
 });
 
+describe('/plugins check', () => {
+  it('查完直接回可更新数量与列表入口', async () => {
+    const h = harness({ check: async () => ({ checked: 2, versions: { 'dsh-a': '1.1.0' }, failed: [] }) });
+    const result = await h.command.handler(makeCtx('check', h.bot));
+
+    expect(h.checkUpdates).toHaveBeenCalledTimes(1);
+    expect(result).toBe(
+      '✅ 已检查 2 个插件，1 个可更新\n<qqbot-cmd-input text="/plugins" show="查看列表"/>',
+    );
+    expect(h.bot.sendMarkdown).not.toHaveBeenCalled();
+  });
+
+  it('没有可自动更新的插件时直说，不冒充已是最新', async () => {
+    const h = harness();
+    expect(await h.command.handler(makeCtx('check'))).toBe('✅ 没有可自动更新的插件');
+  });
+
+  it('查询失败时标警告并给重试入口', async () => {
+    const h = harness({ check: async () => ({ checked: 2, versions: {}, failed: ['dsh-a'] }) });
+    expect(await h.command.handler(makeCtx('check'))).toBe(
+      '⚠️ 已检查 2 个插件，1 个查询失败\n<qqbot-cmd-input text="/plugins check" show="重试"/>',
+    );
+  });
+
+  it('多给参数时回未知参数，不查 registry', async () => {
+    const h = harness();
+    expect(await h.command.handler(makeCtx('check now'))).toBe('⚠️ 未知参数: now · 用法: /help plugins');
+    expect(h.checkUpdates).not.toHaveBeenCalled();
+  });
+
+  it('没有 pluginManager 时不冒充「没有可更新」', async () => {
+    const h = harness({ noInstaller: true });
+    expect(await h.command.handler(makeCtx('check'))).toBe('⚠️ 当前 profile 没有插件管理能力');
+  });
+
+  it('检查抛错时给出原因，不复用「插件操作启动失败」', async () => {
+    const h = harness({
+      check: async () => {
+        throw new Error('network down');
+      },
+    });
+    expect(await h.command.handler(makeCtx('check'))).toBe('❌ 检查插件更新失败: network down');
+  });
+});
+
 describe('/plugins reload', () => {
   it('先补发上一轮，再回执，最后调度重载', async () => {
     const h = harness();
@@ -282,7 +331,8 @@ describe('/plugins 用法', () => {
     expect(result).toBe('⚠️ 不支持的子命令: `remove` · 用法: /help plugins');
   });
 
-  it('用法页只在有 hmr 时列 reload', () => {
+  it('用法页列出 check，只在有 hmr 时列 reload', () => {
+    expect(harness().command.usage).toContain('/plugins check');
     expect(harness().command.usage).toContain('/plugins reload');
     expect(harness({ reloadAvailable: false }).command.usage).not.toContain('/plugins reload');
   });

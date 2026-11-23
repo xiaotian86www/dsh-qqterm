@@ -8,7 +8,7 @@
 import type { QQBot, SlashCommandHandlerContext } from '@tencent-connect/qqbot-nodejs';
 import type { SlashCommand, CommandDeps } from './types.ts';
 import { errorText, sendMarkdownChunked } from '../shared/index.ts';
-import { renderPluginList } from '../plugins/format.ts';
+import { renderPluginCheck, renderPluginList } from '../plugins/format.ts';
 import type { PluginInstaller } from '../plugins/index.ts';
 import { ownerOnlyAuth } from './auth.ts';
 import { parseArgs } from './args.ts';
@@ -21,6 +21,7 @@ function usageFor(reloadable: boolean): string {
     '`/plugins [页码]` 列出已安装插件',
     '`/plugins install <包名> [--allow-builds=<包名,…>]` 安装插件',
     '`/plugins update <包名> [版本]` 更新插件',
+    '`/plugins check` 立即检查插件更新',
     ...(reloadable ? ['`/plugins reload` 应用磁盘变更'] : []),
   ].join('\n');
 }
@@ -63,6 +64,17 @@ export function pluginsCommand({ config, logger, installer, reloader }: CommandD
           const raw = sub === 'list' ? (words[1] ?? '1') : sub === '' ? '1' : sub;
           const page = /^\d+$/.test(raw) ? Number.parseInt(raw, 10) : 1;
           return await listPage(cmdCtx, installer, page, config.textChunkLimit);
+        }
+
+        if (sub === 'check') {
+          if (installer === undefined) return '⚠️ 当前 profile 没有插件管理能力';
+          if (words[1] !== undefined) return `⚠️ 未知参数: ${words[1]} · 用法: /help plugins`;
+          // 检查只读 registry、写更新缓存，不碰 profile：可以就地等结果，不必脱离 fiber
+          try {
+            return renderPluginCheck(await installer.checkUpdates());
+          } catch (err) {
+            return `❌ 检查插件更新失败: ${errorText(err)}`;
+          }
         }
 
         if (sub === 'install' || sub === 'update') {

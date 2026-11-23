@@ -2,7 +2,7 @@
  * 插件命令渲染单测：列表分页 / 更新入口 / 结果文案 / 版本挑选
  */
 import { describe, expect, it } from 'vitest';
-import { pickLatestVersion, renderPluginList, renderPluginResult } from '../../src/plugins/format.ts';
+import { pickLatestVersion, renderPluginCheck, renderPluginList, renderPluginResult } from '../../src/plugins/format.ts';
 import type { BundleInfoLike, PluginVersionLike } from '../../src/plugins/types.ts';
 
 function bundle(over: Partial<BundleInfoLike> & { name: string }): BundleInfoLike {
@@ -76,10 +76,11 @@ describe('renderPluginList', () => {
     expect(text).not.toContain('→ `2.0.0`');
   });
 
-  it('页脚统一给安装 / 更新 / 热重载三个链接', () => {
+  it('页脚统一给安装 / 更新 / 检查 / 热重载四个链接', () => {
     const text = renderPluginList([bundle({ name: 'dsh-a' })], 1);
     expect(text).toContain('text="/plugins install" show="安装插件"');
     expect(text).toContain('text="/plugins update" show="更新插件"');
+    expect(text).toContain('text="/plugins check" show="检查更新"');
     expect(text).toContain('text="/plugins reload" show="热重载"');
   });
 
@@ -121,6 +122,35 @@ describe('pickLatestVersion', () => {
 
   it('全部不可用时返回 undefined', () => {
     expect(pickLatestVersion([version({ version: '2.0.0', bundle: false })])).toBeUndefined();
+  });
+});
+
+describe('renderPluginCheck', () => {
+  it('没有可自动更新的插件时说明原因', () => {
+    expect(renderPluginCheck({ checked: 0, versions: {}, failed: [] })).toBe('✅ 没有可自动更新的插件');
+  });
+
+  it('均已是最新时直说，不给多余入口', () => {
+    expect(renderPluginCheck({ checked: 2, versions: {}, failed: [] })).toBe('✅ 已检查 2 个插件，均已是最新版本');
+  });
+
+  it('有更新时给数量与列表入口', () => {
+    expect(renderPluginCheck({ checked: 3, versions: { 'dsh-a': '1.1.0', 'dsh-b': '2.0.0' }, failed: [] })).toBe(
+      '✅ 已检查 3 个插件，2 个可更新\n<qqbot-cmd-input text="/plugins" show="查看列表"/>',
+    );
+  });
+
+  it('部分查询失败时降级为警告，并列出口数量与重试入口', () => {
+    expect(renderPluginCheck({ checked: 2, versions: { 'dsh-a': '1.1.0' }, failed: ['dsh-b'] })).toBe(
+      '⚠️ 已检查 2 个插件，1 个可更新，1 个查询失败\n'
+        + '<qqbot-cmd-input text="/plugins" show="查看列表"/> · <qqbot-cmd-input text="/plugins check" show="重试"/>',
+    );
+  });
+
+  it('全部查询失败时不冒充最新', () => {
+    expect(renderPluginCheck({ checked: 2, versions: {}, failed: ['dsh-a', 'dsh-b'] })).toBe(
+      '⚠️ 已检查 2 个插件，2 个查询失败\n<qqbot-cmd-input text="/plugins check" show="重试"/>',
+    );
   });
 });
 
