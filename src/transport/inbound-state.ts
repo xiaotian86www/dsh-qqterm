@@ -7,8 +7,12 @@
 import type { DownloadedFile } from './attachment.ts';
 import type { QuotedAttachment } from '../types.ts';
 
-/** 引用消息：quoteRef 中间件写入 */
+/** 引用消息：quoteRef 中间件写入（source 说明解析来源，见 SDK ResolvedQuote） */
 export interface InboundQuoteState {
+  /** 被查的引用键（msgIdx / messageId） */
+  refKey?: string;
+  /** store = 缓存命中；msg_elements = QQ 推送的原文；none = 取不到 */
+  source?: 'store' | 'msg_elements' | 'none';
   text?: string;
   entry?: { senderId?: string; content?: string };
   attachments?: QuotedAttachment[];

@@ -19,6 +19,8 @@ import {
 } from '../transport/session-source.ts';
 import { sendMarkdownChunked } from '../shared/send-helper.ts';
 import { resolveSessionTarget } from './sessions.ts';
+import { buildPromptBody } from '../transport/prompt-body.ts';
+import { takeQuote } from './quote.ts';
 import type { SessionRecord, WorkspaceGroup, WorkspaceSession } from '../session/index.ts';
 import { errorMessage } from '../shared/utils.ts';
 
@@ -27,6 +29,7 @@ const USAGE = [
   '',
   '`/to <会话> <文本>` 向会话发消息',
   '目标在等答案时，文本作为回答；没打开的会话会先接回来',
+  '回复一条消息再发：被引用的内容会一起带上（目标在等答案时不带）',
 ].join('\n');
 
 /** 把分组列表摊平成可解析的会话清单 */
@@ -53,6 +56,7 @@ export function toCommand({ manager, config, logger }: CommandDeps): SlashComman
     name: 'to',
     scope: 'c2c',
     description: '向会话发消息',
+    acceptsQuote: true,
     usage: USAGE,
     handler: async (cmdCtx) => {
       const raw = (cmdCtx.command?.raw ?? '').trim();
@@ -65,6 +69,11 @@ export function toCommand({ manager, config, logger }: CommandDeps): SlashComman
       if (targetArg === '') {
         return '⚠️ 缺少会话 · 用法: /help to';
       }
+
+      // 带引用的命令：引用取不到就什么都不发
+      const taken = await takeQuote(cmdCtx, config.media, logger);
+      if (typeof taken === 'string') return taken;
+      const quote = taken;
 
       let target: WorkspaceSession | undefined;
       try {
@@ -98,26 +107,42 @@ export function toCommand({ manager, config, logger }: CommandDeps): SlashComman
       }
       const label = sessionTargetLabel(sessionId, title);
 
+      // 目标在等回答时，这条文本是答案不是新 prompt：引用不跟着走
+      const awaiting = manager.isAwaitingAnswer(sessionId);
+      const withQuote = awaiting ? undefined : quote;
+      const body = withQuote === undefined
+        ? text
+        : buildPromptBody({ quote: withQuote.quote, quoteFiles: withQuote.files, text });
+
       const outcome = await manager.sendTo(
         scope,
         peerId,
         cmdCtx.message.senderId ?? peerId,
         sessionId,
-        text,
+        body,
         { scope, targetId: peerId },
       );
 
+      /** 带引用的回执尾行：发送成功时才贴，失败文案只讲失败 */
+      const quoteNotes = [
+        ...(withQuote === undefined ? [] : ['📎 已带上引用']),
+        ...(awaiting && quote !== undefined ? ['💡 目标在等回答，引用这次没有一起发送'] : []),
+      ];
+
       if (outcome.ok) {
+        let receipt: string;
         switch (outcome.kind) {
           case 'answered':
-            return `✅ 已回答${label}`;
+            receipt = `✅ 已回答${label}`;
+            break;
           case 'answer-mode':
-            return `💡 请发送回答: ${label}`;
+            receipt = `💡 请发送回答: ${label}`;
+            break;
           case 'queued':
           case 'steered': {
             // 排队 / 插话回执带可点的插话入口，命令的纯文本回复不渲染，走 markdown
             const current = manager.isCurrentSession(sessionId);
-            const text = outcome.kind === 'queued'
+            const body = outcome.kind === 'queued'
               ? queuedPromptReceipt(
                 sessionId,
                 title,
@@ -126,12 +151,15 @@ export function toCommand({ manager, config, logger }: CommandDeps): SlashComman
                 manager.canSteer(),
               )
               : steeredPromptReceipt(sessionId, title, current);
-            await sendMarkdownChunked(cmdCtx, text, config.textChunkLimit);
+            const full = quoteNotes.length === 0 ? body : `${body}\n${quoteNotes.join('\n')}`;
+            await sendMarkdownChunked(cmdCtx, full, config.textChunkLimit);
             return { kind: 'noop' as const };
           }
           default:
-            return `✅ 已发送到${label}`;
+            receipt = `✅ 已发送到${label}`;
+            break;
         }
+        return quoteNotes.length === 0 ? receipt : `${receipt}\n${quoteNotes.join('\n')}`;
       }
 
       switch (outcome.reason) {

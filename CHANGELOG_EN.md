@@ -23,6 +23,7 @@ The first release: DeepSeek Harness inside a QQ private chat.
 - One current session plus any number of acquired sessions: ordinary messages continue the current session, while background sessions post their output, questions, and approvals back to QQ. A non-current reply starts with a `> #short-id · title` line and ends with Reply and Resume (plus Stop while generating, and Archive when archiving is available).
 - `/sessions` groups sessions by workspace and includes cold sessions not yet opened after a restart (the roster keeps the latest 20 in `model-prefs.json`); 10 rows per page, with Reply / Stop / Archive on the row itself; sessions are addressed by 8-character short id or unique prefix, and archiving or unarchiving takes at most 10 at a time.
 - `/to` messages any session and reopens one that is not open yet; an archived session is not reopened — it answers "archived" with an unarchive entry. `/stop` stops the current session, a named one, or all of them; `/steer` changes a queued prompt into steering.
+- Quoted messages follow `/new` and `/to`: the quoted content uses the same format as ordinary messages, is placed ahead of the command text, and is submitted as one user message; with a quote `/new` opens the session immediately and a quote alone is enough; `/to` leaves the quote out while the target is awaiting an answer (that text is the answer); when the quote cannot be resolved nothing happens and neither session nor pointer moves.
 - While a session is generating, a further prompt follows the host's `ui-conversation.busyEnter`: by default it queues until the turn ends (receipt `✅ Queued`, with a steer action), and when the host steers it is consumed at the next step (receipt `✅ Steered`).
 - `/clear` (alias `/reset`) and `/clear all` send a 5-minute confirmation card first, and drop the action if the card cannot be sent; `/new` clears the pointer, does not stop the old session, and opens the new one in place by default.
 - Archiving changes the host's archive state only and never deletes records; archiving the current session clears the pointer so the next message lands in a new session; the archive view groups by workspace.
@@ -51,12 +52,14 @@ The first release: DeepSeek Harness inside a QQ private chat.
 
 **Command panel and plugins**
 
-- The command panel and the seven-entry custom menu (session status, session list, reset session, compact session, long-term goal, permission preset, reasoning effort) sync once the bot is ready, skipping identical content.
+- The command panel and the six-entry custom menu (session status, session list, reset session, compact session, permission preset, reasoning effort) sync once the bot is ready, skipping identical content; the long-term goal takes no menu slot, and `/goal` itself is unchanged.
 - `/plugins` lists, installs, and updates plugins, `check` queries updatable items immediately, and `reload` applies on-disk changes; an automatic check runs 2 minutes after startup and every 6 hours after that.
 
 **Message delivery**
 
-- Outbound messages share one send path: split (code-block and table aware) → enqueue → halve and re-split when too long → retry → sign. Inline command tags stay within the platform's 100-character attribute limit, cuts never land inside a tag, and an unclosed tag degrades to a copyable command line; the over-long notice appears only after halving reaches its floor, the risk-control block has its own notice, and both state only the facts without assuming a fallback channel.
+- Outbound messages share one send path: split (code-block and table aware) → enqueue → halve and re-split when too long → retry → sign.
+- One quote-block format: ordinary messages and quoted commands share one assembler, `[Current message]` marks where the body starts, quoted bodies are cut at 2000 characters with a trailing `…`, and a line equal to an envelope marker gets a backslash so it cannot forge a boundary.
+- A message that only replies with an image or file and no text is no longer dropped as empty: the quote is resolved first, and a quote alone is delivered. Inline command tags stay within the platform's 100-character attribute limit, cuts never land inside a tag, and an unclosed tag degrades to a copyable command line; the over-long notice appears only after halving reaches its floor, the risk-control block has its own notice, and both state only the facts without assuming a fallback channel.
 
 ### Known limitations
 
@@ -64,5 +67,5 @@ The first release: DeepSeek Harness inside a QQ private chat.
 - Only one user, `access.owner`, is served; an empty allow-list rejects every private chat.
 - Host dsh 0.2.2-rc.1 and 0.2.2-rc.3 are verified (see `dsh.compatibility` in `package.json`); after a major host upgrade the settings section and QR binding need re-verification.
 - If any required service in `inject` is missing, the plugin stays inactive rather than degrading.
-- A missing optional service only narrows the capability surface: without `agentPresets` `/preset` is not registered; without `webServer` the in-app binding page is not registered and scanning uses the terminal or browser; without `workspaceRegistry` there are no pins or archive entries, `/new <name>` reports unsupported, and group headers show paths only; without `worktrees` `--worktree` is treated as an unknown argument; without `sessionController` `/sessions` sorting falls back to creation time.
+- A missing optional service only narrows the capability surface: without `agentPresets` `/preset` is not registered; without `webServer` the in-app binding page is not registered and scanning uses the terminal or browser; without `workspaceRegistry` there are no archive entries, `/new --dir` accepts absolute paths only, and group headers show paths only; without `worktrees` `--worktree` is treated as an unknown argument; without `sessionController` `/sessions` sorting falls back to creation time.
 - The main profile should install a published release or a frozen tgz snapshot, never a directory that keeps rebuilding.

@@ -34,6 +34,7 @@ import {
   type UnknownCommandSend,
 } from '../middleware/unknown-command.ts';
 import type { ReplyStore } from '../transport/reply-store.ts';
+import { QUOTE_CONTENT_LIMIT } from '../transport/prompt-body.ts';
 
 export function setupMiddlewares(
   bot: QQBot,
@@ -86,6 +87,16 @@ export function setupMiddlewares(
   // 5. 三层限流（发送者 / 会话 / 全局）
   bot.use(rateLimiter());
 
+  // 5.5. 引用消息解析（记录 + 解析被引用原文）
+  //      必须排在 slashCommand 之前：命令命中后 ctx.stop 截断整条链，命令 handler
+  //      就拿不到 ctx.state.quote 了（带引用的 /new、/to 依赖它）。
+  bot.use(quoteRef({
+    maxSize: 500,
+    preferMsgElements: true,
+    // 与 prompt-body 的 QUOTE_CONTENT_LIMIT 一致，store 命中时才判得出是否被截断
+    contentLimit: QUOTE_CONTENT_LIMIT,
+  }));
+
   // 6. 斜杠命令（在 concurrencyGuard 之前，命令匹配后不排队直接响应）
   // 命令 handler 执行前把换行占位符还原（见 middleware/multiline-command.ts）
   const commandList = restoreMultilineCommands(
@@ -128,13 +139,7 @@ export function setupMiddlewares(
   // 8. C2C 输入状态指示
   bot.use(typingIndicator());
 
-  // 9. 引用消息解析（记录 + 解析被引用原文）
-  bot.use(quoteRef({
-    maxSize: 500,
-    preferMsgElements: true,
-  }));
-
-  // 9.5. 附件下载（file 附件下载到本地，供工具访问）
+  // 9.1. 附件下载（file 附件下载到本地，供工具访问）
   bot.use(attachmentProcessor(config, logger));
 
   // 10. 上下文组装（将 quote + sender 组成 envelope）

@@ -238,7 +238,7 @@ Sync is a whole-table overwrite with the remark fixed to `qqterm:commands`; unch
 |---|---|---|---|
 | `menu.autoSync` | boolean | `true` | Sync fixed entries to the C2C custom menu once the bot is ready |
 
-The menu has seven fixed entries: Session status, Session list, Reset session, Compact session, Long-term goal, Permission preset, Reasoning effort. Permission and reasoning open submenus; the rest point straight at their command. The menu is a bot-wide whole-table overwrite, not per user.
+The menu has six fixed entries: Session status, Session list, Reset session, Compact session, Permission preset, Reasoning effort. Permission and reasoning open submenus; the rest point straight at their command. The menu is a bot-wide whole-table overwrite, not per user.
 
 ## Sessions, workspaces, and interaction
 
@@ -283,13 +283,13 @@ Workspaces are the host's `workspaceRegistry` concept; dsh-qqterm keeps no direc
 
 | Command | Description |
 |---|---|
-| `/new` | New session; `--dir` (`-d`) picks the workspace, `--worktree` (`-w`) makes the first message create a worktree first, `--background` (`-b`) opens another session in the background without touching the current one; the remaining text is sent immediately as the prompt; the old session keeps running |
+| `/new` | New session; `--dir` (`-d`) picks the workspace, `--worktree` (`-w`) makes the first message create a worktree first, `--background` (`-b`) opens another session in the background without touching the current one; the remaining text is sent immediately as the prompt; replying to a message carries its quote along and a quote alone opens the session too; the old session keeps running |
 | `/clear` (alias `/reset`) | Stop the current session; the next message opens a new one in the original workspace; `/clear all` stops every acquired session; a 5-minute confirmation card comes first |
 | `/compact` | Compact session history (summaries replace older records); the reply includes the host command's result |
 | `/goal` | Set or view the current session's long-term goal; `/goal <goal>` sets it, `edit` / `pause` / `resume` / `clear` manage it |
 | `/sessions` (alias `/session`) | Session management: by default lists sessions held by QQ (including cold sessions not yet opened after a restart), `all` shows everything, `archived` shows archived sessions; addressing, quick actions, and archive semantics live in "Multi-session management" |
 | `/rename` | Rename the current session; `/sessions rename <id> <title>` renames an opened session |
-| `/to` | Send a message to a given session; submits an answer when that session is waiting for one; a not-yet-open session is resumed first |
+| `/to` | Send a message to a given session; submits an answer when that session is waiting for one; a not-yet-open session is resumed first; replying to a message places its quote ahead of the body (except while the target awaits an answer) |
 | `/ls` | List subdirectories and files in a directory; click a directory to enter, a file to send |
 | `/get` | Send a file to the current chat (images / videos / voice by type); any path |
 | `/model` | View or switch the current session's model |

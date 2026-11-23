@@ -265,3 +265,65 @@ describe('handleInbound：工作树', () => {
     expect(sent(second)).toHaveLength(0);
   });
 });
+
+describe('handleInbound：引用消息', () => {
+  it('引用块在前、当前正文在后，只投递一条消息', async () => {
+    const { record, followup } = makeRecord('session-a');
+    const manager = managerOf([record]);
+    const ctx = makeCtx('新文本');
+    ctx.state.quote = { source: 'msg_elements', text: '旧文本' } as never;
+
+    await handleInbound(ctx, manager, logger, sendTextOf(ctx));
+
+    expect(followup).toHaveBeenCalledTimes(1);
+    expect(textOf(followup.mock.calls[0]?.[0])).toBe(
+      '[Quoted message begins]\n旧文本\n[Quoted message ends]\n[Current message]\n新文本',
+    );
+  });
+
+  it('只有引用没有正文也照常投递：整条消息就是引用块', async () => {
+    const { record, followup } = makeRecord('session-a');
+    const manager = managerOf([record]);
+    const ctx = makeCtx('');
+    ctx.state.quote = { source: 'msg_elements', text: '旧文本' } as never;
+
+    await handleInbound(ctx, manager, logger, sendTextOf(ctx));
+
+    expect(followup).toHaveBeenCalledTimes(1);
+    expect(textOf(followup.mock.calls[0]?.[0])).toBe(
+      '[Quoted message begins]\n旧文本\n[Quoted message ends]',
+    );
+  });
+
+  it('引用附件段排在引用块前面', async () => {
+    const { record, followup } = makeRecord('session-a');
+    const manager = managerOf([record]);
+    const ctx = makeCtx('新文本');
+    ctx.state.quote = {
+      source: 'msg_elements',
+      text: '旧文本',
+      attachments: [{ contentType: 'image/jpeg', filename: 'pic.jpg', url: 'https://x/y.jpg' }],
+    } as never;
+    ctx.state.downloadedQuoteFiles = [
+      { filename: 'pic.jpg', contentType: 'image', localPath: '/tmp/pic.jpg' },
+    ] as never;
+
+    await handleInbound(ctx, manager, logger, sendTextOf(ctx));
+
+    expect(textOf(followup.mock.calls[0]?.[0])).toBe(
+      '[Reference attachments]\n  - Image: /tmp/pic.jpg\n\n'
+      + '[Quoted message begins]\n旧文本\n[Quoted message ends]\n[Current message]\n新文本',
+    );
+  });
+
+  it('引用取不到又没有正文：整条丢弃，不投递空消息', async () => {
+    const { record, followup } = makeRecord('session-a');
+    const manager = managerOf([record]);
+    const ctx = makeCtx('');
+    ctx.state.quote = { source: 'none' } as never;
+
+    await handleInbound(ctx, manager, logger, sendTextOf(ctx));
+
+    expect(followup).not.toHaveBeenCalled();
+  });
+});

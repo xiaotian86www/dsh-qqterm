@@ -5,9 +5,9 @@
  * 下载失败不阻断消息（记录告警后放行），确保附件异常不影响正常文本处理。
  */
 import type { MiddlewareContext } from '@tencent-connect/qqbot-nodejs';
-import { downloadMediaAttachments } from '../transport/attachment.ts';
+import { downloadMediaAttachments, downloadQuoteAttachments } from '../transport/attachment.ts';
 import type { QQTermConfig } from '../config.ts';
-import type { Logger, QuotedAttachment, RawAttachment } from '../types.ts';
+import type { Logger, RawAttachment } from '../types.ts';
 import { errorMessage } from '../shared/utils.ts';
 
 export function attachmentProcessor(config: QQTermConfig, logger: Logger) {
@@ -19,20 +19,8 @@ export function attachmentProcessor(config: QQTermConfig, logger: Logger) {
       const downloaded = await downloadMediaAttachments(msg.attachments, config.media, logger);
       ctx.state.downloadedFiles = downloaded;
 
-      // 引用消息附件：转成 RawAttachment 结构复用下载（voice 由 downloadMediaAttachments 自动跳过）
-      const quoteAttachments = (ctx.state as { quote?: { attachments?: QuotedAttachment[] } }).quote?.attachments;
-      if (quoteAttachments && quoteAttachments.length > 0) {
-        const rawQuote = quoteAttachments
-          .filter(a => a.url)
-          .map((a): RawAttachment => ({
-            content_type: a.contentType ?? '',
-            filename: a.filename ?? '',
-            size: 0,
-            url: a.url as string,
-          }));
-        const downloadedQuote = await downloadMediaAttachments(rawQuote, config.media, logger);
-        ctx.state.downloadedQuoteFiles = downloadedQuote;
-      }
+      // 引用消息附件：同一套下载逻辑（voice 跳过，ASR 文本来自 quote.attachments）
+      ctx.state.downloadedQuoteFiles = await downloadQuoteAttachments(ctx.state.quote, config.media, logger);
     } catch (err) {
       logger.warn(`qqterm: attachment download failed: ${errorMessage(err)}`);
     }

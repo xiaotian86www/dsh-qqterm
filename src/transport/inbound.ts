@@ -17,15 +17,12 @@ import {
   steeredPromptReceipt,
 } from './session-source.ts';
 import type { ChatScope, Logger, RawAttachment, ReplyTarget } from '../types.ts';
-import {
-  classifyContentType,
-  isVoiceContentType,
-  type MediaKind,
-} from './attachment.ts';
+import { classifyContentType, isVoiceContentType } from './attachment.ts';
 import type { MiddlewareContext } from '@tencent-connect/qqbot-nodejs';
 import { errorMessage } from '../shared/utils.ts';
 import type { SendText } from './send.ts';
-import type { InboundAttachmentState, InboundQuoteState, InboundState } from './inbound-state.ts';
+import type { InboundAttachmentState, InboundState } from './inbound-state.ts';
+import { buildQuotePart, isQuoteResolvable, quoteAttachmentLines, renderMediaLine } from './prompt-body.ts';
 
 // ── 类型定义 ──
 
@@ -41,8 +38,6 @@ interface ProcessedMessage {
   [key: string]: unknown;
 }
 
-/** 引用消息（中间件写入 ctx.state.quote） */
-type ResolvedQuote = InboundQuoteState;
 /** 语音 / 媒体预处理结果 */
 type ProcessedAttachment = InboundAttachmentState;
 /** 中间件链共享的 ctx.state 形状（见 inbound-state.ts） */
@@ -148,9 +143,10 @@ function assembleAgentBody(
 ): string | null {
   const userContent = buildUserContent(msg, state, logger);
 
-  if (isEmptyMessage(userContent, msg.attachments)) return null;
+  // 只有引用、没有正文与附件也是有效消息：引用块本身就是内容
+  if (isEmptyMessage(userContent, msg.attachments) && !isQuoteResolvable(state.quote)) return null;
 
-  const quotePart = buildQuotePart(state.quote);
+  const quotePart = buildQuotePart(state.quote, { hasCurrentText: userContent !== '' });
   const userMessage = `${quotePart}${userContent}`;
 
   const dynamicCtx = buildDynamicCtx(msg, state);
@@ -199,17 +195,6 @@ function buildUserContent(msg: ProcessedMessage, state: MiddlewareState, logger:
 }
 
 /**
- * Layer 2: 引用消息块
- */
-function buildQuotePart(quote?: ResolvedQuote): string {
-  if (!quote?.text && !quote?.entry?.content) return '';
-
-  const quoteText = quote.text || quote.entry?.content || 'Original content unavailable';
-
-  return `[Quoted message begins]\n${quoteText}\n[Quoted message ends]\n[Current message]\n`;
-}
-
-/**
  * Layer 4: 媒体元数据上下文（图片/视频/文件本地路径 + 语音 ASR + 引用附件）
  */
 function buildDynamicCtx(msg: ProcessedMessage, state: MiddlewareState): string {
@@ -243,49 +228,9 @@ function buildDynamicCtx(msg: ProcessedMessage, state: MiddlewareState): string 
   }
 
   // 引用消息的附件（独立于当前消息媒体，不受上一步为空影响）
-  const quoteAttachments = state.quote?.attachments;
-  if (quoteAttachments && quoteAttachments.length > 0) {
-    const downloadedQuote = new Map((state.downloadedQuoteFiles ?? []).map(d => [d.filename, d]));
-    lines.push('[Reference attachments]');
-    for (const qa of quoteAttachments) {
-      const kind = classifyContentType(qa.contentType);
-      const d = downloadedQuote.get(qa.filename ?? '');
-      if (kind === 'voice') {
-        if (qa.asrText) lines.push(`  - Voice: ${qa.asrText}`);
-        continue;
-      }
-      lines.push(`  - ${renderMediaLine(kind, qa.filename, d?.localPath, qa.url, undefined)}`);
-    }
-  }
+  lines.push(...quoteAttachmentLines(state.quote, state.downloadedQuoteFiles));
 
   return lines.length > 0 ? lines.join('\n') + '\n\n' : '';
-}
-
-/**
- * 渲染单个媒体附件（image/video/file）的上下文行内容，不含列表前缀。
- * 当前消息与引用消息共用，保证附件格式统一。语音不在此处理（见 buildDynamicCtx）。
- */
-function renderMediaLine(
-  kind: Exclude<MediaKind, 'voice'>,
-  filename: string | undefined,
-  localPath: string | undefined,
-  url: string | undefined,
-  size: number | undefined,
-): string {
-  switch (kind) {
-    case 'image':
-      return localPath
-        ? `Image: ${localPath}`
-        : `Image: ${url ?? filename ?? 'image'}`;
-    case 'video':
-      return localPath
-        ? `Video: ${localPath}`
-        : `Video: ${filename ?? 'video'} (download failed)`;
-    case 'file':
-      return localPath
-        ? `File: ${localPath}`
-        : `File: ${filename ?? 'file'} (${formatFileSize(size ?? 0)})`;
-  }
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -358,8 +303,4 @@ function buildAttachmentTags(attachments?: RawAttachment[]): string {
   return tags.join(' ');
 }
 
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes}B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
-}
+
