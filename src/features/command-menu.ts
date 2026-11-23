@@ -4,7 +4,7 @@
  * 菜单是机器人级全局配置，仅 C2C 生效：所有用户看到同一份，改完要退出对话框
  * 再进来才看得到新内容，所以不做按会话变化的动态文案——只写静态动作。
  *
- * 结构：五个平铺按钮（会话状态 / 会话列表 / 重置会话 / 压缩会话 / 长期目标）+ 两个
+ * 结构：四个平铺按钮（会话状态 / 会话列表 / 重置会话 / 压缩会话）+ 两个
  * 含子菜单的折叠项（权限预设 / 思考强度）。折叠项的子菜单只能是 send_message 或 link，
  * 不支持再嵌套。
  *
@@ -43,13 +43,12 @@ function isSubmenu(entry: MenuEntry): entry is MenuSubmenu {
   return 'children' in entry;
 }
 
-/** 本插件固定的七个入口：五个平铺按钮 + 权限预设 / 思考强度两个折叠项 */
+/** 本插件固定的六个入口：四个平铺按钮 + 权限预设 / 思考强度两个折叠项 */
 export const MENU_ENTRIES: readonly MenuEntry[] = [
   { name: '会话状态', command: '/status' },
   { name: '会话列表', command: '/sessions' },
   { name: '重置会话', command: '/reset' },
   { name: '压缩会话', command: '/compact' },
-  { name: '长期目标', command: '/goal' },
   {
     name: '权限预设',
     children: [

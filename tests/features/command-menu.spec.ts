@@ -1,5 +1,5 @@
 /**
- * 自定义菜单同步：五个平铺按钮 + 权限 / 思考两个折叠项、整表覆盖
+ * 自定义菜单同步：四个平铺按钮 + 权限 / 思考两个折叠项、整表覆盖
  */
 import { describe, it, expect } from 'vitest';
 import type { OpenApiLike } from '../../src/types.ts';
@@ -42,9 +42,9 @@ function putItems(calls: Call[]): MenuItemPayload[] {
 }
 
 describe('MENU_ENTRIES', () => {
-  it('五个平铺按钮 + 权限预设 / 思考强度两个折叠项', () => {
+  it('四个平铺按钮 + 权限预设 / 思考强度两个折叠项', () => {
     expect(OUR_ITEMS.map((item) => item.name)).toEqual([
-      '会话状态', '会话列表', '重置会话', '压缩会话', '长期目标', '权限预设', '思考强度',
+      '会话状态', '会话列表', '重置会话', '压缩会话', '权限预设', '思考强度',
     ]);
     expect(OUR_ITEMS.filter((item) => item.type === 'menu').map((item) => item.name)).toEqual(['权限预设', '思考强度']);
   });
@@ -94,7 +94,7 @@ describe('syncCommandMenu', () => {
     const { api, calls } = makeApi();
     const result = await syncCommandMenu(api);
 
-    expect(result).toEqual({ action: 'updated', count: 7 });
+    expect(result).toEqual({ action: 'updated', count: 6 });
     const put = calls.find((c) => c.method === 'put');
     expect(put?.path).toBe('/v2/menu');
     expect(put?.body).toEqual({ menu: { items: OUR_ITEMS } });
@@ -104,7 +104,7 @@ describe('syncCommandMenu', () => {
     const { api, calls } = makeApi(OUR_ITEMS);
     const result = await syncCommandMenu(api);
 
-    expect(result).toEqual({ action: 'unchanged', count: 7 });
+    expect(result).toEqual({ action: 'unchanged', count: 6 });
     expect(calls.some((c) => c.method === 'put')).toBe(false);
   });
 
@@ -119,7 +119,7 @@ describe('syncCommandMenu', () => {
     const { api, calls } = makeApi(withIcon);
     const result = await syncCommandMenu(api);
 
-    expect(result).toEqual({ action: 'unchanged', count: 7 });
+    expect(result).toEqual({ action: 'unchanged', count: 6 });
     expect(calls.some((c) => c.method === 'put')).toBe(false);
   });
 
@@ -128,7 +128,7 @@ describe('syncCommandMenu', () => {
     const { api, calls } = makeApi([manual]);
     const result = await syncCommandMenu(api);
 
-    expect(result).toEqual({ action: 'updated', count: 7 });
+    expect(result).toEqual({ action: 'updated', count: 6 });
     expect(putItems(calls)).toEqual(OUR_ITEMS);
   });
 
@@ -141,7 +141,7 @@ describe('syncCommandMenu', () => {
     const { api, calls } = makeApi(legacy);
     const result = await syncCommandMenu(api);
 
-    expect(result).toEqual({ action: 'updated', count: 7 });
+    expect(result).toEqual({ action: 'updated', count: 6 });
     expect(putItems(calls)).toEqual(OUR_ITEMS);
   });
 });

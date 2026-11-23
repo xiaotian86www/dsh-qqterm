@@ -33,6 +33,10 @@ This file records product-level changes to QQ SuperTerm. The format follows [Kee
 - **Receipts state the result, not the next step**: the `/clear` and `/clear all` cards no longer explain that the next message opens a new session and just say whether the current session or all sessions stop; the `/new --worktree` receipt no longer mentions a worktree either and answers "new session opened" like `/new`, leaving the worktree to the creation notice once the tree exists.
 - **`/compact` no longer pre-checks the busy state**: the local `agent.status !== 'idle'` gate is gone — the host's compaction lock decides, so running sessions can be compacted too. Command execution is now a reusable `runHostCommand`, ready for `/goal` and other host commands.
 
+### Removed
+
+- **The custom menu drops the long-term goal entry**: the C2C footer keeps four flat buttons (Session status, Session list, Reset session, Compact session) plus the Permission preset and Reasoning effort submenus; the `/goal` command itself is unchanged.
+
 ### Fixed
 
 - **Replying with only an image or file and no typed text is no longer dropped**: the empty-message check now looks at whether the quote resolves — quote-only messages are delivered as just the quote block, and only an unresolvable quote without text is dropped.
