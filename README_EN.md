@@ -170,6 +170,8 @@ Switching away does not release: `/sessions resume` changes which session is cur
 
 Queueing happens only inside a single session: messages to the same session run in arrival order, while different sessions do not block each other. Sessions are not reclaimed for idleness; as long as the process lives and the agent is not unloaded, they stay available.
 
+While a session is generating, the placement of a new prompt follows the host's `ui-conversation.busyEnter`: by default it queues after the current turn (receipt `✅ Queued`, with a `/steer` action); when the host is set to steer, it is consumed at the next step (receipt `✅ Steered`). `/steer` changes only one queued message's placement and does not abort the current turn; `/stop` aborts and discards queued messages.
+
 ### Workspaces
 
 Workspaces are the host's `workspaceRegistry` concept; dsh-qqterm keeps no directory list of its own.
@@ -226,7 +228,8 @@ Workspaces are the host's `workspaceRegistry` concept; dsh-qqterm keeps no direc
 | `/permission` | View or switch the current session's permission preset (bound user only) |
 | `/cost` | View the current session's token usage |
 | `/status` | View session status: session, state, workspace, worktree, model, reasoning effort, preset, permission, context |
-| `/stop` | Abort the current generation; `/stop <id>` stops a given acquired session; `/stop all` stops everything |
+| `/stop` | Abort the current generation; `/stop <id>` stops a given acquired session; `/stop all` stops everything; queued messages are discarded |
+| `/steer` | Change a queued prompt to steering (takes effect at the next step); no argument uses the latest queued message in the current session, `<id>` names an acquired session, `<id> <message-id>` picks one message |
 | `/retry` | Resend the current session's previous user message |
 | `/help` | Show all commands; `/help <command>` shows arguments and usage |
 | `/plugins` | Plugin management: list, `install` / `update`, `check`, `reload` (bound user only) |

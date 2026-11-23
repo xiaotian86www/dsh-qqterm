@@ -125,6 +125,14 @@ export interface HostAdapter {
    * 服务缺失或解析失败返回 undefined。
    */
   sandboxMode(): string | undefined;
+  /**
+   * 部署里是否有可用的排队消息插话入口（sessionController.updateQueue）。
+   *
+   * 只有 web 组合包挂载该服务；缺失时 /steer 不注册、排队回执不带插话链接。
+   */
+  supportsQueueSteer(): boolean;
+  /** 把一条仍在 next-turn 的消息改成插话；错误码已归一，绝不抛出 */
+  steerQueuedMessage(sessionId: string, itemId: string): Promise<QueueSteerOutcome>;
   /** 探测结果摘要（启动契约检查用） */
   readonly capabilities: string[];
 }
@@ -137,6 +145,11 @@ export interface WorkspaceInfo {
   /** 该工作区的会话记账（顺序即侧边栏顺序） */
   sessionIds: readonly string[];
 }
+
+/** 排队消息改成插话的结果（只暴露命令层要区分的三种） */
+export type QueueSteerOutcome =
+  | { ok: true }
+  | { ok: false; reason: 'not-found' | 'steer-unavailable' | 'failed'; message?: string };
 
 /** 归档 / 取消归档的结果（宿主错误已归一成可展示的文案） */
 export type SessionArchiveOutcome =
@@ -361,6 +374,17 @@ interface SessionTitleLike {
  */
 interface SessionControllerLike {
   list?(request: object, signal?: AbortSignal): Promise<{ items?: readonly unknown[] } | undefined>;
+  /**
+   * 改一条仍在队列里的消息（宿主 SessionController.updateQueue）。
+   *
+   * 只支持把 next-turn 的消息改成插话；已消费或回合已结束时宿主抛
+   * session/queue-item-not-found / session/steer-unavailable。
+   */
+  updateQueue?(request: {
+    sessionId: string;
+    itemId: string;
+    action: { kind: 'steer' };
+  }): Promise<{ accepted?: boolean } | undefined>;
 }
 
 /**
@@ -485,6 +509,7 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
     'sessionPersistence.stat',
     ...(registryNow() === undefined ? [] : ['workspaceRegistry']),
     ...(optionalService<WorktreeServiceLike>(ctx, 'worktrees') === undefined ? [] : ['worktrees']),
+    ...(typeof optionalSessionController(ctx)?.updateQueue === 'function' ? ['sessionController.updateQueue'] : []),
     'sessionQuery',
     'sessionTitle.rename',
   ];
@@ -605,6 +630,33 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
       } catch (err) {
         logger?.debug?.(`host adapter: sandboxPolicy.resolve 失败: ${errorMessage(err)}`);
         return undefined;
+      }
+    },
+
+    supportsQueueSteer() {
+      return typeof optionalSessionController(ctx)?.updateQueue === 'function';
+    },
+
+    async steerQueuedMessage(sessionId, itemId) {
+      // 现读而非用构造期快照：服务可能在 apply 之后才挂载
+      const controller = optionalSessionController(ctx);
+      if (typeof controller?.updateQueue !== 'function') {
+        return { ok: false, reason: 'failed' };
+      }
+      try {
+        const result = await controller.updateQueue({
+          sessionId,
+          itemId,
+          action: { kind: 'steer' },
+        });
+        if (result?.accepted === false) return { ok: false, reason: 'failed' };
+        return { ok: true };
+      } catch (err) {
+        const code = (err as { code?: unknown } | null)?.code;
+        if (code === 'session/queue-item-not-found') return { ok: false, reason: 'not-found' };
+        if (code === 'session/steer-unavailable') return { ok: false, reason: 'steer-unavailable' };
+        logger?.warn?.(`host adapter: sessionController.updateQueue 失败: ${errorMessage(err)}`);
+        return { ok: false, reason: 'failed', message: errorMessage(err) };
       }
     },
 

@@ -11,7 +11,13 @@
 import type { CommandDeps, SlashCommand } from './types.ts';
 import { parseRest } from './args.ts';
 import { getScopePeer, shortSessionId } from '../shared/index.ts';
-import { sessionTargetLabel, sessionTitleOf } from '../transport/session-source.ts';
+import {
+  queuedPromptReceipt,
+  sessionTargetLabel,
+  sessionTitleOf,
+  steeredPromptReceipt,
+} from '../transport/session-source.ts';
+import { sendMarkdownChunked } from '../shared/send-helper.ts';
 import { resolveSessionTarget } from './sessions.ts';
 import type { SessionRecord, WorkspaceGroup, WorkspaceSession } from '../session/index.ts';
 import { errorMessage } from '../shared/utils.ts';
@@ -42,7 +48,7 @@ function displayId(id: string): string {
   return `#${shortSessionId(id)}`;
 }
 
-export function toCommand({ manager, logger }: CommandDeps): SlashCommand {
+export function toCommand({ manager, config, logger }: CommandDeps): SlashCommand {
   return {
     name: 'to',
     scope: 'c2c',
@@ -107,6 +113,22 @@ export function toCommand({ manager, logger }: CommandDeps): SlashCommand {
             return `✅ 已回答${label}`;
           case 'answer-mode':
             return `💡 请发送回答: ${label}`;
+          case 'queued':
+          case 'steered': {
+            // 排队 / 插话回执带可点的插话入口，命令的纯文本回复不渲染，走 markdown
+            const current = manager.isCurrentSession(sessionId);
+            const text = outcome.kind === 'queued'
+              ? queuedPromptReceipt(
+                sessionId,
+                title,
+                outcome.messageId,
+                current,
+                manager.canSteer(),
+              )
+              : steeredPromptReceipt(sessionId, title, current);
+            await sendMarkdownChunked(cmdCtx, text, config.textChunkLimit);
+            return { kind: 'noop' as const };
+          }
           default:
             return `✅ 已发送到${label}`;
         }

@@ -1649,3 +1649,138 @@ describe('getOrCreate — 恢复会话时重建被清理的工作树', () => {
     expect(persistedId()).toBe('session-current');
   });
 });
+
+// ── prompt 落点：宿主 busyEnter 决定排队 / 插话 ──
+
+/** 指定 settings.describe 返回值（undefined 表示没有 settings 服务） */
+function placementCtx(describe?: () => unknown): Context {
+  const base = absentCtx() as unknown as Record<string, unknown>;
+  if (describe !== undefined) base.settings = { describe };
+  return base as unknown as Context;
+}
+
+async function runningRecord(manager: InstanceType<typeof SessionManager>) {
+  const record = await manager.getOrCreate('c2c', PEER, PEER, REPLY);
+  record.agent.status = 'running';
+  record.agent.steer = vi.fn();
+  return record;
+}
+
+describe('submitPrompt — 落点由宿主 ui-conversation.busyEnter 决定', () => {
+  it('空闲会话永远 followup，回 started', async () => {
+    const { registry } = createRegistry(async ({ resumeSessionId }) => fakeHandle(resumeSessionId));
+    const manager = createManagerWithCtx(registry, placementCtx(() => ([
+      { ns: 'ui-conversation', value: { busyEnter: 'steer' } },
+    ])));
+    const record = await manager.getOrCreate('c2c', PEER, PEER, REPLY);
+    record.agent.steer = vi.fn();
+
+    const submitted = manager.submitPrompt(record, '  继续  ');
+
+    expect(submitted.placement).toBe('started');
+    expect(record.lastPrompt).toBe('继续');
+    expect(record.agent.followup).toHaveBeenCalledTimes(1);
+    expect(record.agent.steer).not.toHaveBeenCalled();
+  });
+
+  it('生成中且 busyEnter=queue：followup 排队，回 queued', async () => {
+    const { registry } = createRegistry(async ({ resumeSessionId }) => fakeHandle(resumeSessionId));
+    const manager = createManagerWithCtx(registry, placementCtx(() => ([
+      { ns: 'ui-conversation', value: { busyEnter: 'queue' } },
+    ])));
+    const record = await runningRecord(manager);
+
+    const submitted = manager.submitPrompt(record, '继续');
+
+    expect(submitted.placement).toBe('queued');
+    expect(record.agent.followup).toHaveBeenCalledTimes(1);
+    expect(record.agent.steer).not.toHaveBeenCalled();
+  });
+
+  it('生成中且 busyEnter=steer：agent.steer，回 steered', async () => {
+    const { registry } = createRegistry(async ({ resumeSessionId }) => fakeHandle(resumeSessionId));
+    const manager = createManagerWithCtx(registry, placementCtx(() => ([
+      { ns: 'ui-conversation', value: { busyEnter: 'steer' } },
+    ])));
+    const record = await runningRecord(manager);
+
+    const submitted = manager.submitPrompt(record, '继续');
+
+    expect(submitted.placement).toBe('steered');
+    expect(record.agent.steer).toHaveBeenCalledTimes(1);
+    expect(record.agent.followup).not.toHaveBeenCalled();
+  });
+
+  it('设置服务缺失或读失败：按排队处理，不冒充插话', async () => {
+    const { registry: missingRegistry } = createRegistry(async ({ resumeSessionId }) => fakeHandle(resumeSessionId));
+    const missing = createManagerWithCtx(missingRegistry, placementCtx());
+    const missingRecord = await runningRecord(missing);
+    expect(missing.submitPrompt(missingRecord, '继续').placement).toBe('queued');
+    expect(missingRecord.agent.followup).toHaveBeenCalledTimes(1);
+
+    const { registry: brokenRegistry } = createRegistry(async ({ resumeSessionId }) => fakeHandle(resumeSessionId));
+    const broken = createManagerWithCtx(brokenRegistry, placementCtx(() => { throw new Error('EIO'); }));
+    const brokenRecord = await runningRecord(broken);
+    expect(broken.submitPrompt(brokenRecord, '继续').placement).toBe('queued');
+    expect(brokenRecord.agent.steer).not.toHaveBeenCalled();
+  });
+
+  it('认不出的 busyEnter 值按排队处理', async () => {
+    const { registry } = createRegistry(async ({ resumeSessionId }) => fakeHandle(resumeSessionId));
+    const manager = createManagerWithCtx(registry, placementCtx(() => ([
+      { ns: 'ui-conversation', value: { busyEnter: 'later' } },
+    ])));
+    const record = await runningRecord(manager);
+
+    expect(manager.submitPrompt(record, '继续').placement).toBe('queued');
+    expect(record.agent.steer).not.toHaveBeenCalled();
+  });
+});
+
+describe('canSteer / steerQueued — 委托宿主 sessionController.updateQueue', () => {
+  function controllerCtx(controller: unknown): Context {
+    const base = absentCtx() as unknown as Record<string, unknown>;
+    return {
+      ...base,
+      get: (name: string) => (name === 'sessionController' ? controller : undefined),
+    } as unknown as Context;
+  }
+
+  it('没有 updateQueue 时不可用', () => {
+    const { registry } = createRegistry(async ({ resumeSessionId }) => fakeHandle(resumeSessionId));
+    const manager = createManagerWithCtx(registry, controllerCtx({ list: async () => ({}) }));
+
+    expect(manager.canSteer()).toBe(false);
+  });
+
+  it('把 updateQueue 的 accepted 转成 ok，并传会话与消息 id', async () => {
+    const updateQueue = vi.fn(async () => ({ accepted: true }));
+    const { registry } = createRegistry(async ({ resumeSessionId }) => fakeHandle(resumeSessionId));
+    const manager = createManagerWithCtx(registry, controllerCtx({ updateQueue }));
+
+    expect(manager.canSteer()).toBe(true);
+    expect(await manager.steerQueued('session-x', 'msg-1')).toEqual({ ok: true });
+    expect(updateQueue).toHaveBeenCalledWith({
+      sessionId: 'session-x',
+      itemId: 'msg-1',
+      action: { kind: 'steer' },
+    });
+  });
+
+  it('宿主错误码归一成 not-found / steer-unavailable', async () => {
+    const failWith = (code: string) => {
+      const { registry } = createRegistry(async ({ resumeSessionId }) => fakeHandle(resumeSessionId));
+      const manager = createManagerWithCtx(registry, controllerCtx({
+        updateQueue: async () => { throw Object.assign(new Error('nope'), { code }); },
+      }));
+      return manager;
+    };
+
+    expect(await failWith('session/queue-item-not-found').steerQueued('s', 'm'))
+      .toEqual({ ok: false, reason: 'not-found' });
+    expect(await failWith('session/steer-unavailable').steerQueued('s', 'm'))
+      .toEqual({ ok: false, reason: 'steer-unavailable' });
+    const failed = await failWith('EIO').steerQueued('s', 'm');
+    expect(failed).toMatchObject({ ok: false, reason: 'failed' });
+  });
+});

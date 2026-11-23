@@ -11,7 +11,11 @@
  * 问答通道驱动，不从这条普通消息路径直接写。
  */
 import { WorktreeError, worktreeErrorText, type SessionManager } from '../session/index.ts';
-import { createQQUserMessage } from '../session/user-message.ts';
+import {
+  queuedPromptReceipt,
+  sessionTitleOf,
+  steeredPromptReceipt,
+} from './session-source.ts';
 import type { ChatScope, Logger, RawAttachment, ReplyTarget } from '../types.ts';
 import {
   classifyContentType,
@@ -104,19 +108,30 @@ export async function handleInbound(
     }
   }
 
-  // ── 构建 UserMessage → followup ──
-  // 原文留档：轮次失败后「重发」只能靠它再开一轮（宿主没有重跑已结束一轮的 API）
-  record.lastPrompt = agentBody;
-  const message = createQQUserMessage(agentBody);
+  // ── 构建 UserMessage → 交给宿主 ──
+  // submitPrompt 统一决定排队还是插话（读宿主 ui-conversation.busyEnter），并记下
+  // 消息 id 与落点。这里绝不能 await whenIdle()：concurrencyGuard 以 QQ 用户为键，
+  // 处理函数挂到本轮结束会把同一个人的所有消息串成一条队列——正在生成的会话会挡住
+  // 另一个空闲会话（多会话下表现为「消息发给空闲会话，却在排队」）。
+  const submitted = manager.submitPrompt(record, agentBody);
+  logger.info(`→ prompt sent: key=${scope}:${peerId} placement=${submitted.placement}`);
 
-  // followup 写进宿主的 next-turn inbox：目标空闲时立刻开一轮，正在生成时排在
-  // 本轮之后由宿主按 turn 串行处理，不会打断当前这轮。
-  //
-  // 因此这里绝不能 await whenIdle()：concurrencyGuard 以 QQ 用户为键，处理函数
-  // 挂到本轮结束会把同一个人的所有消息串成一条队列——正在生成的会话会挡住另一个
-  // 空闲会话（多会话下表现为「消息发给空闲会话，却在排队」）。
-  record.agent.followup(message);
-  logger.info(`→ followup sent: key=${scope}:${peerId}`);
+  // 排队 / 插话的回执是提示，不挡返回：发不出去只记日志，消息已经交给宿主
+  if (submitted.placement !== 'started') {
+    const current = manager.isCurrentSession(record.sessionId);
+    const title = sessionTitleOf(record);
+    const receipt = submitted.placement === 'queued'
+      ? queuedPromptReceipt(record.sessionId, title, submitted.messageId, current, manager.canSteer())
+      : steeredPromptReceipt(record.sessionId, title, current);
+    try {
+      void sendText(replyTarget, receipt).catch((sendErr: unknown) => {
+        logger.warn(`placement receipt failed: ${errorMessage(sendErr)}`);
+      });
+    } catch (sendErr) {
+      // sendText 正常是 async；真同步抛错也不能挡返回（消息已经交给宿主）
+      logger.warn(`placement receipt failed: ${errorMessage(sendErr)}`);
+    }
+  }
 }
 
 // ══════════════════════════════════════════════════════════════
