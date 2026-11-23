@@ -154,7 +154,7 @@ Sync is a whole-table overwrite with the remark fixed to `qqterm:commands`; unch
 |---|---|---|---|
 | `menu.autoSync` | boolean | `true` | Sync fixed entries to the C2C custom menu once the bot is ready |
 
-The menu has seven fixed entries: Session status, Session list, Reset session, Compact session, Long-term goal, Permission preset, Reasoning effort. Permission and reasoning open submenus; the rest point straight at their command. The menu is a bot-wide whole-table overwrite, not per user.
+The menu has six fixed entries: Session status, Session list, Reset session, Compact session, Permission preset, Reasoning effort. Permission and reasoning open submenus; the rest point straight at their command. The menu is a bot-wide whole-table overwrite, not per user.
 
 ## Sessions, workspaces, and interaction
 

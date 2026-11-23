@@ -29,6 +29,10 @@ This file records product-level changes to QQ SuperTerm. The format follows [Kee
 - **Receipts state the result, not the next step**: the `/clear` and `/clear all` cards no longer explain that the next message opens a new session and just say whether the current session or all sessions stop; the `/new --worktree` receipt no longer mentions a worktree either and answers "new session opened" like `/new`, leaving the worktree to the creation notice once the tree exists.
 - **`/compact` no longer pre-checks the busy state**: the local `agent.status !== 'idle'` gate is gone — the host's compaction lock decides, so running sessions can be compacted too. Command execution is now a reusable `runHostCommand`, ready for `/goal` and other host commands.
 
+### Removed
+
+- **The custom menu drops the long-term goal entry**: the C2C footer keeps four flat buttons (Session status, Session list, Reset session, Compact session) plus the Permission preset and Reasoning effort submenus; the `/goal` command itself is unchanged.
+
 ### Fixed
 
 - **Inline command tags stay within the platform's 100-character attribute limit**: a `<qqbot-cmd-input>` whose `text` runs past 100 characters gets the whole message rejected as "too long or invalid" — the `/get` button carrying a long absolute path hit exactly that, was mistaken for an over-long message and halved, and the mangled half-tag was then accepted by the platform. A tag whose escaped `text` exceeds 100 characters now renders as plain text instead of a button, and when a tag is still refused at send time the tag is degraded to a copyable command line and resent instead of shortening the message. Halving also gained a 200-character floor, so it either fits or reports the over-long failure rather than grinding down to single characters.
