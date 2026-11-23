@@ -250,20 +250,23 @@ describe('/plugins check', () => {
     const result = await h.command.handler(makeCtx('check', h.bot));
 
     expect(h.checkUpdates).toHaveBeenCalledTimes(1);
-    expect(result).toBe(
+    // 链接必须走 markdown 发送：SDK 会把 handler 返回值当纯文本发，标签就成了裸文本
+    expect(h.bot.sendMarkdown.mock.calls[0]?.[1]).toBe(
       '✅ 已检查 2 个插件，1 个可更新\n<qqbot-cmd-input text="/plugins" show="查看列表"/>',
     );
-    expect(h.bot.sendMarkdown).not.toHaveBeenCalled();
+    expect(result).toEqual({ kind: 'noop' });
   });
 
-  it('没有可自动更新的插件时直说，不冒充已是最新', async () => {
+  it('没有可自动更新的插件时也走 markdown 发送', async () => {
     const h = harness();
-    expect(await h.command.handler(makeCtx('check'))).toBe('✅ 没有可自动更新的插件');
+    expect(await h.command.handler(makeCtx('check', h.bot))).toEqual({ kind: 'noop' });
+    expect(h.bot.sendMarkdown.mock.calls[0]?.[1]).toBe('✅ 没有可自动更新的插件');
   });
 
   it('查询失败时标警告并给重试入口', async () => {
     const h = harness({ check: async () => ({ checked: 2, versions: {}, failed: ['dsh-a'] }) });
-    expect(await h.command.handler(makeCtx('check'))).toBe(
+    expect(await h.command.handler(makeCtx('check', h.bot))).toEqual({ kind: 'noop' });
+    expect(h.bot.sendMarkdown.mock.calls[0]?.[1]).toBe(
       '⚠️ 已检查 2 个插件，1 个查询失败\n<qqbot-cmd-input text="/plugins check" show="重试"/>',
     );
   });

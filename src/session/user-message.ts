@@ -11,7 +11,7 @@
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 
 /** 构造一条来自 QQ 的用户消息 */
-export function createQQUserMessage(text: string): unknown {
+export function createQQUserMessage(text: string): { id: string } {
   return createUserMessage({
     content: [{ type: 'text' as const, text }],
     source: { kind: 'user' },

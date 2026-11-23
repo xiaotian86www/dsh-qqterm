@@ -9,6 +9,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { MiddlewareContext } from '@tencent-connect/qqbot-nodejs';
 import { handleInbound } from '../../src/transport/inbound.ts';
 import { WorktreeError } from '../../src/session/worktree.ts';
+import { createQQUserMessage } from '../../src/session/user-message.ts';
 import type { SessionManager, SessionRecord } from '../../src/session/index.ts';
 import type { Logger, ReplyTarget } from '../../src/types.ts';
 
@@ -51,6 +52,8 @@ function makeRecord(sessionId: string, status: 'idle' | 'running' = 'running'): 
     session: { id: sessionId, snapshotEvents: () => [] },
     cancel: vi.fn(),
     followup,
+    steer: vi.fn(),
+    inbox: { nextTurn: [], nextStep: [] },
     whenIdle,
   };
   const record: SessionRecord = {
@@ -65,10 +68,23 @@ function makeRecord(sessionId: string, status: 'idle' | 'running' = 'running'): 
   return { record, followup, whenIdle };
 }
 
-function managerOf(records: SessionRecord[]): SessionManager {
+function managerOf(
+  records: SessionRecord[],
+  placement: 'started' | 'queued' = 'started',
+  canSteer = false,
+): SessionManager {
   let index = 0;
   return {
     getOrCreate: vi.fn(async () => records[Math.min(index++, records.length - 1)]),
+    // 入站只消费 submitPrompt 的结果，落点判定在 manager 单测里覆盖
+    submitPrompt: vi.fn((record: SessionRecord, text: string) => {
+      record.lastPrompt = text;
+      const message = createQQUserMessage(text);
+      record.agent.followup(message);
+      return { messageId: message.id, placement };
+    }),
+    isCurrentSession: vi.fn(() => true),
+    canSteer: vi.fn(() => canSteer),
   } as unknown as SessionManager;
 }
 
@@ -89,6 +105,41 @@ describe('handleInbound：派发不等待本轮 turn', () => {
     expect(followup).toHaveBeenCalledTimes(1);
     expect(textOf(followup.mock.calls[0]?.[0])).toBe('继续');
     expect(whenIdle).not.toHaveBeenCalled();
+  });
+
+  it('排队回执不挡返回：消息已交给宿主，回执带插话链接', async () => {
+    const { record } = makeRecord('session-a');
+    const manager = managerOf([record], 'queued', true);
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    const sendText = vi.fn(() => pending);
+    const ctx = makeCtx('继续');
+
+    const returned = await Promise.race([
+      handleInbound(ctx, manager, logger, sendText as never).then(() => true),
+      new Promise<boolean>((resolve) => { setTimeout(() => resolve(false), 100); }),
+    ]);
+    expect(returned).toBe(true);
+    expect(record.agent.followup).toHaveBeenCalledTimes(1);
+    expect(sendText).toHaveBeenCalledTimes(1);
+    const body = String(sendText.mock.calls[0]?.[1]);
+    expect(body).toContain('✅ 已排队 · 本轮结束后发送');
+    expect(body).toContain('/steer #');
+    expect(body).toContain('插话');
+    release();
+    await pending;
+  });
+
+  it('核心设为插话：回执说已插话，并仍立即返回', async () => {
+    const { record } = makeRecord('session-a');
+    const manager = managerOf([record], 'steered', false);
+    const sendText = vi.fn(async () => {});
+
+    await handleInbound(makeCtx('继续'), manager, logger, sendText as never);
+
+    expect(record.agent.followup).toHaveBeenCalledTimes(1);
+    const body = String(sendText.mock.calls[0]?.[1]);
+    expect(body).toBe('✅ 已插话 · 下一步生效');
   });
 
   it('空闲会话的消息马上进 followup，不被另一个生成中的会话挡住', async () => {

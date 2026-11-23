@@ -20,7 +20,7 @@ import { permissionCommand } from './permission.ts';
 import { retryCommand } from './retry.ts';
 import { helpCommand } from './help.ts';
 import { pluginsCommand } from './plugins.ts';
-import { stopCommand } from './misc.ts';
+import { steerCommand, stopCommand } from './misc.ts';
 
 /**
  * 构建标准命令列表
@@ -45,6 +45,9 @@ export function buildCommandList(deps: CommandDeps): SlashCommand[] {
     ...(deps.manager.presetsAvailable() ? [presetCommand(deps)] : []),
     permissionCommand(deps),
     stopCommand(deps),
+    // 插话走宿主 sessionController.updateQueue；没有该服务时不注册，
+    // 用户输入 /steer 按未知指令处理，排队回执也不给链接。
+    ...(deps.manager.canSteer() ? [steerCommand(deps)] : []),
     retryCommand(deps),
     pluginsCommand(deps),
   ];

@@ -17,6 +17,7 @@ export type {
   PresetEntry,
   PresetSwitchOutcome,
   ModelSwitchOutcome,
+  SettingsDescriptorLike,
   EffortOption,
   EffortView,
   EffortSwitchOutcome,
@@ -36,6 +37,9 @@ export type {
   RenameSessionOutcome,
   ArchiveSessionOutcome,
   SendToOutcome,
+  PromptPlacement,
+  PromptSubmission,
+  SteerQueuedOutcome,
   RetryPromptOutcome,
   WorktreeInfo,
 } from './types.ts';

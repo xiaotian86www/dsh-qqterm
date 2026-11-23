@@ -85,6 +85,9 @@ import type {
   RenameSessionOutcome,
   ArchiveSessionOutcome,
   SendToOutcome,
+  PromptPlacement,
+  PromptSubmission,
+  SteerQueuedOutcome,
   RetryPromptOutcome,
   WorktreeInfo,
 } from './types.ts';
@@ -98,6 +101,10 @@ const PRESET_SETTINGS_NS = 'agent-preset-registry';
 
 /** 权限预设默认值所在的配置条目（与设置页写的是同一个 namespace） */
 const PERMISSION_SETTINGS_NS = 'permission';
+
+/** 会话页「生成中发送」设置的命名空间与字段（宿主 ui-conversation） */
+const BUSY_ENTER_SETTINGS_NS = 'ui-conversation';
+const BUSY_ENTER_FIELD = 'busyEnter';
 
 /** 会话列表最多为多少条会话读取标题（每条都要读一遍日志，是列表的耗时大头） */
 const TITLE_FETCH_LIMIT = 10;
@@ -1843,6 +1850,56 @@ export class SessionManager {
   }
 
   /**
+   * 把一条 prompt 交给宿主，记下落点与消息 id。
+   *
+   * 生成中按宿主 `ui-conversation.busyEnter` 决定：`steer` 走 `agent.steer`
+   * （下一步消费），其余一律 `followup`（排队到本轮之后）。空闲永远 followup。
+   * 设置读不到时按 queue——`followup` 就是宿主的排队原语，插件不另存默认值。
+   */
+  public submitPrompt(record: SessionRecord, text: string): PromptSubmission {
+    const body = text.trim();
+    // 原文留档：轮次失败后「重发」要用（宿主没有重跑已结束一轮的 API）
+    record.lastPrompt = body;
+    const message = createQQUserMessage(body);
+    const running = record.agent.status === 'running';
+    const steering = running && this.busyEnterBehavior() === 'steer';
+    if (steering) record.agent.steer(message);
+    else record.agent.followup(message);
+    const placement: PromptPlacement = !running ? 'started' : steering ? 'steered' : 'queued';
+    return { messageId: message.id, placement };
+  }
+
+  /** 宿主 `ui-conversation.busyEnter`：只有显式 steer 才插话，其余（含读不到）排队 */
+  private busyEnterBehavior(): 'queue' | 'steer' {
+    try {
+      const descriptor = this.getSettingsService()
+        .describe()
+        .find((entry) => entry.ns === BUSY_ENTER_SETTINGS_NS);
+      return descriptor?.value?.[BUSY_ENTER_FIELD] === 'steer' ? 'steer' : 'queue';
+    } catch (err) {
+      this.logger.debug(`busyEnter unavailable: ${errorText(err)}`);
+      return 'queue';
+    }
+  }
+
+  /** 部署是否有插话入口（sessionController.updateQueue） */
+  public canSteer(): boolean {
+    return this.host.supportsQueueSteer();
+  }
+
+  /** 把一条仍在排队的消息改成插话；不 cancel、不改当前指针 */
+  public async steerQueued(sessionId: string, itemId: string): Promise<SteerQueuedOutcome> {
+    const outcome = await this.host.steerQueuedMessage(sessionId, itemId);
+    return outcome.ok
+      ? { ok: true }
+      : {
+        ok: false,
+        reason: outcome.reason,
+        ...(outcome.message === undefined ? {} : { message: outcome.message }),
+      };
+  }
+
+  /**
    * `/to <会话> <文本>`：向指定会话发 prompt，或在它等答案时提交答案。
    *
    * 目标还没打开时先按 id 打开，走 `/sessions resume` 同一条路；只是不把指针挪过去，
@@ -1910,17 +1967,17 @@ export class SessionManager {
 
     if (body === '') return { ok: false, reason: 'empty', sessionId };
 
+    let submitted: PromptSubmission;
     try {
-      // 原文留档：轮次失败后「重发」要用（宿主没有重跑已结束一轮的 API）
-      record.lastPrompt = body;
-      record.agent.followup(createQQUserMessage(body));
+      submitted = this.submitPrompt(record, body);
     } catch (err) {
       const message = errorText(err);
-      this.logger.warn(`/to followup failed: sessionId=${sessionId} err=${message}`);
+      this.logger.warn(`/to prompt failed: sessionId=${sessionId} err=${message}`);
       return { ok: false, reason: 'failed', sessionId, message };
     }
-    this.logger.info(`prompt sent via /to: sessionId=${sessionId}`);
-    return { ok: true, kind: 'sent', sessionId };
+    this.logger.info(`prompt sent via /to: sessionId=${sessionId} placement=${submitted.placement}`);
+    if (submitted.placement === 'started') return { ok: true, kind: 'sent', sessionId };
+    return { ok: true, kind: submitted.placement, sessionId, messageId: submitted.messageId };
   }
 
   /**
@@ -1934,15 +1991,16 @@ export class SessionManager {
     if (!record) return { ok: false, reason: 'no-session' };
     const prompt = record.lastPrompt;
     if (prompt === undefined || prompt.trim() === '') return { ok: false, reason: 'no-prompt' };
+    let submitted: PromptSubmission;
     try {
-      record.agent.followup(createQQUserMessage(prompt));
+      submitted = this.submitPrompt(record, prompt);
     } catch (err) {
       const message = errorText(err);
-      this.logger.warn(`/retry followup failed: sessionId=${record.sessionId} err=${message}`);
+      this.logger.warn(`/retry prompt failed: sessionId=${record.sessionId} err=${message}`);
       return { ok: false, reason: 'failed', message };
     }
-    this.logger.info(`prompt resent: sessionId=${record.sessionId}`);
-    return { ok: true, sessionId: record.sessionId };
+    this.logger.info(`prompt resent: sessionId=${record.sessionId} placement=${submitted.placement}`);
+    return { ok: true, sessionId: record.sessionId, ...submitted };
   }
 
   /**
@@ -1960,9 +2018,7 @@ export class SessionManager {
     replyTarget: ReplyTarget,
   ): Promise<{ sessionId: string; worktreeNotice?: string }> {
     const record = await this.getOrCreate(scope, peerId, senderId, replyTarget);
-    const body = prompt.trim();
-    record.lastPrompt = body;
-    record.agent.followup(createQQUserMessage(body));
+    this.submitPrompt(record, prompt);
     const notice = record.worktreeNotice;
     if (notice !== undefined) delete record.worktreeNotice;
     this.logger.info(`prompt sent with /new: sessionId=${record.sessionId}`);
@@ -2020,9 +2076,7 @@ export class SessionManager {
     const attachCwd = this.headerCwd(created.agent) ?? directory;
     if (attachCwd) void this.host.attachSessionToWorkspace(sessionId, attachCwd);
 
-    const body = input.prompt.trim();
-    record.lastPrompt = body;
-    created.agent.followup(createQQUserMessage(body));
+    this.submitPrompt(record, input.prompt);
     this.logger.info(
       `background session started: sessionId=${sessionId} dir=${created.directory} worktree=${input.worktree}`,
     );

@@ -8,10 +8,13 @@ import {
   sessionReplyLink,
   sessionResumeLink,
   sessionSourceHeader,
+  sessionSteerLink,
   sessionStopLink,
   sessionTargetLabel,
   sessionTitleOf,
   sourceTitle,
+  queuedPromptReceipt,
+  steeredPromptReceipt,
 } from '../../src/transport/session-source.ts';
 
 function recordWithEvents(events: ReadonlyArray<{ type?: string; data?: { title?: unknown } }>): SessionRecord {
@@ -61,6 +64,16 @@ describe('来源行与尾部动作', () => {
       .toBe('<qqbot-cmd-input text="/stop #04de1556" show="停止"/>');
   });
 
+  it('插话链接带上消息 id，执行 /steer #短id <消息id>', () => {
+    expect(sessionSteerLink('session-04de1556-8c54-4b78-93e1-5714e079fca6', 'm-1'))
+      .toBe('<qqbot-cmd-input text="/steer #04de1556 m-1" show="插话"/>');
+  });
+
+  it('插话链接的属性值做转义，消息 id 里的引号不破坏标签', () => {
+    expect(sessionSteerLink('session-04de1556', 'm"1<2>'))
+      .toBe('<qqbot-cmd-input text="/steer #04de1556 m&quot;1&lt;2&gt;" show="插话"/>');
+  });
+
   it('归档链接把 /sessions archive #短id 直接执行', () => {
     expect(sessionArchiveLink('session-04de1556-8c54-4b78-93e1-5714e079fca6'))
       .toBe('<qqbot-cmd-input text="/sessions archive #04de1556" show="归档"/>');
@@ -106,6 +119,29 @@ describe('来源行与尾部动作', () => {
         + ' · <qqbot-cmd-input text="/sessions resume #04de1556" show="恢复"/>'
         + ' · <qqbot-cmd-input text="/stop #04de1556" show="停止"/>'
         + ' · <qqbot-cmd-input text="/sessions archive #04de1556" show="归档"/>');
+  });
+});
+
+describe('排队 / 插话回执', () => {
+  it('当前会话排队：首行说清落点，第二行给可点的插话入口', () => {
+    expect(queuedPromptReceipt('session-04de1556', undefined, 'm-1', true, true))
+      .toBe('✅ 已排队 · 本轮结束后发送\n> 💡 <qqbot-cmd-input text="/steer #04de1556 m-1" show="插话"/>');
+  });
+
+  it('别的会话排队：带上标题与短 id 署名', () => {
+    expect(queuedPromptReceipt('session-04de1556', '修登录', 'm-1', false, false))
+      .toBe('✅ 已排队 · 「修登录」 · `#04de1556`');
+  });
+
+  it('没有插话能力时不带链接，也不解释部署差异', () => {
+    expect(queuedPromptReceipt('session-04de1556', undefined, 'm-1', true, false))
+      .toBe('✅ 已排队 · 本轮结束后发送');
+  });
+
+  it('插话回执：当前只说效果，别的会话带署名', () => {
+    expect(steeredPromptReceipt('session-04de1556', undefined, true)).toBe('✅ 已插话 · 下一步生效');
+    expect(steeredPromptReceipt('session-04de1556', '修登录', false))
+      .toBe('✅ 已插话 · 「修登录」 · `#04de1556`');
   });
 });
 
