@@ -1899,6 +1899,11 @@ export class SessionManager {
       };
   }
 
+  /** 目标会话是否在等一条回答（`/to` 据此决定引用是否一起发：等答案时不带引用） */
+  isAwaitingAnswer(sessionId: string): boolean {
+    return this.questionChannel?.hasPending(sessionId) ?? false;
+  }
+
   /**
    * `/to <会话> <文本>`：向指定会话发 prompt，或在它等答案时提交答案。
    *

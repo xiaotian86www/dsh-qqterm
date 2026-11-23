@@ -10,6 +10,7 @@ import { ConfigSchema, type QQTermConfig } from '../../src/config.ts';
 import type { SessionManager, SessionRecord, WorkspaceGroup, WorkspaceSession } from '../../src/session/index.ts';
 import type { Logger } from '../../src/types.ts';
 import { toCommand } from '../../src/commands/to.ts';
+import type { InboundQuoteState } from '../../src/transport/inbound-state.ts';
 
 const state = vi.hoisted(() => ({ sent: [] as string[] }));
 
@@ -54,6 +55,7 @@ function makeManager(over: {
   record?: SessionRecord;
   current?: boolean;
   canSteer?: boolean;
+  awaiting?: boolean;
 } = {}) {
   return {
     listWorkspaceGroups: vi.fn(async () => over.groups ?? groups()),
@@ -62,21 +64,23 @@ function makeManager(over: {
     findBySessionId: vi.fn(() => over.record),
     isCurrentSession: vi.fn(() => over.current ?? false),
     canSteer: vi.fn(() => over.canSteer ?? true),
+    isAwaitingAnswer: vi.fn(() => over.awaiting ?? false),
     sendTo: vi.fn(async () => over.sendTo ?? { ok: true, kind: 'sent', sessionId: TARGET }),
   } as unknown as SessionManager;
 }
 
-function makeCtx(raw: string): SlashCommandHandlerContext {
+function makeCtx(raw: string, quote?: InboundQuoteState): SlashCommandHandlerContext {
   return {
     message: { senderId: 'user1', kind: 'c2c', messageId: 'm1' },
     command: { raw },
+    state: quote === undefined ? {} : { quote },
   } as unknown as SlashCommandHandlerContext;
 }
 
-async function run(manager: SessionManager, raw: string): Promise<string> {
+async function run(manager: SessionManager, raw: string, quote?: InboundQuoteState): Promise<string> {
   state.sent.length = 0;
   const command = toCommand({ manager, config, logger });
-  const result = await command.handler(makeCtx(raw));
+  const result = await command.handler(makeCtx(raw, quote));
   return typeof result === 'string' ? result : state.sent.at(-1) ?? '';
 }
 
@@ -203,6 +207,63 @@ describe('/to', () => {
   it('缺少会话参数时给用法', async () => {
     const manager = makeManager();
     expect(await run(manager, '')).toContain('缺少会话');
+    expect(manager.sendTo).not.toHaveBeenCalled();
+  });
+
+  it('带引用时把引用块拼在正文前面，回执贴 📎', async () => {
+    const manager = makeManager();
+
+    const text = await run(manager, '#3f2a9b1c 继续修登录', {
+      source: 'msg_elements',
+      text: '上次的报错栈',
+    });
+
+    expect(manager.sendTo).toHaveBeenCalledWith(
+      'c2c',
+      'user1',
+      'user1',
+      TARGET,
+      '[Quoted message begins]\n上次的报错栈\n[Quoted message ends]\n[Current message]\n继续修登录',
+      { scope: 'c2c', targetId: 'user1' },
+    );
+    expect(text).toBe('✅ 已发送到「目标会话」 · `#3f2a9b1c`\n📎 已带上引用');
+  });
+
+  it('只有引用没有正文时，整条消息就是引用块', async () => {
+    const manager = makeManager();
+
+    await run(manager, '#3f2a9b1c', { source: 'msg_elements', text: '只有引用' });
+
+    expect(manager.sendTo).toHaveBeenCalledWith(
+      'c2c',
+      'user1',
+      'user1',
+      TARGET,
+      '[Quoted message begins]\n只有引用\n[Quoted message ends]',
+      { scope: 'c2c', targetId: 'user1' },
+    );
+  });
+
+  it('目标在等回答时不带引用，回执说明为什么', async () => {
+    const manager = makeManager({
+      awaiting: true,
+      sendTo: { ok: true, kind: 'answered', sessionId: TARGET },
+    });
+
+    const text = await run(manager, '#3f2a9b1c 2', { source: 'msg_elements', text: '引用原文' });
+
+    expect(manager.sendTo).toHaveBeenCalledWith(
+      'c2c', 'user1', 'user1', TARGET, '2', { scope: 'c2c', targetId: 'user1' },
+    );
+    expect(text).toBe('✅ 已回答「目标会话」 · `#3f2a9b1c`\n💡 目标在等回答，引用这次没有一起发送');
+  });
+
+  it('引用取不到时什么都不发', async () => {
+    const manager = makeManager();
+
+    const text = await run(manager, '#3f2a9b1c hi', { source: 'none' });
+
+    expect(text).toBe('❌ 引用内容取不到，没有执行');
     expect(manager.sendTo).not.toHaveBeenCalled();
   });
 });

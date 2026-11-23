@@ -10,6 +10,8 @@ import type { CommandDeps, SlashCommand } from './types.ts';
 import { parseArgs } from './args.ts';
 import type { SessionConfirmAction } from '../features/session-confirm.ts';
 import { WorktreeError, worktreeErrorText, type ChangeWorkspaceOutcome } from '../session/index.ts';
+import { buildPromptBody } from '../transport/prompt-body.ts';
+import { takeQuote } from './quote.ts';
 import { getScopePeer, shortSessionId } from '../shared/index.ts';
 import { errorMessage } from '../shared/utils.ts';
 
@@ -99,11 +101,12 @@ export function parseNewArgs(raw: string): {
  *
  * 两条路径都不做二次确认：旧会话继续跑，没有可误伤的东西。
  */
-export function newCommand({ manager, config }: CommandDeps): SlashCommand {
+export function newCommand({ manager, config, logger }: CommandDeps): SlashCommand {
   return {
     name: 'new',
     scope: 'all',
     description: '新建会话',
+    acceptsQuote: true,
     // 用法页只在有 workspaceRegistry 时列名字写法：没有该服务就只认绝对路径，
     // 与 /sessions 组标题一致，不提示「当前部署不支持按名字」。
     get usage(): string {
@@ -113,6 +116,7 @@ export function newCommand({ manager, config }: CommandDeps): SlashCommand {
         '',
         '`/new` 在当前工作区新建会话，旧会话继续跑',
         '`/new <提示词>` 新建会话并把提示词发出去',
+        '回复一条消息再发：被引用的内容会一起作为新会话首条消息',
         named ? '`/new --dir <工作区>` 在指定工作区新建（`-d`）' : '`/new --dir <路径>` 在指定目录新建（`-d`）',
         ...(manager.worktreesAvailable() ? ['`/new --worktree` 新会话开在独立工作树（`-w`）'] : []),
         '`/new --background <提示词>` 后台另开一条，不切走当前会话（`-b`）',
@@ -146,10 +150,15 @@ export function newCommand({ manager, config }: CommandDeps): SlashCommand {
 
       if (worktree && manager.readOnlySandbox()) return READ_ONLY_WORKTREE;
 
-      // 后台：另开一条会话把提示词发出去，当前会话与它的工作区都不动
+      // 带引用的命令：先确认引用取得到，再动会话（取不到就什么都不改）
+      const taken = await takeQuote(cmdCtx, config.media, logger);
+      if (typeof taken === 'string') return taken;
+      const quote = taken;
+
+      // 后台：另开一条会话把内容发出去，当前会话与它的工作区都不动
       if (background) {
-        // 后台会话没有提示词就没有要跑的东西（普通 /new 不给提示词是合法的）
-        if (prompt === undefined) return BACKGROUND_MISSING;
+        // 后台会话没有提示词也没有引用就没有要跑的东西（普通 /new 不给提示词是合法的）
+        if (prompt === undefined && quote === undefined) return BACKGROUND_MISSING;
         let directory: string;
         let label: string | undefined;
         if (arg === '') {
@@ -164,12 +173,16 @@ export function newCommand({ manager, config }: CommandDeps): SlashCommand {
         }
         if (directory === '') return '⚠️ 拿不到当前工作区 · 用 `--dir` 指定一个';
 
+        const body = quote === undefined
+          ? prompt!
+          : buildPromptBody({ quote: quote.quote, quoteFiles: quote.files, text: prompt ?? '' });
+
         let started: { sessionId: string; worktreeNotice?: string };
         try {
           started = await manager.startBackgroundSession({
             directory,
             worktree,
-            prompt,
+            prompt: body,
             scope,
             peerId,
             senderId,
@@ -184,6 +197,7 @@ export function newCommand({ manager, config }: CommandDeps): SlashCommand {
         const lines = started.worktreeNotice === undefined
           ? [`✅ 已在后台开启会话 \`#${short}\``]
           : [started.worktreeNotice];
+        if (quote !== undefined) lines.push('📎 已带上引用');
         if (label !== undefined) lines.push(label);
         return lines.join('\n');
       }
@@ -207,15 +221,19 @@ export function newCommand({ manager, config }: CommandDeps): SlashCommand {
       }
       if (worktree) manager.armWorktree();
 
-      // 带提示词：立刻开会话，把提示词作为第一条消息发出（--worktree 的树也在这条上建）
-      if (prompt !== undefined) {
+      // 带提示词或引用：立刻开会话，把内容作为第一条消息发出（--worktree 的树也在这条上建）
+      if (prompt !== undefined || quote !== undefined) {
+        const body = buildPromptBody({
+          ...(quote === undefined ? {} : { quote: quote.quote, quoteFiles: quote.files }),
+          text: prompt ?? '',
+        });
         let notice: string | undefined;
         try {
           const started = await manager.promptNewSession(
             scope,
             peerId,
             senderId,
-            prompt,
+            body,
             { scope, targetId: peerId },
           );
           notice = started.worktreeNotice;
@@ -224,7 +242,11 @@ export function newCommand({ manager, config }: CommandDeps): SlashCommand {
           const message = errorMessage(err);
           return `❌ 没能开启会话: ${message}\n稍后再试一次。`;
         }
-        const lines = notice === undefined ? ['✅ 已开启新会话，提示词已发出'] : [notice];
+        const head = prompt === undefined
+          ? '✅ 已开启新会话，引用已作为首条消息发出'
+          : '✅ 已开启新会话，提示词已发出';
+        const lines = notice === undefined ? [head] : [notice];
+        if (quote !== undefined) lines.push('📎 已带上引用');
         if (label !== undefined) lines.push(label);
         return lines.join('\n');
       }

@@ -3,7 +3,7 @@
  *
  * 每个命令工厂函数接收 CommandDeps，由 commands/index.ts 统一注入。
  */
-import type { QQBot } from '@tencent-connect/qqbot-nodejs';
+import type { QQBot, SlashCommand as SdkSlashCommand } from '@tencent-connect/qqbot-nodejs';
 import type { SessionManager } from '../session/index.ts';
 import type { QQTermConfig } from '../config.ts';
 import type { Reloader } from '../reload/index.ts';
@@ -22,5 +22,11 @@ export interface CommandDeps {
   installer?: PluginInstaller;
 }
 
-/** 斜杠命令（SDK 类型，统一从本模块转出，命令文件不用直接依赖宿主包） */
-export type { SlashCommand } from '@tencent-connect/qqbot-nodejs';
+/** 斜杠命令（SDK 类型 + 插件登记字段，统一从本模块转出，命令文件不用直接依赖宿主包） */
+export type SlashCommand = SdkSlashCommand & {
+  /**
+   * 这条命令会把随消息一起来的引用并进 prompt（见 commands/quote.ts）。
+   * 只有需要引用内容的命令才标：其它命令无视引用，不做「取不到」判断。
+   */
+  acceptsQuote?: boolean;
+};
