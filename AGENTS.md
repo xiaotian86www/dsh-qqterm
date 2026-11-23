@@ -1,99 +1,92 @@
 # AGENTS.md — dsh-qqterm 开发约束
 
-给在本仓库工作的开发者 / AI 助手：这里只写**不能违反的约束**和查表用的定值。
-安装配置见 [README.md](./README.md)，版本变更见 [CHANGELOG.md](./CHANGELOG.md)。
+给在本仓库工作的开发者 / AI 助手：这里只写**不能违反的约束**。实现怎么写的看代码，安装配置看 [README.md](./README.md)，版本变更看 [CHANGELOG.md](./CHANGELOG.md)。
 
 ## 1. 项目速览
 
 - dsh（DeepSeek Harness）的 QQ Bot IM 通道插件，纯 Cordis 插件，不改宿主 loop。
-- 宿主加载 `lib/index.js`，浏览器加载 `lib/client.js`（dsh.client 模块）。
-- Node ≥ 22.12、TypeScript ESM、pnpm、vitest、tsdown。
-- 当前宿主 dsh 0.2.2-rc.3 实测可运行；`dsh.compatibility` 只是声明，宿主升级后必须重新验收并更新。
-- `lib/` 的 js 要提交（开箱即用）；`lib/**/*.d.ts`、`lib/**/*.map` 被 .gitignore 排除。
+- Node ≥ 22.12、TypeScript ESM、pnpm、vitest、tsdown；当前宿主 dsh 0.2.2-rc.3 实测可运行。
+- `lib/` 的构建产物要提交（开箱即用），类型声明与 sourcemap 不入库。
 
 ## 2. 目录地图
 
-| 路径 | 职责 |
-|---|---|
-| `src/index.ts` | Cordis 入口：`name` / `inject` / `Config` / `apply` |
-| `src/gateway/` | 中间件、事件、出站、生命周期 |
-| `src/setup/` | 扫码绑定、凭据持久化、端内绑定页 |
-| `src/features/` | 问答、审批、指令面板、按钮协议 |
-| `src/session/` | 会话寻址、多会话、工作树接入 |
-| `src/transport/` | 入站、出站、分片、附件、回复目标 |
-| `src/commands/` | 斜杠指令 |
-| `src/plugins/` | 插件安装 / 更新 / 热重载 |
-| `src/media/` | 富媒体理解、附件发送、清理 |
-| `src/host/` | 宿主 Agent/Session 适配 |
-| `src/client/` | 浏览器端（settings.section） |
-| `cordis.patch.yml` / `cordis.dev.yml` | bundle patch（随包分发）/ `--patch` 调试 overlay |
-| `tests/` | vitest 用例，镜像 `src/`，不进 `lib/` |
-| `lib/` | 构建产物，**不要手改** |
+- `src/` 按功能分目录：gateway、setup、features、session、transport、commands、plugins、media、host、client；测试放顶层 `tests/`，不进 `lib/`。
 
 ## 3. 硬约束
 
 ### 3.0 薄层原则
 
-qqterm 是通道，不是能力所有者：目标是从 QQ 接入的超级终端，用最小的自由度损失操作远端 agent。宿主核心或兄弟插件已有等价能力的一律转发，不重写、不影子实现。判定线：去掉 QQ 这个通道，这段代码还成立吗？成立说明放错了层。
+qqterm 是通道，不是能力所有者：目标是把 QQ 接到远端 agent 的完整能力面，用最小的自由度损失。宿主核心或兄弟插件已有的能力一律转发，不重写、不影子实现。
 
-- **归属**：agent 循环、模型 / 思考强度、preset、权限、压缩、工作区 / 工作树、插件安装归宿主；插件只拥有通道独有的一层——入站解析、分片、附件、回复目标、绑定、多会话寻址与文案渲染。
-- **命令面**：宿主有命令就走 `commands` 登记簿（`find` 判可见性、`execute` 转发），不解析宿主私有服务；宿主没有而 QQ 侧必经的路由（`/sessions`、`/to`、`/new`、`/stop`、`/clear`）才由插件注册。
-- **允许的厚度**：只做通道差异适配（分片、按钮降级、审批 / 提问桥接），适配层不放业务判定；不缓存宿主状态另立事实源，必须缓存时要能从宿主重新推导。
-- **自由度**：命令面覆盖宿主能力全集，缺能力先补转发，不本地造轮子；自由度指 `access.owner` 一人的可达能力面，不是放宽白名单（§8 不变）。
-- **默认没有兜底渠道**：功能只在 QQ 这一条通道内成立——不设计「QQ 上做不了就去 Web / 桌面端看」的路径，不在提示里把别的界面当出口，也不要求用户切换客户端才能拿到结果或完成动作。做不到就在本通道内降级（重试、分片、纯文本、入队重发、挂起重发），再做不到就如实说没完成，只写事实。判定线：把 Web 端与宿主界面从部署里删掉，这个功能还成立吗？要靠对方才能闭环的，说明还没实现完。
-- **如无必要勿增实体**：各层都先问「能不能不加」。设计上，能不改结构就不改；新增实体（模块、类型、选项、命令、分支、钩子、依赖、文档章节、测试设施）先证明必要——现有结构为什么表达不了、第二个使用方在哪、删掉会坏哪个用户可见行为，答不上就不加（扩展优于新建，参数优于新命令，复用优于抽象）。实现上，能不加的状态 / 分支就不加。展示上，实现里必须存在的内部状态（例如会话是否已打开）不映射到界面，不为它造概念、选项或提示——使用方只该看到他 要做的动作。
-- **一个事实只判定一处**：同一状态（是否已归档、是否在生成、会话是否存在）由拥有该事实的层给出结论，上层不预读、不复述、不另起分支兜底——两处判定迟早会分叉，出错时也分不清该信谁。展示层可以省略不展示，但不能各自维护一份判定。
+- **归属与判定线**：agent 循环、模型 / 思考强度、preset、权限、压缩、工作区 / 工作树、插件安装归宿主；插件只拥有通道独有的一层——入站解析、分片、附件、回复目标、绑定、多会话寻址与文案渲染。判定线：去掉 QQ 这层，这段代码还成立吗？成立说明它属于宿主，插件只能问不能判。
+- **命令面**：宿主有的命令只做转发（可见性交给宿主登记簿），不解析宿主私有服务；只有 QQ 侧必经的路由（`/sessions`、`/to`、`/new`、`/stop`、`/clear`）才由插件注册。
+- **允许的厚度**：只做通道差异适配（分片、按钮降级、审批 / 提问桥接），适配层不放业务判定、不另立事实源；必须缓存时只存指针 / 下标，且能从宿主重新推导。
+- **自由度**：命令面覆盖 `access.owner` 一人的可达能力全集，缺能力先补转发，不本地造轮子；不是放宽白名单（§8 不变）。
+- **默认没有兜底渠道**：功能只在 QQ 这一条通道内成立——不设计「QQ 上做不了就去 Web / 桌面端看」的路径，不把别的界面当出口，不要求用户切换客户端才能拿到结果。做不到就在本通道内降级（重试、分片、纯文本、入队重发、挂起重发），再做不到就如实说没完成。判定线：把 Web 端与宿主界面从部署里删掉，这个功能还成立吗？要靠对方才能闭环的，说明还没实现完。
+- **如无必要勿增实体**：先问「能不能不加」。新增实体（模块、类型、选项、命令、分支、钩子、依赖、文档章节、测试设施）先证明必要：现有结构为什么表达不了、第二个使用方在哪、删掉会坏哪个用户可见行为（扩展优于新建，参数优于新命令，复用优于抽象）。
+- **事实一致（硬约束）**：同一状态（是否已归档、是否在生成、会话是否存在、工作区是哪个）在任意时刻、任意入口只能有一个判定处，由拥有该事实的层给出结论；上层不预读、不复述、不另起分支兜底。
+  - 一个问题的答案只有一个函数能给，其余调用点只做转发；日志、列表、按钮、提示投影的是同一个结论。
+  - 缓存只当加速器：缓存指针 / 下标，不缓存结论；使用点必须能从事实源重新推导，不因缓存存在就跳过重查。
+  - 展示层可以省略不展示，但不能各自维护一份判定。
+- **行为一致不作强制**：分片、降级（键盘 → 纯文本）、多会话署名等路径不要求逐字对齐，后期允许分叉；只要求每条路径各自事实正确。§4 的「同一意思只长成一个样子」约束的是文案形态，不是跨路径行为等价。
 
 ### 3.1 宿主依赖
 
-- `@deepseek-ai/*` 一律 `peerDependencies`，禁止进 `dependencies`，禁止打进客户端 bundle；不 import 宿主包私有深层路径；版本号运行时读 `package.json`，不另建常量。
-- 能力依赖全写进 `inject`（当前 14 项），运行时不探测、不写降级分支；服务缺失时插件 inactive，不抛错阻塞宿主。`inject` 只进不退。
-- 可选能力不进 `inject`，一律用 `ctx.get(name)` 软读（`src/shared/utils.ts` 的 `optionalService`）；属性访问会抛 `cannot get property "x" without inject`，可选链兜不住。软读必须在使用点现查，不得存成 `apply` / 构造期常量——返回值随提供方 fiber 是否活动而变，缓存会把「此刻还没有」固化成「整台部署永远没有」；需要「到位时注册、离开时注销」才用 `ctx.inject([…], …)`（见下方 `webServer`）。五个例外：
-  - `agentPresets`：缺 `agent-preset-registry` 时 `/preset` 整条不注册，建会话走宿主默认组合。
-  - `webServer`：只有 web / Desktop 组合包提供。绑定页经 `mountBindRoutes`（`src/setup/bind-routes.ts`）用 `ctx.inject(['webServer'], …)` 订阅，到位时注册、离开或替换时由 Cordis 注销；缺服务时扫码只走终端 / 浏览器降级通道。
-  - `sessionController`：只软读 `list()`，取 `/sessions` 排序用的 `updatedAt`（`max(createdAt, lastPromptAt)`）与 `blank`；缺服务只丢排序与空白会话过滤。
-  - `workspaceRegistry`：缺服务时 `/sessions` 仍按目录分组，但组标题只给路径、不标 `📌`、不给归档入口；归档类子命令（无 `hmr` 时的 `/plugins reload` 同理）按未知子命令处理，`/new <名字>` 回不支持（绝对路径照常）。
-  - `worktrees`：缺服务时 `/new --worktree` 按未知参数处理。建会话时目录不是 Git 仓库、或沙箱已只读，就地开会话并提示；只读沙箱下 `/new --worktree` 当场拒绝。`--worktree`（`-w`）要求下一条消息先建树再开会话，基点是第一条消息到达时目录的 HEAD（`from: <完整 sha>`），读不到就不建会话（回落主检出也算错）；意图只在内存里按 sessionKey 记，`/to`、`/sessions resume`、`/clear` 与不带参数的 `/new` 清掉，建树失败保留（重发即重试）。`/new --worktree <提示词>` 在发这条提示词时建树，`--background -w` 同样（要求从参数进来，不经过 `pendingWorktree`）。`/status` 不出工作树行，`/sessions archive` 不提清理。
-- 只软读 `sandboxPolicy.resolve()` 判只读，不写进 `inject`。`compaction` 也不进 `inject`：它挂在 preset 作用域，`/compact` 的判定与执行全走宿主 `commands` 登记簿。
-- 因可选服务缺失而不可用的能力**不解释、不提示**：命令不注册，或按未知子命令 / 未知参数处理，用法页不列，聊天里不出现部署差异。
+- `@deepseek-ai/*` 一律 `peerDependencies`，不进 `dependencies`，不进客户端 bundle；不 import 宿主私有深层路径；版本号运行时读 `package.json`，不另建常量。
+- 能力依赖全写进 `inject`，运行时不探测、不写降级分支；服务缺失时插件 inactive，不抛错阻塞宿主。`inject` 只进不退。
+- 可选能力不进 `inject`：在使用点软读、现查，不存成构造期常量（返回值随提供方是否活动而变）；需要「到位时注册、离开时注销」才做订阅。缺失只缩小能力面、不改变语义，**不解释、不提示**：命令不注册，或按未知子命令 / 未知参数处理，用法页不列。
+
+| 可选服务 | 缺了以后 |
+|---|---|
+| `agentPresets` | `/preset` 不注册，建会话走宿主默认组合 |
+| `webServer` | 扫码只走终端 / 浏览器通道 |
+| `sessionController` | `/sessions` 丢排序与空白会话过滤 |
+| `workspaceRegistry` | 仍按目录分组，但组标题只给路径、不标 `📌`、不给归档入口；归档类子命令按未知处理，`/new <名字>` 回不支持（绝对路径照常） |
+| `worktrees` | `/new --worktree` 按未知参数处理 |
+
+- 工作树：`--worktree` 让下一条消息先建树（基点是消息到达时的 HEAD，读不到就不建会话），意图只按会话记在内存，`/to`、`/sessions resume`、`/clear` 与无参 `/new` 清掉，建树失败保留（重发即重试）；`--background -w` 同样先建树。只读沙箱下当场拒绝；目录不是 Git 仓库时就地开会话并提示。`/status` 不出工作树行，`/sessions archive` 不提清理。
+- 沙箱只软读 `sandboxPolicy.resolve()` 判只读，不写进 `inject`；`/compact` 的判定与执行全走宿主命令登记簿，插件不判。
 
 ### 3.2 启动与生命周期
 
-- `apply()` 必须立即返回：扫码、网关、长轮询一律 `void …catch()`，禁止 await 用户交互。
-- 禁止运行时写 `process.env`；凭据只写 profile 的 `cordis.patch.yml`。
-- 未捕获 rejection 在宿主是致命错误，所有异步链必须有兜底 catch。
-- 长生命周期对象（gateway socket、定时器）必须在 `outsideHmrTransaction` 里创建（`src/index.ts` 两处 `bootstrapGateway`），否则之后每条入站消息写配置都报 `HMR transactions cannot be nested`。
-- `name = 'qqterm'` 与 patch entry id 是兼容契约，改了用户 profile 里按 id 的配置覆盖会失效。
+- `apply()` 必须立即返回：扫码、网关、长轮询一律不 await 用户交互；未捕获 rejection 在宿主是致命错误，所有异步链必须有兜底 catch。
+- 禁止运行时写 `process.env`；凭据只写 profile 的配置文件。
+- 长生命周期对象（gateway socket、定时器）必须在 HMR 事务外创建，否则之后每条入站消息写配置都会报嵌套错误。
+- 身份契约：包名、`name = 'qqterm'`、patch entry id、客户端入口 id 是同一份契约，改一个要同改其余——profile 里按 id 的配置覆盖与客户端注册都依赖它。
 
 ### 3.3 客户端
 
-- 入口 id 必须等于包名（tsdown 读 package.json）；改包名要同步 `cordis.patch.yml` 的 `name` 与 `PACKAGE_NAME`，否则报 “loaded without registering”。
-- 外部依赖只有 `react` / `react-dom`（`tsdown.client.config.ts` 的 `BASELINE_EXTERNALS`），其余内联；新增依赖先看体积。
-- 唯一槽位 `settings.section`：绑定 / 换凭据 / 解绑 / 配置编辑。不要注册 `sidebar.right.pane.tab`、`main`、`sidebar.panellist` 或插件详情动作；服务缺失时静默 inactive，不能白屏。
+- 外部依赖只有 `react` / `react-dom`，其余内联；新增依赖先看体积。
+- 唯一槽位 `settings.section`（绑定 / 换凭据 / 解绑 / 配置编辑），不注册其他槽位；服务缺失时静默 inactive，不能白屏。
 
 ### 3.4 会话与交互
 
-- 只做 C2C 私聊，群消息在 accessPolicy 拦掉，代码里没有群聊分支；按钮键盘只在 C2C 可用，发送失败降级成纯文本并记 warn。改问答 / 审批时在 C2C 验证回退。
-- `ask_user_question` / `approval` 走宿主 waterfall，不退回 `userQuestions.ask` 探测。投递失败按键盘 → 纯文本降级；仍失败按「暂不可用」挂起，等 `ready` / `resumed` 或新入站消息后重发，不判成 `unavailable`。插件卸载或渠道失效时把挂起项 `handoffPending` 交还宿主；借来的会话不 cancel、不 dispose。
-- 聊天会话 key 固定 `qqterm:${appId}:chat`，全 bot 只有一个「当前会话」；已获取会话可以有多份，输出全部回 QQ。非当前会话的署名见 §4.9。
-- `/sessions` 默认按工作区分组列工作中会话（重启后尚未打开的也在列），`all` 看全部、只标 `📌`。工作中会话的行尾给「回复」（`/to #短id `，非当前会话一律给：列表不区分会话是否已打开）、「停止」（`/stop #短id`，只在正在生成时给）与「归档」（`/sessions archive #短id`，没有 `workspaceRegistry` 时不给）快捷链接，已归档的行不给。`resume` 只改指针；`/new` 清指针、不停旧会话；`/clear`（别名 `/reset`）停当前再开新，`/clear all` 停全部；`/stop` 停当前、`/stop <id>` 停指定已获取会话（规则同 `/sessions` 的目标解析），`/stop all` 停全部生成中。`/clear` 与 `/clear all` 先发确认卡（5 分钟过期，卡片发不出去就放弃动作），`/new` 直接执行。
-- `/to` 的目标没打开时先按 id 接回来再发（与 `resume` 同一条路），只是不切指针；打开失败按 `not-found` / `locked` 如实回，不 create。已归档的会话不接回来（归档是界面已有的状态，`/to` 不替人改），回「已归档」并给取消归档入口。
-- `/new` 的参数：工作区用 `--dir`（`-d`），其余非参数词按顺序连成提示词直接发出去；`--worktree`（`-w`）让这条提示词先建树，`--background`（`-b`）另开一条会话、不动当前指针与聊天工作区且必须带提示词。
-- 启动恢复：QQ `ready` 后按 prefs 指针 `getOrCreate`（singleflight）；盘上已无则跳过并清指针，**恢复失败绝不新建**；占用 / 后端故障时指针保持原样。回复目标存 `model-prefs.json` 的 `targets`，值变化才写；恢复失败（locked / 宿主报错）用它推 `⚠️ 上次的会话没能恢复` + `/sessions resume` 按钮，`not-found` 静默。持久化写在消息路径上，不写卸载钩子（强杀不执行）。
-- 模型 / 思考强度 / preset 沿用宿主核心行为，插件不另立配置：`/model`、`/reasoning` 有活跃会话时调 `agent.model.select` 写进该会话（不 fork 不重建，下轮生效），同时把同一份选择写成部署默认值；无会话只写默认值（`agentDefaultModel.saveSelection`，`/permission` 走 `settings.update`）。整段读改写走 `serializeSelection`，同一会话的 QQ 侧写入串行，不为切换拉起会话。`/preset` 写 `agent-preset-registry.selectedDefault`，对新建会话生效，插件不存 preset。查看视图显示当前值并标 `✅`，不造「全局」标签。
-- 插件只在 `~/.dsh-qqterm/model-prefs.json` 存 `sessionIds` / `dirs` / `targets` / `held`。`dirs` 是「下一条消息建会话的落点」，只由建会话、切换会话与 `/new <工作区|路径>` 写，运行期 `cd` 只改会话运行目录、不写。工作区一律按会话 `header.cwd` 算：`/sessions` 分组、建会话落点、`/status` 同一来源；树会话的工作区是主仓库根，树只作运行目录；`/get`、`/ls` 的相对路径按运行目录算。
-- 命令参数统一走 `src/commands/args.ts`，不要自己写 `raw.split(/\s+/)`。带参数的命令（`/new`、`/sessions`、`/plugins`）走 `parseArgs(raw, { command, flags, terminator })`：`FlagSpec` 声明 `name` / `alias` / `value` / `list` / `missing`，出口是 `words` / `flags` / `values` / `lists`；引号成对包住的值留在同一个词里、引号本身去掉，引号包着的词不当参数，`--dir=值` 等价于 `--dir 值`，未闭合回 `⚠️ 引号没有闭合 · 用法: /help <命令>`，认不出回 `⚠️ 未知参数: x · 用法: /help <命令>`。整行就是一个值的命令（`/ls`、`/get`、`/rename`、`/goal`、`/model`、`/reasoning`、`/preset`、`/permission`、`/to` 的正文）走 `parseRest()`。禁止静默跳过认不出的参数（`/plugins install` 的 `--allow-builds` 拼错不得回退成不带审批安装）。
-- 会话标题由 `sessionTitle.rename` 写入 `session/title`，写完即固定。`/rename` 只改当前会话，`/sessions rename <id>` 改已打开会话；两者只接受 live session，冷会话提示先 `/sessions resume`。
-- 入站 `source.kind` 必须是 `user`（`src/session/user-message.ts`）：标题、最近提问时间、轮次大纲、replay 断点都以人类消息为触发条件，自造 kind 会让新会话停在「未命名会话」。
-- Markdown 按 `textChunkLimit` 分片，代码块 / 表格感知切分在 `src/transport/chunker.ts`，不要绕过。
-- 超长先自己解决：分片 / 重切是通道的责任，切到最小分片仍被平台拒绝才允许提示，内容类失败（超长、风控拦截）的提示只写事实（原因 + 未送达），见 §3.0「默认没有兜底渠道」。
-- 普通消息在 `agent.followup()` 之后必须立刻返回：`concurrencyGuard` 以 QQ 用户为键，`await agent.whenIdle()` 会占着锁把别的会话一起堵住。
-- 发到 QQ 的聊天文本统一走 `src/transport/send.ts`：会话事件用 `Sender.session`（分片 → 入队 → 超长减半），卡片用 `Sender.card`（给了 `fallbackBody` 才在键盘失败时降级纯文本），命令回复用 `sendChunkedText`（经 `sendMarkdownChunked`），非当前会话署名叫 `Sender.decorate`。提示类文本（入站兜底、未知指令、热重载 / 插件公告）拿 `Sender.text` 的 `SendText` 形状注入，`handleInbound` / `rejectUnknownCommands` / `ReloaderOptions.notify` / `PluginInstallerOptions.notify` 都收这个函数。不要另写 `bot.sendMarkdown` 的分片 / 重试 / 署名。例外只有媒体与平台操作（`sendFile` / `sendImage` / `ack`）。
-- 工具结果只在 `showToolResults` 打开时推送，默认一条不发；失败按 §4.3 给目标与原因。用户可见文案内联在 `src/`（`locale/*.json` 只有插件 meta）；注释与内部日志用中文。
+全 bot 只有一个「当前会话」，已获取会话可以有多份，输出全部回 QQ；只做 C2C 私聊，群消息在接入层拦掉，按钮键盘只在 C2C 可用，发送失败降级成纯文本。
+
+**一条命令只改它声明的那一样事实**，不顺手改别的、不替用户做决定：
+
+| 命令 | 职责边界 |
+|---|---|
+| `/sessions` | 列会话：默认工作中（含尚未打开的冷会话），`all` 全部，只标 `📌`；行尾按状态给回复 / 停止 / 归档，已归档的行不给 |
+| `/to` | 目标没打开就先接回来再发（与 `resume` 同一条路），不切指针、不 create；已归档不接回，回「已归档」+ 取消归档入口 |
+| `/new` | 清指针、建新会话，不停旧会话；`--dir`（`-d`）指定工作区，`--worktree`（`-w`）让这条提示词先建树，`--background`（`-b`）另开一条且不动指针、必须带提示词 |
+| `/clear` | 停当前（`all` 停全部）再开新；先发 5 分钟确认卡，卡片发不出去就放弃动作 |
+| `/stop` | 停当前 / `<id>` / `all`，只停生成、不动指针 |
+| `/rename` | 改当前会话标题，`/sessions rename <id>` 改已打开会话；两者只接受 live session，冷会话如实拒绝（`/sessions rename` 给「先恢复」入口），不偷偷拉起会话 |
+
+- 提问 / 审批走宿主 waterfall，不自探接口；投递失败按键盘 → 纯文本 → 挂起，等就绪或新入站消息重发，不判成不可用；卸载 / 渠道失效把挂起项交还宿主；借来的会话不 cancel、不 dispose。
+- 启动恢复：按持久化指针恢复；盘上已无则跳过并清指针，**恢复失败绝不新建**，占用 / 后端故障时指针保持原样；locked / 宿主报错推「上次的会话没能恢复」+ 恢复按钮，not-found 静默。持久化写在消息路径上，不写卸载钩子（强杀不执行）。
+- 模型 / 思考强度 / preset 沿用宿主核心行为，插件不另立配置：有活跃会话时写进该会话（不 fork 不重建，下轮生效）并写部署默认；无会话只写默认（`/permission` 同）；同一会话的 QQ 侧写入必须串行；`/preset` 只对新建会话生效，插件不存 preset；查看视图显示当前值并标 `✅`，不造「全局」标签。
+- 只持久化四样：会话指针、下一条消息的建会话落点、回复目标、已持有集合。落点只由建会话、切换会话与 `/new <工作区|路径>` 写，运行期 `cd` 只改运行目录；工作区一律按会话创建时的工作区算（`/sessions` 分组、落点、`/status` 同一来源），树会话的工作区是主仓库根、树只作运行目录；`/get`、`/ls` 的相对路径按运行目录算。
+- 参数统一走同一个解析器，不要自己 split：引号成对包住的值留在同一个词里、引号本身去掉，`--dir=值` 等价于 `--dir 值`；未闭合回「引号没有闭合 + 用法」，认不出回「未知参数 + 用法」；禁止静默跳过认不出的参数（拼错的审批开关不得回退成不带审批安装）。整行就是一个值的命令按整行取参。
+- 入站消息必须标成用户消息：标题、最近提问时间、轮次大纲、replay 断点都以人类消息为触发，自造类型会让新会话停在「未命名会话」。
+- 消息交给 agent 之后必须立刻返回：并发锁以 QQ 用户为键，等待空闲会把别的会话一起堵住。
+- 出站文本统一走同一套发送路径（分片 → 入队 → 超长减半 → 重试 → 署名），分片必须感知代码块 / 表格；例外只有媒体与平台操作（发文件 / 发图 / ack）。超长先自己解决：切到最小分片仍被平台拒绝才允许提示，内容类失败（超长、风控拦截）只写事实（原因 + 未送达），不假设有兜底渠道。工具结果只在开关打开时推送，失败按 §4.3 给目标与原因。
+- 用户可见文案内联在 `src/`；注释与内部日志用中文。
 
 ## 4. 用户可见文案
 
-覆盖 QQ 消息正文（markdown + 纯文本回退）、键盘 `label` / `visited_label`、端内面板、终端扫码引导；不含注释与内部日志。目标：**同一意思只长成一个样子**。
+覆盖 QQ 消息正文（markdown + 纯文本回退）、键盘 `label`、端内面板、终端扫码引导；不含注释与内部日志。目标：**同一意思只长成一个样子**——这是文案形态的目标，不是跨路径行为等价的承诺（见 §3.0）。
 
 ### 4.1 状态符号
 
@@ -104,9 +97,8 @@ qqterm 是通道，不是能力所有者：目标是从 QQ 接入的超级终端
 | 警示 / 降级 | `⚠️`（必须是 `U+26A0 U+FE0F`） | 行首 |
 | 提示 / 引导 | `💡` | 不占行首（`> 💡 …`） |
 
-- 命令回复第一行必须带图标：状态类用上表，信息类用领域图标；裸文本开头会被读成模型正文。
-- 正文与按钮 label 禁用 `✓ ✔ ☑ √ × ✗`；一行最多一个状态图标且在行首（批量结果清单除外）。
-- 例外：按钮 `visited_label` 用纯文本 `✓ 已允许` / `✓ 已拒绝` / `✓ 已选`（与 label 成对，改要一起改并同步 `src/features/*-renderer` 单测）；终端日志前缀 `✔`（`src/setup/persist.ts`、`src/setup/binding-service.ts`）只进终端。
+- 命令回复第一行必须带图标：状态类用上表，信息类用领域图标；裸文本开头会被读成模型正文；一行最多一个状态图标且在行首（批量结果清单除外）。
+- 正文与按钮 label 禁用 `✓ ✔ ☑ √ × ✗`。唯一例外是已执行态：`✓ + 过去式短语`（已允许 / 已拒绝 / 已选 / 已确认 / 已取消 / 已重发 / 已放弃），与 label 成对，改要一起改并同步单测；终端日志前缀 `✔` 只进终端。
 
 ### 4.2 领域图标
 
@@ -118,28 +110,25 @@ qqterm 是通道，不是能力所有者：目标是从 QQ 接入的超级终端
 
 - 视图型：标题 `### 图标 标题`（是什么 + 多少个，不加句号）；区块间一个空行，结尾不留空行。
 - 字段行 `**字段**: 值`（字段名 2–4 字，id / 路径 / 命令 / 预设名用反引号），字段之间不空行。
-- 列表：有序 `1. `，无序 `· `，不嵌套，不用 `-` / `*`；会话行是按钮，行首直接 `#id` 不加前缀，行尾可跟 `回复` / `停止` / `归档` 快捷链接（同一行，用 ` · ` 分隔，已归档的行不给，见 §3.4）；目标一律 8 位短 id，不编号。
-- 分页一页 10 条（`PAGE_SIZE`），页脚 `上一页 · 第 1/2 页 · 下一页`，缺哪边省略，标题不写页码。
+- 列表：有序 `1. `，无序 `· `，不嵌套，不用 `-` / `*`；会话行是按钮，行首直接 `#id` 不加前缀，行尾用 ` · ` 接快捷动作（条件见 §3.4）；目标一律 8 位短 id，不编号；当前项行尾 `✅`、持有项行尾 `📌`，同一行不同时出现。
+- 分页一页 10 条，页脚 `上一页 · 第 1/2 页 · 下一页`，缺哪边省略，标题不写页码。
 - 批量结果：首行汇总（`🗄 已归档 3 个会话，1 个失败`），随后每行 `✅/⚠️ + 序号 + 标题 + id`，跳过项 `· ` 单列。
-- 反馈型：第一行就是结论（图标 + 动词短语 + 值），不写垫场；需要下一步就给一行动作，不需要就只回一行。
-- 篇幅：反馈 ≤ 3 行，视图 ≤ 12 行（列表分页，指令清单不受限）；一行 ≤ 40 个汉字。
-- 纯文本回退：两版只差标记（去 `**` 与反引号、指令写裸 `/cmd`），行序与事实完全一致；发送统一走 `textChunkLimit`（默认 4500，QQ 上限约 5000），不手写切分，截断写 `…（已截断）`。
+- 反馈型：第一行就是结论（图标 + 动词短语 + 值），不写垫场；需要下一步就只给一行动作。反馈 ≤ 3 行，视图 ≤ 12 行（列表分页、指令清单不受限），一行 ≤ 40 个汉字。
+- 纯文本回退：两版只差标记（去 `**` 与反引号、指令写裸 `/cmd`），行序与事实完全一致；发送按上限分片（默认 4500，QQ 上限约 5000），不手写切分，截断写 `…（已截断）`。
 
 ### 4.4 标点与空格
 
-- 冒号：后面是**一个值**（名字、路径、id、数字、原始错误）→ 半角 `: `；引出一整**句** → 全角 `：`；状态行同一条判据。
-- 句内用全角 `，。；！？`；引号 `「」`；中文用全角括号，纯 ASCII 用半角并在前留一个空格（`工作区内修改 (workspace-write)`）；英文句与拟声用半角 `!`（`✅ pong!`），中文句用全角 `！`。
-- 省略号 `…`，破折号 `——`；中文与英文 / 数字间留一个半角空格（`约 128 tokens`）；单位紧贴数字（`12ms`、`2h10m`）；计数千分位用 `num()`。
-- 行内分隔统一 ` · `，不用 `|`、`、`、`/`（`/` 留给命令与模型 id）；不输出 ANSI 颜色、全角空格、制表符对齐。
+- 冒号：后面是一个值（名字、路径、id、数字、原始错误）→ 半角 `: `；引出一整句 → 全角 `：`；状态行同一条判据。
+- 句内用全角 `，。；！？`，引号 `「」`；中文用全角括号，纯 ASCII 用半角并前置一个空格（`工作区内修改 (workspace-write)`）；英文句 / 拟声用半角 `!`，中文句用全角 `！`。
+- 省略号 `…`、破折号 `——`；中文与英文 / 数字间留一个半角空格（`约 128 tokens`），单位紧贴数字（`12ms`、`2h10m`），计数用千分位；行内分隔统一 ` · `，不用 `|`、`、`、`/`（`/` 留给命令与模型 id）；不输出 ANSI 颜色、全角空格、制表符对齐。
 - 时间用相对格式 `3d 前` / `2h10m 后`，未知写 `—`；会话 id 用 8 位加 `#`，正文里包反引号；路径原样，不转义不改写。
 
 ### 4.5 按钮与可点击指令
 
-- `label` ≤ 10 字符（`BUTTON_LABEL_MAX`），超长由 `buttonLabel()` 截断补 `…`；写法「图标 + 动作短语」（`✅ 允许一次`），完整文本留在正文。
-- 可点击指令一律 `<qqbot-cmd-input text="/命令 参数" show="展示文本"/>`：`text` 必须真能执行（重复点击由命令幂等兜底），`show` 是纯文本短标签、不写 markdown。
-- 属性净化：去换行、去 `` ` * _ ~ < > " '``、超长截到 28 字补 `…`（`shortTitle()`），`&` 按上下文转义；例外是 `/sessions` 组标题的路径链接，`show` 用原始路径（只去换行 + 属性转义），不过 `cleanInline()`。
-- 标签拼装只走 `src/shared/inline.ts`（`cleanInline()` / `attrValue()` / `clip()` / `commandLink()` / `commandLinkRaw()`）：展示文本先净化用 `commandLink()`，路径、id 这类必须原样显示的值用 `commandLinkRaw()`；不要在各文件重写净化与转义。
-- 当前项 `… ✅`、持有项 `… 📌`：一律行尾、不用前缀，同一条消息不同时出现两者；按钮发送失败必须降级成纯文本，事实与下一步都不能丢。
+- `label` ≤ 10 字符，超长截断补 `…`；写法「图标 + 动作短语」（`✅ 允许一次`），完整文本留在正文。
+- 可点击指令一律用内联指令标签：`text` 必须真能执行（重复点击由命令幂等兜底），`show` 是纯文本短标签、不写 markdown。
+- 属性净化：去换行、反引号与 `* _ ~ < >` 及各引号，超长截到 28 字补 `…`，`&` 按上下文转义；例外是会话组标题的路径链接（`show` 用原始路径，只去换行 + 转义）。拼装只走统一函数：展示文本先净化，路径 / id 走原样版本，不要在各文件重写。
+- 当前项 / 持有项的位置见 §4.3；按钮发送失败必须降级成纯文本，事实与下一步都不能丢。
 
 ### 4.6 用词与语气
 
@@ -155,15 +144,13 @@ qqterm 是通道，不是能力所有者：目标是从 QQ 接入的超级终端
 | OpenID | openid、用户 ID |
 
 - 第二人称「你」，不自称「我们」，不用「您」；不写「抱歉」「请稍候」「操作成功」；状态用「已 / 正在」，不叠词。
-- 失败文案 = 原因 + 下一步（`换一个存在的目录，或直接给绝对路径。`）；例外：设置类命令（`/model`、`/reasoning`、`/preset`、`/permission`）报错只写原因，「怎么改」由该命令的查看界面给出。权限、token、路径这类敏感或长值不省略、不概括。
+- 失败文案 = 原因 + 下一步（`换一个存在的目录，或直接给绝对路径。`）；设置类命令（`/model`、`/reasoning`、`/preset`、`/permission`）报错只写原因，怎么改由该命令的查看界面给出；权限、token、路径这类敏感或长值不省略、不概括。
 - 面板：标题是名词短语（`扫码绑定 QQ 机器人`），按钮是动词短语（`改用扫码绑定`），不加句末标点；失败态必须给可执行入口，表单与错误提示写「哪错了 + 怎么改」，不直接抛宿主原文。
 
 ### 4.7 简洁
 
-- 交代结果，不是说明书：一条消息最多一处「下一步」放最后一行（分页条不算）；不复述用户已知（刚发的命令、已有按钮、会话标题、当前路径）。
-- 不解释实现（宿主服务名、registry、profile 机制、内部错误类名）；原始错误码只在排障必要时留一行。
-- `**` 只用于字段标签与消息里唯一的具名实体，不拿加粗当强调；括号最多一层。
-- 不用「注意 / 重要 / 务必 / 强烈建议 / 一定要」，不堆感叹号、不用反问句；删虚词（非常 / 可能 / 基本上 / 建议您 / 请务必 / 相应）。
+- 交代结果，不是说明书：一条消息最多一处「下一步」放最后一行（分页条不算）；不复述用户已知（刚发的命令、已有按钮、会话标题、当前路径）；不解释实现（宿主服务名、registry、profile 机制、内部错误类名），原始错误码只在排障必要时留一行。
+- `**` 只用于字段标签与消息里唯一的具名实体；括号最多一层；不用「注意 / 重要 / 务必 / 强烈建议 / 一定要」，不堆感叹号、不用反问句；删虚词（非常 / 可能 / 基本上 / 建议您 / 请务必 / 相应）。
 - 不给备选方案清单，给一个最佳动作，第二条路并进同一行用 ` · ` 隔开；用正向表述。
 
 ### 4.8 自查
@@ -171,60 +158,58 @@ qqterm 是通道，不是能力所有者：目标是从 QQ 接入的超级终端
 改文案或新增命令后必跑，三条零命中（或只剩 §4.1 例外）才算过。发现偏差当场改，不攒「待统一」清单。
 
 ```bash
-rg -n '[✓✔☑√×✗]' src                              # 文字符号：只该命中 visited_label 与终端日志
+rg -n '[✓✔☑√×✗]' src                              # 文字符号：只该命中已执行态与终端日志
 rg -n '：`|：\$\{' src                              # 「标签：值」误用全角冒号
 rg -n '注意|务必|强烈建议|建议您|也可以|另外' src/commands src/features
 ```
 
 ### 4.9 非当前会话标记
 
-QQ 只有一个窗口，多个已获取会话的输出、提问、审批都回到这里，署名只靠首尾两行；实现集中在 `src/transport/session-source.ts`（`sessionSourceHeader` / `sessionLinkRow`），出站、交付物、提问、审批共用，不要另拼。
+QQ 只有一个窗口，多个已获取会话的输出、提问、审批都回到这里，署名只靠首尾两行；集中一处实现，出站 / 交付物 / 提问 / 审批共用，不要另拼。
 
-- 首行：独占一行、后接空行，`` > `#短id` · 标题 ``；短 id 必须包行内代码（QQ 会把引用行里 `#` 开头的内容渲染成标题）；不带 emoji；标题取最新 `session/title`（`sessionTitleOf`），取不到写 `未命名会话`，压到 20 字内。
-- 尾部动作：正文后空一行、独占一行，`回复`（`/to #短id `）+ `恢复`（`/sessions resume #短id`），该会话正在生成时 + `停止`（`/stop #短id`），部署有 `workspaceRegistry` 时再 + `归档`（`/sessions archive #短id`，没有归档能力时不给入口）；长回复只在首片带首行、末片带链接（拼好的整条消息交给 `splitForLimit` 按上限切，超长重切只切不装饰）。
-- 非当前会话的提问 / 审批用同一首行，正文不塞 `[#id]`；提问在引导行给 `回答 · 恢复`，审批 / 重试有自己的键盘，不追加。讲「当前这条消息」的路由警告只在句子里带 `#短id（标题）`（`sessionLabel`），不套首行。
+- 首行：独占一行、后接空行，`> #短id · 标题`；短 id 必须包行内代码（QQ 会把引用行里 `#` 开头的内容渲染成标题）；不带 emoji；标题取最新值，取不到写「未命名会话」，压到 20 字内。
+- 尾部动作：正文后空一行、独占一行，回复（`/to #短id `）+ 恢复（`/sessions resume #短id`），正在生成时 + 停止，有归档能力时 + 归档（条件见 §3.4）；长回复只在首片带首行、末片带链接（整条消息按上限切，超长重切只切不装饰）。
+- 非当前会话的提问 / 审批用同一首行，正文不塞 `[#id]`；提问在引导行给「回答 · 恢复」，审批 / 重试有自己的键盘，不追加；讲「当前这条消息」的路由警告只在句子里带 `#短id（标题）`，不套首行。
 
 ## 5. 构建 / 测试
 
 | 命令 | 用途 |
 |---|---|
 | `pnpm install` | 只用 pnpm，不要生成 `package-lock.json` |
-| `pnpm build` | `tsc` + `tsdown`，产出 `lib/index.js` 与 `lib/client.js` |
+| `pnpm build` | 类型检查 + 打包，产出 `lib/index.js` 与 `lib/client.js` |
 | `pnpm build:client` | 只重建客户端 |
-| `pnpm dev` | `tsc --watch`（客户端改动要手动 build） |
-| `pnpm test` | `vitest run` |
+| `pnpm dev` | 类型检查 watch（客户端改动要手动 build） |
+| `pnpm test` | 跑测试 |
 | `pnpm typecheck:client` | 客户端类型检查 |
 | `pnpm run lint` | ⚠️ 没有 eslint，不是门禁 |
 
-- 测试放顶层 `tests/`，镜像 `src/` 的目录结构（`tests/commands/foo.spec.ts` 测 `src/commands/foo.ts`），文件名一律 `*.spec.ts`；不得访问真实 `~/.dsh`、真实凭据或外网，用 `mkdtempSync(tmpdir())` 建临时目录，必要时 mock `node:fs` / logger。
-- 相对导入必须带 `.ts` 后缀（`rewriteRelativeImportExtensions` 负责改写）；不要改 `tsconfig*` 的 include / exclude 边界。
-- 提 PR 前至少 `pnpm build` + `pnpm test`（改客户端加 `pnpm typecheck:client`），并提交 `lib/` 的 js。发布前确认 `lib/` 与 `src/` 一致。
+- 测试放顶层 `tests/`，按模块镜像 `src/`，文件名一律 `*.spec.ts`；不得访问真实 `~/.dsh`、真实凭据或外网，用临时目录，必要时 mock 文件系统与 logger。
+- 相对导入必须带 `.ts` 后缀；不要改类型检查配置的 include / exclude 边界。提 PR 前至少 `pnpm build` + `pnpm test`（改客户端加 `pnpm typecheck:client`），并提交 `lib/` 的 js。
 
 ## 6. 版本与发布
 
 - 开发快照保持基线版本，只加 `-dev.N`（`0.0.1` → `0.0.1-dev.0`），不要抬成 `0.0.2`。
-- 发布：更新 `CHANGELOG.md` / `CHANGELOG_EN.md`（Keep a Changelog）→ 改版本号 → `pnpm build` → 打包；`prepublishOnly` 会再 build 一次。
-- `ci:prepare-test-pkg` 会把包名改成 `@tencent/dsh-qqterm` 并改写 `cordis.patch.yml`，只在一次性分支 / 临时目录跑，不要提交它的改动。
-- 宿主升级后更新 `dsh.compatibility.dshReleases` 与 note，重新验收客户端槽位与扫码绑定全流程。
+- 发布：更新 `CHANGELOG.md` / `CHANGELOG_EN.md`（Keep a Changelog）→ 改版本号 → 构建 → 打包；发布钩子会再构建一次。
+- 临时测试包会改包名与 patch 配置，只在一次性分支 / 临时目录跑，不要提交它的改动。
+- 宿主升级后更新 `dsh.compatibility` 并重新验收客户端槽位与扫码绑定全流程。
 
 ## 7. 安装与 profile 隔离
 
 - 主 profile 禁止 `link:` 开发目录：只装已发布版本或 `file:` 冻结快照。
-- 开发用独立 profile：tgz 实体副本 + HMR 常开（不要写 `- id: hmr / disabled: true`），快照 tgz 是它的依赖目标，不要删除或移动。不用 `link:` 是因为 `pnpm build` 会改已加载的包，宿主的文件监听与构建互相踩。
-- 开发循环：`pnpm dev:reload dev`（build → pack 带时间戳 → `dsh plugin add`）→ QQ 里 `/plugins reload`；`✅ 没有需要应用的变更` 表示磁盘没变。
-- 主 profile 换本地包：`pnpm build && pnpm pack --pack-destination .pack` → 重命名为 `.pack/dsh-qqterm-<版本>-YYYYMMDD-HHmm.tgz` → `dsh plugin --profile web add file:<绝对路径>`；装完重启 dsh，客户端改动还要刷新页面。tgz 是实体副本，仓库改动不会自动进入 profile。回滚：装回已发布版本，或恢复安装前的 `package.json` / `pnpm-lock.yaml`。
-- profile 的 pnpm 版本要匹配它的 `node_modules`（看 `.modules.yaml` 的 `packageManager` / `storeDir`），不匹配报 `ERR_PNPM_UNEXPECTED_STORE`；换对应 pnpm，不要用 `pnpm install` 迁移整个 store。
+- 开发用独立 profile：tgz 实体副本 + HMR 常开，快照 tgz 不删除不移动；不用 `link:` 是因为构建会改已加载的包，文件监听与构建互相踩。
+- 开发循环：重载构建 → 打包 → 装进开发 profile → QQ 里 `/plugins reload`（提示没有变更即磁盘没变）；主 profile 换本地包同理，装完重启宿主，客户端改动还要刷新页面。tgz 是实体副本，仓库改动不会自动进入 profile。
+- profile 的 pnpm 版本要匹配它的依赖目录，不匹配报 store 错误；换对应 pnpm，不要用安装命令迁移整个 store。
 
 ## 8. 安全与隐私
 
-- 绝不提交真实 appId / appSecret、OpenID、会话日志；凭据只放 profile 的 `cordis.patch.yml` 或 `QQBOT_APPID` / `QQBOT_SECRET`，示例一律占位符。
+- 绝不提交真实 appId / appSecret、OpenID、会话日志；凭据只放 profile 配置或环境变量，示例一律占位符。
 - 白名单只有一个用户：`access.owner` 为空时拒绝所有私聊；群消息一律拒绝；按钮点击（提问 / 审批 / 重试 / 确认）必须校验点击者等于 owner，网关与通道各复核一次。
-- 文件发送只发给 `access.owner`，因此不限制目录：`/get` 与交付物投递可以是任意路径，但目标必须是存在且可读的普通文件；目录仍需 `statSync` 检查，`/get` 拒绝非文件。
-- 媒体 / 缓存落 `~/.dsh-qqterm/`，不进仓库；`.env`、`.dsh-sessions/` 已在 .gitignore，不要为提交方便移除。`docs/` 入库，只放可公开的设计文档（如入站/出站路径清单），不放凭据、OpenID、会话日志。
+- 文件发送只发给 `access.owner`，因此不限制目录：任意路径，但目标必须是存在且可读的普通文件；`/get` 拒绝目录。
+- 媒体 / 缓存落用户目录，不进仓库；`.env`、`.dsh-sessions/` 已在 .gitignore，不要为提交方便移除。`docs/` 只放可公开的设计文档，不放凭据、OpenID、会话日志。
 
 ## 9. 已知坑
 
-- DSH 沙箱会话里往 `lib/`、`src/`、`node_modules/` 写报 `EPERM`：该目录缺沙箱要求的 Low 完整性标签，`icacls <目录> /setintegritylevel "(OI)(CI)Low" /t` 就地修好。
-- 某些 pnpm 版本跑 `pnpm run build` 会先校验依赖并尝试重建 `node_modules`；可直接跑 `node_modules/.bin/tsc` + `node_modules/.bin/tsdown`。
-- 改包名后只重建、不清宿主模块缓存，客户端可能报 “loaded without registering”。
-- DSH 沙箱里 `pnpm test` 起不来（Vite 探测网络盘、worker 起子进程都被拦成 `spawn EPERM`）：改用 `node node_modules/vitest/vitest.mjs run --configLoader native --pool=vmThreads`。
+- 沙箱里写 `lib/`、`src/`、`node_modules/` 报 `EPERM`：目录缺 Low 完整性标签，就地修 ACL。
+- 某些 pnpm 版本跑构建会先校验依赖并重建依赖目录；可直接跑本地的类型检查与打包命令。
+- 改包名后只重建、不清宿主模块缓存，客户端可能报注册失败。
+- 沙箱里测试起不来（子进程被拦成 `spawn EPERM`）：改用 vmThreads 池 + native config loader 跑。
