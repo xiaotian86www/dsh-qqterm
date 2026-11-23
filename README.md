@@ -229,7 +229,7 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqterm/cordis.dev.yml
 | `/stop` | 中止当前生成；`/stop <id>` 停指定已获取会话；`/stop all` 停全部 |
 | `/retry` | 重发当前会话上一条用户消息 |
 | `/help` | 查看所有指令；`/help <命令>` 查看参数与用法 |
-| `/plugins` | 插件管理：列出、`install` / `update`、`reload`（仅绑定用户） |
+| `/plugins` | 插件管理：列出、`install` / `update`、`check`、`reload`（仅绑定用户） |
 
 补充说明：
 
@@ -283,9 +283,10 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqterm/cordis.dev.yml
 
 - 列出 registry 里的插件包，有新版本的项带「→ 新版本」和更新链接。
 - `install` / `update` 立即调宿主的 reconcile：安装新版本、更新时选最新的兼容版本，失败回滚旧版本；带构建脚本的包会先停下来等「继续安装」按钮。
+- `check` 立即向 registry 查一遍可更新项，不等定时检查；回执给出检查数量、可更新数量与查询失败数量。
 - `reload` 按已加载模块的磁盘身份替换变化的项，磁盘没变时提示没有变更。
 - 本地 tgz 开发包先用 `pnpm dev:reload` 打快照并装进开发 profile，再发 `/plugins reload`。
-- 启动 2 分钟后检查一次更新，之后每 6 小时一次；仅绑定用户可执行。
+- 启动 2 分钟后自动检查一次更新，之后每 6 小时一次；`check` 是同一份检查的手工触发。仅绑定用户可执行。
 
 ## 核心模块
 

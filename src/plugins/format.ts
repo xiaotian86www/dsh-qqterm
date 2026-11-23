@@ -5,7 +5,7 @@
  * 用户看到的都必须是同一句话。
  */
 import type { BundleInfoLike, PluginVersionLike } from './types.ts';
-import type { PluginOpState } from './state.ts';
+import type { PluginOpState, PluginUpdateCheck } from './state.ts';
 import { quoteArg } from '../commands/args.ts';
 import { cleanInline, clip, commandLink } from '../shared/inline.ts';
 import { pageLinks, pageSlice } from '../shared/paging.ts';
@@ -104,8 +104,31 @@ function footerLinks(): string {
   return [
     commandLink('/plugins install', '安装插件'),
     commandLink('/plugins update', '更新插件'),
+    commandLink('/plugins check', '检查更新'),
     commandLink('/plugins reload', '热重载'),
   ].join(' · ');
+}
+
+/** 手工检查更新的回执：先说查了多少、有几个可更新，再给列表 / 重试入口 */
+export function renderPluginCheck(check: PluginUpdateCheck): string {
+  const count = Object.keys(check.versions).length;
+  const failed = check.failed.length;
+
+  // 没有可查的包：说明为什么没有结果，不冒充「均已是最新」
+  if (check.checked === 0) return '✅ 没有可自动更新的插件';
+
+  const parts = [`已检查 ${check.checked} 个插件`];
+  if (count > 0) parts.push(`${count} 个可更新`);
+  else if (failed === 0) parts.push('均已是最新版本');
+  if (failed > 0) parts.push(`${failed} 个查询失败`);
+
+  const lines = [`${failed > 0 ? '⚠️' : '✅'} ${parts.join('，')}`];
+  const actions: string[] = [];
+  if (count > 0) actions.push(commandLink('/plugins', '查看列表'));
+  // 没查通的包结论不完整，给重试入口而不是让用户自己再发一遍
+  if (failed > 0) actions.push(commandLink('/plugins check', '重试'));
+  if (actions.length > 0) lines.push(actions.join(' · '));
+  return lines.join('\n');
 }
 
 /** 一次操作的结果文案；还在跑（没有 phase）时返回 undefined */

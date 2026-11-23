@@ -67,6 +67,16 @@ export interface PluginUpdateCache {
   versions: Record<string, string>;
 }
 
+/** 一次更新检查的结果：手上没有就能回执（手动 `/plugins check` 用，后台检查忽略返回值） */
+export interface PluginUpdateCheck {
+  /** 本轮参与检查的包数（registry 安装的第三方插件） */
+  checked: number;
+  /** 可更新的包 → 新版本；查询失败的包沿用上一轮已知结果 */
+  versions: Record<string, string>;
+  /** 这一轮没查通的包名 */
+  failed: string[];
+}
+
 /** 检查结果路径：与操作状态同目录，多 profile 各自一份 */
 export function pluginUpdateCachePath(profileDir?: string | null): string {
   const digest = createHash('sha1').update(profileDir ?? '').digest('hex').slice(0, 8);

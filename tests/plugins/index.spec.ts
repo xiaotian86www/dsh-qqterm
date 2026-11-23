@@ -259,9 +259,10 @@ describe('checkUpdates', () => {
       async (name) => (name === 'dsh-a' ? listed('1.0.0', '1.1.0') : listed('1.0.0')),
     );
 
-    await installer.checkUpdates();
+    const result = await installer.checkUpdates();
 
     expect(listVersions.mock.calls.map((call) => call[0])).toEqual(['dsh-a']);
+    expect(result).toEqual({ checked: 1, versions: { 'dsh-a': '1.1.0' }, failed: [] });
     expect(installer.updates()?.versions).toEqual({ 'dsh-a': '1.1.0' });
     expect((installer.updates()?.checkedAt ?? 0) > 0).toBe(true);
   });
@@ -280,7 +281,23 @@ describe('checkUpdates', () => {
     // dsh-a 这一轮查不通：沿用上一轮的 1.1.0，dsh-b 仍刷新到 2.1.0
     fail = true;
     latestB = '2.1.0';
-    await installer.checkUpdates();
+    const second = await installer.checkUpdates();
+    expect(second).toEqual({ checked: 2, versions: { 'dsh-a': '1.1.0', 'dsh-b': '2.1.0' }, failed: ['dsh-a'] });
     expect(installer.updates()?.versions).toEqual({ 'dsh-a': '1.1.0', 'dsh-b': '2.1.0' });
+  });
+
+  it('registry 拒绝回答时把包记成查询失败，并沿用上一轮已知版本', async () => {
+    let refuse = false;
+    const { installer } = setup([bundle('dsh-a')], async () => {
+      if (refuse) return { status: 'refused', problem: 'network', reason: 'offline' };
+      return listed('1.0.0', '1.1.0');
+    });
+
+    await installer.checkUpdates();
+    refuse = true;
+    const result = await installer.checkUpdates();
+
+    expect(result).toEqual({ checked: 1, versions: { 'dsh-a': '1.1.0' }, failed: ['dsh-a'] });
+    expect(installer.updates()?.versions).toEqual({ 'dsh-a': '1.1.0' });
   });
 });

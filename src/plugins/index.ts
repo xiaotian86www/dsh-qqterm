@@ -38,6 +38,7 @@ import {
   type PluginOpNotice,
   type PluginOpState,
   type PluginUpdateCache,
+  type PluginUpdateCheck,
 } from './state.ts';
 import { pickLatestVersion, renderPluginResult } from './format.ts';
 import type {
@@ -86,7 +87,7 @@ export interface PluginInstaller {
   /** 后台检查的结果（没有检查记录时 undefined）；列表据此标新版本 */
   updates(): PluginUpdateCache | undefined;
   /** 查一遍 registry，把可更新的版本写进缓存；失败按包跳过，不抛错 */
-  checkUpdates(): Promise<void>;
+  checkUpdates(): Promise<PluginUpdateCheck>;
 }
 
 export interface PluginInstallerOptions {
@@ -319,19 +320,26 @@ export function createPluginInstaller(
       return readPluginUpdateCache(updatesPath, logger);
     },
 
-    async checkUpdates(): Promise<void> {
-      if (manager === undefined) return;
+    async checkUpdates(): Promise<PluginUpdateCheck> {
+      if (manager === undefined) return { checked: 0, versions: {}, failed: [] };
       const bundles = await manager.listBundles();
       // 旧结果只用来兜单个包的查询失败，不能整体沿用：退装的包要消失
       const previous = readPluginUpdateCache(updatesPath, logger)?.versions ?? {};
       const versions: Record<string, string> = {};
+      const failed: string[] = [];
+      let checked = 0;
 
       for (const bundle of bundles) {
         // 只有 registry 安装的包能由 listVersions 查新版本；本地 tgz / 目录、Git 安装都没有 update
         if (!bundle.installed || bundle.official || bundle.update !== 'registry') continue;
+        checked += 1;
         try {
           const list = await manager.listVersions(bundle.name);
           if (list.status !== 'listed') {
+            // 查不到不等于没有更新：沿用上一轮已知结果，并把这一包记为没查通
+            const kept = previous[bundle.name];
+            if (kept !== undefined) versions[bundle.name] = kept;
+            failed.push(bundle.name);
             logger.debug(`跳过插件更新检查 (${bundle.name}): ${list.problem}`);
             continue;
           }
@@ -340,11 +348,13 @@ export function createPluginInstaller(
         } catch (err) {
           const kept = previous[bundle.name];
           if (kept !== undefined) versions[bundle.name] = kept;
+          failed.push(bundle.name);
           logger.debug(`检查插件更新失败 (${bundle.name}): ${errorText(err)}`);
         }
       }
 
       writePluginUpdateCache(updatesPath, { checkedAt: Date.now(), versions }, logger);
+      return { checked, versions, failed };
     },
 
     async announce(bot: QQBot): Promise<void> {

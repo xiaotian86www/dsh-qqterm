@@ -14,6 +14,7 @@ This file records product-level changes to QQ SuperTerm. The format follows [Kee
 - **Archive straight from a background session's message**: messages pushed by non-current sessions now carry an `Archive` action after Reply / Resume, running `/sessions archive #short-id` in one tap; deployments without `workspaceRegistry` do not show the entry point.
 - **`/stop` can target a session**: `/stop <id>` aborts any acquired session by its 8-character short id (or an id prefix), and the receipt names it; bare `/stop` (current) and `/stop all` are unchanged.
 - **Stop straight from a background session's message**: while a non-current session is running, the messages it pushes to QQ carry a `Stop` action after Reply / Resume that runs `/stop #short-id` in one tap; idle sessions do not show the entry point.
+- **`/plugins check` for a manual update check**: `/plugins` gains a `check` subcommand that queries the registry for updatable plugins right away instead of waiting for the scheduled check after startup. The receipt reports how many plugins were checked, how many can be updated, and how many lookups failed, with a "View list" action when updates exist and a "Retry" action when lookups failed. The scheduled and manual checks share one update cache.
 - **`/goal` long-running goals**: forwards to the host `/goal` (create, show, edit, pause, resume, clear) with arguments passed through verbatim; success follows the host result and the reply carries the host text, with a single unsupported notice when the deployment lacks the command.
 
 ### Changed
