@@ -170,3 +170,4 @@ export function decorateSessionMessage(
   if (body === '') return '';
   return `${sessionSourceHeader(sessionId, title)}\n\n${body}\n\n${sessionLinkRow(sessionId, archivable, stoppable)}`;
 }
+

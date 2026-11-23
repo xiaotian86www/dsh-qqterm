@@ -37,15 +37,14 @@ function makeBot(script: Array<Error | undefined> = []): {
   return { bot: { sendMarkdown }, calls };
 }
 
-const config = { textChunkLimit: 20 } as unknown as QQTermConfig;
-
 function view(current = true): { isCurrent: (id: string) => boolean; titleOf: () => string; canArchive: () => boolean } {
   return { isCurrent: () => current, titleOf: () => '标题', canArchive: () => true };
 }
 
-function makeSender(script: Array<Error | undefined> = [], current = true) {
+function makeSender(script: Array<Error | undefined> = [], current = true, textChunkLimit = 20) {
   const { bot, calls } = makeBot(script);
   const outbox = new Outbox({ logger });
+  const config = { textChunkLimit } as unknown as QQTermConfig;
   const sender = createSender({ bot, config, logger, sessions: view(current), outbox });
   return { sender, calls, outbox };
 }
@@ -99,6 +98,20 @@ describe('session：会话输出', () => {
     expect(body).toContain('> `#abcd1234` · 标题');
     expect(body).toContain('/to #abcd1234');
     expect(body).toContain('正文');
+  });
+
+  it('非当前会话超长：每条都留正文，末条不会只剩链接行', async () => {
+    // 正文顶到上限时，尾部链接行曾经被单独切成一条只有 <qqbot-cmd-input> 的消息
+    const { sender, calls } = makeSender([], false, 400);
+    await sender.session('abcd1234-xyz', TARGET, 'a'.repeat(800), 'assistant');
+
+    expect(calls.length).toBeGreaterThan(1);
+    expect(calls.every(call => call.body.length <= 400)).toBe(true);
+    expect(calls[0]?.body.startsWith('> `#abcd1234`')).toBe(true);
+    expect(calls[calls.length - 1]?.body).toContain('show="恢复"');
+    for (const call of calls) {
+      expect(call.body.replace(/<qqbot-cmd-input[^>]*\/>/g, '').trim()).not.toBe('');
+    }
   });
 
   it('超长被平台拒绝：折半重切后继续发完', async () => {
