@@ -19,6 +19,7 @@ export type PluginErrorCode =
   | 'stale-approval'
   | 'incompatible-version'
   | 'unsupported-platform'
+  | 'unexpected-package'
   | 'operation-error'
   | 'unknown';
 
@@ -50,7 +51,11 @@ export interface BundleInfoLike {
   version?: string;
   installed: boolean;
   enabled: boolean;
-  updatable: boolean;
+  /**
+   * 宿主能怎么替换这个包：`registry` 才可由 `listVersions` 查新版本；
+   * 本地 tgz / 目录安装不含此字段。宿主 0.2.2-rc.1 起由 `update` 取代 `updatable`。
+   */
+  update?: 'registry' | 'git';
   removable: boolean;
   source?: string;
   description?: string;

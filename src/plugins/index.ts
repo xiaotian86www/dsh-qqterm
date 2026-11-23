@@ -327,10 +327,14 @@ export function createPluginInstaller(
       const versions: Record<string, string> = {};
 
       for (const bundle of bundles) {
-        if (!bundle.installed || bundle.official || !bundle.updatable) continue;
+        // 只有 registry 安装的包能由 listVersions 查新版本；本地 tgz / 目录、Git 安装都没有 update
+        if (!bundle.installed || bundle.official || bundle.update !== 'registry') continue;
         try {
           const list = await manager.listVersions(bundle.name);
-          if (list.status !== 'listed') continue;
+          if (list.status !== 'listed') {
+            logger.debug(`跳过插件更新检查 (${bundle.name}): ${list.problem}`);
+            continue;
+          }
           const picked = pickLatestVersion(list.versions);
           if (picked !== undefined) versions[bundle.name] = picked.version;
         } catch (err) {
