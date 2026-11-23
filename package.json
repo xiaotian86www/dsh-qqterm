@@ -83,7 +83,7 @@
         "0.2.2-rc.1": "compatible",
         "0.2.2-rc.3": "compatible"
       },
-      "note": "0.2.2-rc.1 与 0.2.2-rc.3 均已验收：插件硬依赖 agents / llm / agentDefaultModel / sessionProjections / sessionPersistence / sessionQuery / sessionTitle / permissionPresets / settings / commands / tools / attachments / workingDirectory / pluginManager（14 项全部写入 inject），缺任一服务插件不激活。agentPresets / webServer / workspaceRegistry 不进 inject，按部署可选：缺 agentPresets 时 /preset 不注册，缺 webServer 时绑定只走终端 / 浏览器，缺 workspaceRegistry 时 /sessions 仅按目录分组且不给归档入口；缺 worktrees（forge 组合包才提供）时新会话就地创建，聊天里不出现工作树字样，沙箱模式只软读 sandboxPolicy.resolve()。sessionController 只在 adapter 中软读一次 list()，供 /sessions 的排序与空白会话标记。compaction 由会话绑定的 agent preset 提供，不进 inject，/compact 也不从宿主面取引擎。客户端依赖 settings.section 席位契约与 dsh.client 模块系统，宿主大版本升级后请重新验收席位行为。"
+      "note": "0.2.2-rc.1 与 0.2.2-rc.3 均已验收：必需 / 可选服务清单与缺失行为见 README「设计原则」；压缩由会话绑定的 agent preset 提供，不进 inject。客户端依赖 settings.section 席位契约与 dsh.client 模块系统，宿主大版本升级后请重新验收席位行为。"
     }
   },
   "dependencies": {
