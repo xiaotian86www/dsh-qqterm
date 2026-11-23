@@ -12,6 +12,7 @@ import type { Logger } from '../../src/types.ts';
 import type { CommandDeps } from '../../src/commands/types.ts';
 import { compactCommand, newCommand, parseNewArgs, resetCommand } from '../../src/commands/session.ts';
 import type { SessionConfirmRequest } from '../../src/features/session-confirm.ts';
+import type { InboundQuoteState } from '../../src/transport/inbound-state.ts';
 
 const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
 
@@ -41,16 +42,27 @@ function makeManager() {
 
 type ManagerStub = ReturnType<typeof makeManager>;
 
-function makeCtx(raw: string, senderId = 'user1', name = 'new'): SlashCommandHandlerContext {
+function makeCtx(
+  raw: string,
+  senderId = 'user1',
+  name = 'new',
+  quote?: InboundQuoteState,
+): SlashCommandHandlerContext {
   return {
     message: { senderId, kind: 'c2c', messageId: 'm1' },
     command: { name, raw },
+    state: quote === undefined ? {} : { quote },
   } as unknown as SlashCommandHandlerContext;
 }
 
-async function run(manager: ManagerStub, raw = '', senderId = 'user1'): Promise<string> {
+async function run(
+  manager: ManagerStub,
+  raw = '',
+  senderId = 'user1',
+  quote?: InboundQuoteState,
+): Promise<string> {
   const command = newCommand({ manager: manager as unknown as SessionManager, config, logger });
-  const result = await command.handler(makeCtx(raw, senderId));
+  const result = await command.handler(makeCtx(raw, senderId, 'new', quote));
   return typeof result === 'string' ? result : '';
 }
 
@@ -705,5 +717,92 @@ describe('/new --background', () => {
     const command = newCommand({ manager: makeManager() as unknown as SessionManager, config, logger });
     expect(command.usage).toContain('`/new --background <提示词>`');
     expect(command.usage).toContain('（`-b`）');
+  });
+});
+
+describe('/new 带引用', () => {
+  const QUOTE: InboundQuoteState = { source: 'msg_elements', text: '被引用的原文' };
+
+  it('提示词与引用一起作为新会话首条消息', async () => {
+    const manager = makeManager();
+
+    const text = await run(manager, '修一下', 'user1', QUOTE);
+
+    expect(manager.promptNewSession).toHaveBeenCalledWith(
+      'c2c',
+      'user1',
+      'user1',
+      '[Quoted message begins]\n被引用的原文\n[Quoted message ends]\n[Current message]\n修一下',
+      { scope: 'c2c', targetId: 'user1' },
+    );
+    expect(text).toBe('✅ 已开启新会话，提示词已发出\n📎 已带上引用');
+  });
+
+  it('只有引用没有提示词时，照样立刻开会话，首条只有引用', async () => {
+    const manager = makeManager();
+
+    const text = await run(manager, '', 'user1', QUOTE);
+
+    expect(manager.promptNewSession).toHaveBeenCalledWith(
+      'c2c',
+      'user1',
+      'user1',
+      '[Quoted message begins]\n被引用的原文\n[Quoted message ends]',
+      { scope: 'c2c', targetId: 'user1' },
+    );
+    // 旧会话照样只清指针，不 cancel
+    expect(manager.remove).toHaveBeenCalledTimes(1);
+    expect(manager.remove.mock.invocationCallOrder[0])
+      .toBeLessThan(manager.promptNewSession.mock.invocationCallOrder[0]);
+    expect(text).toBe('✅ 已开启新会话，引用已作为首条消息发出\n📎 已带上引用');
+  });
+
+  it('引用取不到时什么都不动', async () => {
+    const manager = makeManager();
+
+    const text = await run(manager, '修一下', 'user1', { source: 'none' });
+
+    expect(text).toBe('❌ 引用内容取不到，没有执行');
+    expect(manager.remove).not.toHaveBeenCalled();
+    expect(manager.promptNewSession).not.toHaveBeenCalled();
+  });
+
+  it('--background 允许只有引用', async () => {
+    const manager = makeManager();
+
+    const text = await run(manager, '-b', 'user1', QUOTE);
+
+    expect(manager.startBackgroundSession).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: '[Quoted message begins]\n被引用的原文\n[Quoted message ends]',
+    }));
+    expect(text.split('\n')[0]).toBe('✅ 已在后台开启会话 `#abcdef12`');
+    expect(text).toContain('📎 已带上引用');
+  });
+
+  it('后台带提示词时引用拼在前面', async () => {
+    const manager = makeManager();
+
+    await run(manager, '-b 修一下', 'user1', QUOTE);
+
+    expect(manager.startBackgroundSession).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: '[Quoted message begins]\n被引用的原文\n[Quoted message ends]\n[Current message]\n修一下',
+    }));
+  });
+
+  it('没有引用时行为不变：日志里没有引用标记', async () => {
+    const manager = makeManager();
+
+    const text = await run(manager, '修一下');
+
+    expect(manager.promptNewSession).toHaveBeenCalledWith(
+      'c2c', 'user1', 'user1', '修一下', { scope: 'c2c', targetId: 'user1' },
+    );
+    expect(text).toBe('✅ 已开启新会话，提示词已发出');
+  });
+
+  it('用法页说明引用会跟着走', () => {
+    const command = newCommand({ manager: makeManager() as unknown as SessionManager, config, logger });
+    expect(command.usage).toContain('被引用的内容会一起作为新会话首条消息');
+    expect(command.acceptsQuote).toBe(true);
   });
 });

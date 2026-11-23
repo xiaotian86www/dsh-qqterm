@@ -10,7 +10,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { basename, extname, join, sep } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import * as dns from 'node:dns';
-import type { Logger, RawAttachment } from '../types.ts';
+import type { Logger, QuotedAttachment, RawAttachment } from '../types.ts';
 import type { MediaConfig } from '../config.ts';
 import { MEDIA_ROOT } from '../media/media-cleaner.ts';
 import { errorMessage } from '../shared/utils.ts';
@@ -222,4 +222,28 @@ export async function downloadMediaAttachments(
   }
 
   return results;
+}
+
+/**
+ * 下载引用消息的附件：转成 RawAttachment 结构复用 downloadMediaAttachments。
+ * 语音没有可下载内容（ASR 文本直接来自 quote.attachments），由下载器按类型跳过；
+ * 命令路径（/new、/to）在中间件之后才解析引用，也需要自己调这个函数。
+ */
+export async function downloadQuoteAttachments(
+  quote: { attachments?: QuotedAttachment[] } | undefined,
+  media: MediaConfig,
+  logger: Logger,
+): Promise<DownloadedFile[]> {
+  const attachments = quote?.attachments ?? [];
+  if (attachments.length === 0) return [];
+
+  const raw = attachments
+    .filter(a => a.url)
+    .map((a): RawAttachment => ({
+      content_type: a.contentType ?? '',
+      filename: a.filename ?? '',
+      size: 0,
+      url: a.url as string,
+    }));
+  return downloadMediaAttachments(raw, media, logger);
 }
