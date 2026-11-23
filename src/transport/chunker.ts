@@ -9,6 +9,8 @@ const CODE_FENCE_OPEN = /^```/;
 const GFM_TABLE_LINE = /^\|.+\|$/;
 /** 行内指令标签：QQ 端把它渲染成按钮本身，不算可读正文 */
 const INLINE_TAG = /<qqbot-cmd-input\b[^>]*\/>/g;
+/** 行内指令标签的开头：片首的 `<` 只有它是标签时才整条保留 */
+const INLINE_TAG_OPEN = '<qqbot-cmd-input';
 
 /**
  * 按换行边界切分 Markdown 文本
@@ -155,10 +157,45 @@ function hardSplit(text: string, size: number): string[] {
     let cut = size;
     const open = rest.lastIndexOf('<', cut - 1);
     const close = rest.lastIndexOf('>', cut - 1);
-    if (open > close && open > 0) cut = open;
+    if (open > close) {
+      if (open > 0) {
+        cut = open;
+      } else if (rest.startsWith(INLINE_TAG_OPEN)) {
+        // 标签从片首开始：整条标签必须留在同一片，切点挪到标签之后
+        const tagEnd = rest.indexOf('/>', cut - 1);
+        // 没有收尾说明这条标签本身就是残片，不切，交给上层按超长告知
+        if (tagEnd === -1) break;
+        cut = tagEnd + 2;
+      }
+    }
     chunks.push(rest.slice(0, cut));
     rest = rest.slice(cut);
   }
   if (rest !== '') chunks.push(rest);
   return chunks;
+}
+
+/** 文本里最长的一条行内指令标签：减半重切时切点不能比它短 */
+export function longestInlineTag(text: string): number {
+  let longest = 0;
+  for (const match of text.matchAll(INLINE_TAG)) longest = Math.max(longest, match[0].length);
+  return longest;
+}
+
+/**
+ * 只有开标签、没有 `/>` 收尾的残片会被 QQ 当成一条没写完的属性，整段按字面渲染。
+ * 去掉开头的 `<` 让它回到纯文本：内容一个字不丢，只是不再尝试渲染成按钮。
+ */
+export function defuseDanglingTag(text: string): string {
+  const opener = '<qqbot-cmd-input';
+  let result = text;
+  let index = result.indexOf(opener);
+  while (index !== -1) {
+    const end = result.indexOf('/>', index + opener.length);
+    if (end === -1) {
+      return result.slice(0, index) + 'qqbot-cmd-input' + result.slice(index + opener.length);
+    }
+    index = result.indexOf(opener, end + 2);
+  }
+  return result;
 }

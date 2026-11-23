@@ -15,7 +15,7 @@
 import type { InlineKeyboard } from '@tencent-connect/qqbot-nodejs';
 import type { QQTermConfig } from '../config.ts';
 import type { Logger, ReplyTarget } from '../types.ts';
-import { chunkMarkdownText, splitForLimit } from './chunker.ts';
+import { chunkMarkdownText, defuseDanglingTag, longestInlineTag, splitForLimit } from './chunker.ts';
 import { classifyDeliveryError, Outbox } from './outbox.ts';
 import { decorateSessionMessage } from './session-source.ts';
 import { errorMessage } from '../shared/utils.ts';
@@ -136,7 +136,8 @@ export function createSender(options: CreateSenderOptions): Sender {
     if (body === '') return;
     const composed = decorate(sessionId, body);
     const queue = splitForLimit(composed, config.textChunkLimit);
-    const send = (value: string): Promise<unknown> => bot.sendMarkdown(target, value);
+    // 残片标签发出去就是一段乱码属性，发送前统一打回纯文本
+    const send = (value: string): Promise<unknown> => bot.sendMarkdown(target, defuseDanglingTag(value));
     let notified = false;
 
     while (queue.length > 0) {
@@ -155,7 +156,8 @@ export function createSender(options: CreateSenderOptions): Sender {
       // 内容类失败：超长按本条长度减半重切；切不动才告知，风控与超长各用自己的措辞
       let notice = BLOCKED_NOTICE;
       if (outcome === 'too-long') {
-        const smaller = splitForLimit(part, Math.floor(part.length / 2));
+        // 切点不能比一条行内标签还短，否则标签只能被拦腰截断
+        const smaller = splitForLimit(part, Math.max(Math.floor(part.length / 2), longestInlineTag(part)));
         if (smaller.length > 1) {
           queue.unshift(...smaller);
           continue;
