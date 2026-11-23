@@ -4,6 +4,7 @@ dist/
 .env
 .dsh-sessions/
 *.tsbuildinfo
+package-lock.json
 cordis.dev.yml
 
 # lib/ 构建产物入库（GitHub 安装开箱即用），但排除类型与 sourcemap
