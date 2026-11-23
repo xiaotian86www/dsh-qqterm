@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { splitForLimit } from '../../src/transport/chunker.ts';
+import { defuseDanglingTag, longestInlineTag, splitForLimit } from '../../src/transport/chunker.ts';
 import { decorateSessionMessage } from '../../src/transport/session-source.ts';
 
 describe('splitForLimit', () => {
@@ -67,5 +67,39 @@ describe('splitForLimit', () => {
       expect(chunk.length).toBeLessThanOrEqual(200);
       expect((chunk.match(/</g) ?? []).length).toBe((chunk.match(/>/g) ?? []).length);
     }
+  });
+
+  it('标签从片首开始时整条留在同一片，上限比标签还短也不切', () => {
+    const tag = '<qqbot-cmd-input text="/get D:\\thirdparty\\dsh-qqbot\\.agents\\worktrees\\dsh-4c90913f-ce8f\\tests\\session\\session-manager.spec.ts" show="tests/session/session-manag…"/>';
+    const text = `${tag}：submitPrompt 三种 placement、sendTo queued/steered、settings 缺失回退、`;
+    const chunks = splitForLimit(text, 113);
+
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks[0]).toBe(tag);
+    expect(chunks.join('')).toBe(text);
+    for (const chunk of chunks) {
+      expect((chunk.match(/<qqbot-cmd-input/g) ?? []).length).toBe((chunk.match(/\/>/g) ?? []).length);
+    }
+  });
+
+  it('减半重切时切点不短于最长标签', () => {
+    const tag = '<qqbot-cmd-input text="/get 报告.md" show="报告.md"/>';
+    expect(longestInlineTag(`前文${tag}后文`)).toBe(tag.length);
+    expect(longestInlineTag('没有标签')).toBe(0);
+  });
+
+  it('以普通尖括号开头的长行照旧按字符硬切', () => {
+    const text = `<注意：这一行不是指令标签${'a'.repeat(300)}`;
+    const chunks = splitForLimit(text, 100);
+
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.join('')).toBe(text);
+    for (const chunk of chunks) expect(chunk.length).toBeLessThanOrEqual(100);
+  });
+
+  it('半截标签降级成纯文本，内容一个字不丢', () => {
+    const text = '看这个 <qqbot-cmd-input text="/get 报告.md" show="报告.md"/> 和 <qqbot-cmd-input text="/get 半截';
+    expect(defuseDanglingTag(text)).toBe('看这个 <qqbot-cmd-input text="/get 报告.md" show="报告.md"/> 和 qqbot-cmd-input text="/get 半截');
+    expect(defuseDanglingTag('完整 <qqbot-cmd-input text="/get a" show="a"/>')).toBe('完整 <qqbot-cmd-input text="/get a" show="a"/>');
   });
 });

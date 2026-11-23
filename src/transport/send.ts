@@ -15,7 +15,8 @@
 import type { InlineKeyboard } from '@tencent-connect/qqbot-nodejs';
 import type { QQTermConfig } from '../config.ts';
 import type { Logger, ReplyTarget } from '../types.ts';
-import { chunkMarkdownText, splitForLimit } from './chunker.ts';
+import { chunkMarkdownText, defuseDanglingTag, longestInlineTag, splitForLimit } from './chunker.ts';
+import { hasOversizedTag, stripInlineTags } from '../shared/inline.ts';
 import { classifyDeliveryError, Outbox } from './outbox.ts';
 import { decorateSessionMessage } from './session-source.ts';
 import { errorMessage } from '../shared/utils.ts';
@@ -65,6 +66,9 @@ const BLOCKED_NOTICE = '❌ 上一条消息被 QQ 拦截，未送达。';
 
 /** 超长且切到最小分片仍被拒：换掉的不是风控，别复用「被拦截」的措辞 */
 const TOO_LONG_NOTICE = '❌ 上一条消息超过长度上限，切到最小分片仍被拒，未送达。';
+
+/** 对半只解决「整条太长」：切到这么短还被拒，说明不是长度问题，再切只会切碎 */
+const HALVE_FLOOR = 200;
 
 /** 一次发送的失败分类：只对网络类重试，其它原样抛给调用方 */
 async function sendOnceWithRetry(run: () => Promise<unknown>): Promise<void> {
@@ -125,7 +129,8 @@ export function createSender(options: CreateSenderOptions): Sender {
    * 会话输出：
    *   - 非当前会话先署名，再按上限切分（切分点感知 qqbot-cmd-input 标签）；
    *   - 每片交给 Outbox：网络抖动重试一次、仍失败入队并停发后续分片；
-   *   - 超长按本条长度减半重切，切不动时按「超长」而非「被拦截」告知；内容类失败只告知一次。
+   *   - 超长按本条长度减半重切（有下限）；标签属性超限时先降级成纯文本，
+   *     切不动时按「超长」而非「被拦截」告知；内容类失败只告知一次。
    */
   const session = async (
     sessionId: string,
@@ -136,7 +141,8 @@ export function createSender(options: CreateSenderOptions): Sender {
     if (body === '') return;
     const composed = decorate(sessionId, body);
     const queue = splitForLimit(composed, config.textChunkLimit);
-    const send = (value: string): Promise<unknown> => bot.sendMarkdown(target, value);
+    // 残片标签发出去就是一段乱码属性，发送前统一打回纯文本
+    const send = (value: string): Promise<unknown> => bot.sendMarkdown(target, defuseDanglingTag(value));
     let notified = false;
 
     while (queue.length > 0) {
@@ -152,11 +158,22 @@ export function createSender(options: CreateSenderOptions): Sender {
       if (outcome === 'broken') return;
       if (outcome === 'sent') continue;
 
-      // 内容类失败：超长按本条长度减半重切；切不动才告知，风控与超长各用自己的措辞
+      // 内容类失败：超长按本条长度减半重切；标签属性不合规就降级成纯文本；切不动才告知。
+      // 风控与超长各用自己的措辞，内容类失败只告知一次。
       let notice = BLOCKED_NOTICE;
       if (outcome === 'too-long') {
-        const smaller = splitForLimit(part, Math.floor(part.length / 2));
-        if (smaller.length > 1) {
+        // 标签属性超限：消息变短不会让属性变合法，对半只会把标签切坏，先降级重发一次
+        if (hasOversizedTag(part)) {
+          const plain = stripInlineTags(part);
+          if (plain !== part) {
+            queue.unshift(plain);
+            continue;
+          }
+        }
+        // 切点不能比一条行内标签还短，否则标签只能被拦腰截断
+        const smaller = splitForLimit(part, Math.max(Math.floor(part.length / 2), longestInlineTag(part)));
+        // 下限保证级联有终点：4500 最多切到 140 字一片，不会一路对半刷屏
+        if (smaller.length > 1 && part.length > HALVE_FLOOR) {
           queue.unshift(...smaller);
           continue;
         }

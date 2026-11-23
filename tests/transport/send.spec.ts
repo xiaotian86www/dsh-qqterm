@@ -115,11 +115,29 @@ describe('session：会话输出', () => {
   });
 
   it('超长被平台拒绝：折半重切后继续发完', async () => {
-    const { sender, calls } = makeSender([apiError(40054007)]);
-    const body = 'A'.repeat(60);
+    const { sender, calls } = makeSender([apiError(40054007)], true, 400);
+    const body = 'A'.repeat(800);
     await sender.session('sess-1', TARGET, body, 'assistant');
     expect(calls.length).toBeGreaterThan(1);
-    expect(calls.map(call => call.body).join('').length).toBeGreaterThanOrEqual(60);
+    expect(calls.every(call => call.body.length <= 400)).toBe(true);
+    expect(calls.map(call => call.body).join('').length).toBeGreaterThanOrEqual(800);
+  });
+
+  it('切到下限仍被拒：告知超长，不再一路对半', async () => {
+    const { sender, calls } = makeSender([apiError(40054007)], true, 4000);
+    await sender.session('sess-1', TARGET, 'A'.repeat(150), 'assistant');
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.body).toBe('❌ 上一条消息超过长度上限，切到最小分片仍被拒，未送达。');
+  });
+
+  it('标签属性超限被拒：降级成纯文本重发，不把标签切坏', async () => {
+    const { sender, calls } = makeSender([apiError(40054018)], true, 4000);
+    const tag = `<qqbot-cmd-input text="/get ${'C:\\a'.repeat(40)}" show="文件"/>`;
+    await sender.session('sess-1', TARGET, `下载 ${tag}`, 'assistant');
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.body).not.toContain('qqbot-cmd-input');
+    expect(calls[0]?.body).toContain('下载');
+    expect(calls[0]?.body).toContain('/get');
   });
 
   it('两次网络失败：入队并停发后续分片，恢复后按序补发', async () => {

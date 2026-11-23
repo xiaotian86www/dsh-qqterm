@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { attrValue, cleanInline, clip, commandLink, commandLinkRaw } from '../../src/shared/inline.ts';
+import {
+  attrValue,
+  cleanInline,
+  clip,
+  commandLink,
+  commandLinkRaw,
+  hasOversizedTag,
+  stripInlineTags,
+  tagTextFits,
+} from '../../src/shared/inline.ts';
 
 describe('cleanInline', () => {
   it('把换行与连续空白压成单个空格并去掉首尾空白', () => {
@@ -52,6 +61,11 @@ describe('commandLink', () => {
       '<qqbot-cmd-input text="/ls &quot;a&amp;b&quot;" show="目录"/>',
     );
   });
+
+  it('命令超过属性上限：不出按钮，退回纯文本标签', () => {
+    expect(commandLink(`/get ${'a'.repeat(120)}`, '文件')).toBe('文件');
+    expect(commandLink('a'.repeat(101), '')).toBe('a'.repeat(101));
+  });
 });
 
 describe('commandLinkRaw', () => {
@@ -63,5 +77,42 @@ describe('commandLinkRaw', () => {
 
   it('只去换行再转义属性字符', () => {
     expect(commandLinkRaw('/get x', 'a\nb"c')).toBe('<qqbot-cmd-input text="/get x" show="a b&quot;c"/>');
+  });
+
+  it('命令超过属性上限：退回原样展示文本', () => {
+    expect(commandLinkRaw(`/ls ${'a'.repeat(120)}`, 'a_b~c')).toBe('a_b~c');
+  });
+});
+
+describe('tagTextFits', () => {
+  it('按转义后的属性长度判定，正好 100 字符算合规', () => {
+    expect(tagTextFits('a'.repeat(100))).toBe(true);
+    expect(tagTextFits('a'.repeat(101))).toBe(false);
+  });
+
+  it('实体转义后超限也算不合规', () => {
+    expect(tagTextFits('&'.repeat(50))).toBe(false);
+  });
+});
+
+describe('hasOversizedTag', () => {
+  it('普通正文与合规标签都不算', () => {
+    expect(hasOversizedTag('普通正文')).toBe(false);
+    expect(hasOversizedTag(commandLink('/stop', '停止'))).toBe(false);
+  });
+
+  it('text 超过上限或缺失都算必拒', () => {
+    expect(hasOversizedTag(`<qqbot-cmd-input text="/get ${'a'.repeat(120)}" show="文件"/>`)).toBe(true);
+    expect(hasOversizedTag('<qqbot-cmd-input show="文件"/>')).toBe(true);
+  });
+});
+
+describe('stripInlineTags', () => {
+  it('把标签换成可复制的命令原文，记住实体还原', () => {
+    expect(stripInlineTags('见 <qqbot-cmd-input text="/ls &quot;a&amp;b&quot;" show="目录"/>')).toBe('见 `/ls "a&b"`');
+  });
+
+  it('没有标签的文本原样返回', () => {
+    expect(stripInlineTags('普通正文')).toBe('普通正文');
   });
 });
