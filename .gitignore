@@ -10,3 +10,4 @@ cordis.dev.yml
 lib/**/*.d.ts
 lib/**/*.map
 .tmp/
+.pnpm-store/
