@@ -39,6 +39,8 @@ QQ 用户 → QQ WebSocket → dsh-qqterm → ctx.agents → dsh agent loop → 
 
 ## 安装
 
+四种方式任选其一。凭据保存在 profile 的 `cordis.patch.yml`，媒体缓存与会话偏好数据在 `~/.dsh-qqterm`。
+
 ### 方式一：桌面版安装（推荐）
 
 无需命令行，全程在应用内完成：
@@ -53,7 +55,7 @@ QQ 用户 → QQ WebSocket → dsh-qqterm → ctx.agents → dsh agent loop → 
 
 扫码成功后凭据自动保存，后续启动无需再次扫码。
 
-### 方式二：手动执行
+### 方式二：命令行安装
 
 ```bash
 # 安装到 profile
@@ -63,270 +65,278 @@ npx @deepseek-ai/dsh plugin --profile qqterm add dsh-qqterm
 npx @deepseek-ai/dsh --profile qqterm
 ```
 
-首次启动时，插件检测到凭据未配置会自动进入扫码引导：终端输出二维码 → 手机 QQ 扫码绑定 → 凭据自动保存到 profile，后续启动无需再次扫码。
+首次启动时，插件检测到凭据未配置会自动进入扫码引导，用手机 QQ 扫终端里的二维码完成绑定。
 
-无端内绑定页的环境（如纯 CLI）可设置 `QQBOT_BIND_OPEN_BROWSER=1`，额外拉起系统浏览器扫码页作为降级通道。
+也可以直接用环境变量提供凭据：
 
-<img src="./assets/docs/qrcode.png" alt="二维码扫码示意图" width="280" />
+```bash
+export QQBOT_APPID="xxx"
+export QQBOT_SECRET="xxx"
+```
+
+浏览器打不开时设置 `QQBOT_BIND_OPEN_BROWSER=1`，扫码页会改用系统默认浏览器打开。
+
+<img src="./assets/docs/qrcode.png" alt="终端扫码" width="560" />
 
 ### 方式三：本地路径安装
 
 ```bash
-# 构建
-cd /path/to/dsh-qqterm
-pnpm install && pnpm build
-
-# 安装到 profile（本地路径）
 npx @deepseek-ai/dsh plugin --profile qqterm add /path/to/dsh-qqterm
-
-# 启动
-export QQBOT_APPID="你的AppID" QQBOT_SECRET="你的AppSecret"
-npx @deepseek-ai/dsh --profile qqterm
 ```
 
-### 方式四：--patch 开发模式
+适合开发验证。主 profile 建议安装已发布版本或冻结的 tgz 快照，不要指向会持续构建的开发目录。
+
+### 方式四：`--patch` 开发模式
 
 ```bash
-export QQBOT_APPID="你的AppID" QQBOT_SECRET="你的AppSecret"
+export QQBOT_APPID="xxx" QQBOT_SECRET="xxx"
 npx @deepseek-ai/dsh web --patch /path/to/dsh-qqterm/cordis.dev.yml
 ```
 
-## 配置项
+不用安装进 profile，适合临时调试。
+
+## 配置
+
+配置写在 profile 的插件配置里；`appId` / `appSecret` 也可以由环境变量提供。
+
+### 基础配置
 
 | 配置 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `appId` | string | **必填** | QQ Bot AppID（或通过 `QQBOT_APPID` 环境变量） |
-| `appSecret` | string | **必填** | QQ Bot AppSecret（或通过 `QQBOT_SECRET` 环境变量） |
-| `textChunkLimit` | number | `4500` | 单条消息最大字符数 |
+|---|---|---|---|
+| `appId` | string | `""` | QQ Bot AppID；留空时启动扫码绑定 |
+| `appSecret` | string | `""` | QQ Bot AppSecret |
+| `textChunkLimit` | number | `4500` | 单条消息最大字符数，超出按此分片（QQ 上限约 5000） |
 | `maxQueue` | number | `20` | 并发队列最大长度 |
-| `askTimeoutMs` | number | `300000` | 待答问题超时(ms)，默认 5 分钟（ask_user_question），0=不超时 |
-| `showToolResults` | boolean | `false` | 是否展示工具调用结果（成功与失败都受此开关控制） |
-| `debug` | boolean | `false` | 调试模式 |
+| `askTimeoutMs` | number | `300000` | 待答问题超时（毫秒），超时自动拒绝并提示；`0` 为不超时 |
+| `retryOffer.enabled` | boolean | `true` | 轮次失败后是否用「重发 / 放弃」卡片询问 |
+| `retryOffer.timeoutMs` | number | `600000` | 卡片有效期（毫秒），超时后按钮失效；`0` 为永不过期 |
+| `showToolResults` | boolean | `false` | 是否展示工具调用结果（成功与失败都受控） |
+| `debug` | boolean | `false` | 调试日志 |
 
-### 聊天会话与后台会话
+### 访问控制
 
-插件区分两个概念：**聊天会话**是 QQ 这一侧当前的对话现场，**后台会话**是宿主里的 session 日志。
+| 配置 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `access.owner` | string | `""` | 唯一允许使用机器人的 QQ 用户 OpenID；空字符串拒绝所有私聊 |
 
-- 当前聊天会话全 bot 只有一个：任何私聊窗口续写、看到的都是同一段上下文。
-- 后台会话仍有多份：`/sessions` 默认按工作区分组列出工作中会话，`/sessions all` 看全部会话，`/new` 新开一个。`/sessions resume` 与 `/to` 实际拿到的会话会留在「已获取集合」里继续活着，输出、提问、审批都回 QQ（非当前会话的消息在正文前标 `#短id · 标题`，正文后空一行、单独一行给「回复」「恢复」两个链接）。
-- 会话不按闲置时间回收：长任务跑再久也不会被中断。
-- 排队只发生在同一个会话内部：当前会话空闲时消息立刻开跑，不会因为另一个会话正在生成而等待；同一会话连发多条则按顺序各跑一轮。
+白名单只有一个用户，群消息一律拒绝；按钮点击（提问 / 审批 / 重试 / 确认）会校验点击者等于 `access.owner`。换绑或解绑在设置页完成。
 
-多个私聊同时说话时，回复发给最后一条消息所在的私聊。
+### 富媒体
+
+| 配置 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `media.enabled` | boolean | `true` | 是否启用富媒体理解（图片 / 视频下载后交给工具分析） |
+| `media.maxMB` | number | `200` | 单次下载大小上限（MB） |
+| `media.ttlHours` | number | `24` | 缓存存活时长（小时）；`0` 为永不过期 |
+
+下载的文件落在 `~/.dsh-qqterm/media`，按 TTL 清理。关闭 `media.enabled` 后附件仍会收到，但不会下载和分析。
+
+### 交付文件
+
+| 配置 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `sendFile.sendPresentedFiles` | boolean | `true` | 是否把 `present` 声明的交付文件在轮末发到当前会话 |
+| `sendFile.maxFiles` | number | `4` | 单轮最多投递的交付文件数（小于 1 按 1 处理） |
+
+交付文件由 agent 通过 `present` 声明，轮末统一发送；路径不限，但只发给 `access.owner`。入站附件下载由 `media` 控制。
+
+### 指令面板
+
+| 配置 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `panel.autoSync` | boolean | `true` | 机器人就绪后是否把内置指令同步到 QQ 指令面板 |
+
+同步是整表覆盖，remark 固定为 `qqterm:commands`；没有变化时跳过写入。
+
+### 自定义菜单
+
+| 配置 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `menu.autoSync` | boolean | `true` | 机器人就绪后是否把固定入口同步到单聊自定义菜单 |
+
+菜单固定七项：会话状态、会话列表、重置会话、压缩会话、长期目标、权限预设、思考强度。权限与思考强度是二级菜单，其余项直接指向对应指令。菜单是 bot 级的整表覆盖，不按用户区分。
+
+## 会话、工作区与交互
+
+### 一个当前会话，多份已获取会话
+
+全 bot 只有一个「当前会话」：普通消息都续写它，key 固定为 `qqterm:${appId}:chat`。
+
+后台会话可以有多份：普通消息、`/sessions resume`、`/to` 拿到的 agent 都进「已获取集合」，输出、提问、审批都回 QQ。当前会话的回复直接发；其它会话的回复在正文前单独一行 `> #短id · 标题`，正文后空一行给「回复」「恢复」两个链接（正在生成时再加「停止」，有归档能力时再加「归档」）。
+
+已获取集合只在运行期存在；会话名册（最近 20 个）写进 `model-prefs.json`，重启后列表照常列出，`/sessions resume` 才真正打开。当前会话仍由启动自动恢复。
+
+切走不释放：`/sessions resume` 换的是「当前」，旧会话继续跑；下次 `resume` 直接接着它的完整历史。
+
+排队只发生在同一会话内部：同一会话的消息按到达顺序执行；不同会话互不阻塞。会话不按闲置时间回收，只要进程还在、agent 还没卸载就一直可用。
+
+### 工作区
+
+工作区是宿主的 `workspaceRegistry` 概念，dsh-qqterm 不维护自己的目录列表。
+
+- 没有 `cwd` 配置。新会话落在宿主的默认工作区（`Documents/deepseek-harness/default-workspace`），宿主读不到时用 dsh 的启动目录。
+- 工作区跟着会话走：`/sessions resume` 在会话自己的工作区里跑，不要求先切目录；跨工作区恢复也照常。
+- 换工作区只能通过 `/new --dir <工作区>` 决定下一条消息的落点；`/new` 本身留在当前工作区。
+- 匹配顺序：工作区标题 → 目录名（大小写不敏感，唯一前缀匹配）→ 绝对路径。没有 `workspaceRegistry` 时只认绝对路径。
+- 标题默认取目录最后一段，可以在 Web 侧栏改；手动改过的标题不会被自动改写。
+- 工作树：`/new --worktree` 让下一条消息先按当前目录的 HEAD 建树，再在树里开会话，分支名 `dsh-<会话短 id>`。未提交改动不会带进树里。读不到 HEAD 或建树失败时这一轮不建会话，回复原因和下一步，意图保留，重发即重试；目录不是 Git 仓库时就地开会话并提示；只读沙箱在 `/new` 当场拒绝。归档会话时宿主会删掉干净的工作树、保留分支，有未提交改动则保留树。
+- 运行目录与工作区是两个概念：运行期 `cd` 只改运行目录（`/get`、`/ls` 的相对路径基准）；工作区分组、`/status` 的工作区行、下一条 `/new` 的落点仍用会话创建时的 `header.cwd`。工作树会话的工作区是主仓库根，树只作运行目录。
 
 ### 模型、preset 与思考强度
 
-模型与思考强度跟着**当前会话**走，preset 是部署级设置，都沿用宿主核心行为：
+- 新会话的模型按 `settings.yaml` → `agentDefaultModel` → `deepseek-official/deepseek-v4-flash` 解析。
+- `/model`、`/reasoning`：有活跃会话时写进当前会话，下一轮生效（不 fork、不重建），同时写部署默认；没有会话时只写默认。
+- `/reasoning` 选的档位同时成为全局默认，之后的会话沿用。
+- `/preset` 是部署级：落盘到 `settings.yaml`，只影响新建会话；插件不存 preset。
+- `/permission`：有活跃会话时在当前会话立即生效，没有会话时改默认。
+- 查看视图显示当前值并标 `✅`，不造「全局」标签。
 
-- 新会话（`/new`、第一条消息）取宿主核心的当前值：`settings.yaml` → 宿主 agentDefaultModel → `deepseek-official/deepseek-v4-flash`。插件配置里没有 `provider` / `model` / `preset`，这三项以宿主为准。
-- `/model` 走宿主同一条切换路径：选择记进当前会话（不重建、不改历史），下一轮生效；没有活跃会话时直接写部署默认值，回执与有会话时一致。
-- `/reasoning` 走同一个入口：写进当前会话，下一轮生效；按核心行为，它同时成为全局的当前选择，新会话会跟随；没有活跃会话时同样写部署默认值。
-- `/preset` 与设置页「设为默认」是同一个入口：写入的 preset 对之后新建的会话生效，已开始的会话保持自己的 preset。
-- 没有会话时，`/model`、`/reasoning`、`/permission` 的查看视图照常展示当前值——那就是部署默认值（新建会话会拿到的值），写法不变。
-- `/permission` 有会话时立即作用于当前会话；没有会话时写部署默认预设。
+### 文件与富媒体
 
-### 访问控制（access）
+- 入站图片 / 视频按 `media` 配置下载，交给工具分析；缓存落在 `~/.dsh-qqterm/media`，按 TTL 清理。
+- 助手消息里的图片内容块按出现位置作为 QQ 图片发出，文本在图片处切成前后两条。
+- `present` 声明的交付文件在轮末发送（`sendFile.sendPresentedFiles`，单轮最多 `maxFiles` 个）。
+- `/get` 可以发任意路径的文件，目录会被拒绝；`/ls` 用来浏览并点选。
+- 助手正文里的本地文件链接会改写成 `/get <绝对路径>`，点开即发。
+- 交付文件与 `/get` 都只发给 `access.owner`。
 
-超级终端只服务一个用户：其他私聊一律拒绝，群聊不支持。扫码绑定会把扫码者自动写成唯一用户；手动绑定或换人时在设置页填 OpenID。
+### 问答、审批与失败重发
 
-| 配置 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `access.owner` | string | `""` | 唯一允许的用户（QQ OpenID）；留空拒绝所有人 |
-
-### 富媒体理解（media）
-
-| 配置 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `media.enabled` | boolean | `true` | 是否启用富媒体理解（图片/视频下载 + 工具分析） |
-| `media.maxMB` | number | `200` | 富媒体下载大小上限(MB) |
-| `media.ttlHours` | number | `24` | 富媒体存活时长(小时)，0=永不过期 |
-
-### 附件发送（sendFile）
-
-| 配置 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `sendFile.sendPresentedFiles` | boolean | `true` | 是否把 present 声明的交付文件发送到当前会话 |
-| `sendFile.maxFiles` | number | `4` | 单轮最多投递的交付文件数 |
-
-交付文件与 `/get` 都只发给唯一绑定用户（`access.owner`），因此不限制目录：`~/.dsh-qqterm/media`、当前会话工作目录、任意绝对路径都能发。助手消息里的图片由附件服务定位后直接发送。
-
-助手正文里的本地文件链接（`/`、`./`、`../`、盘符开头，或相对工作目录能命中的路径）在发送前改写成 `/get <绝对路径>` 命令链接：QQ 点不开本地路径，点这个链接由插件把文件发到聊天里。`/get <路径>` 也可以手动输入，路径不限。
-
-### 指令面板（panel）
-
-| 配置 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `panel.autoSync` | boolean | `true` | 机器人就绪后自动把当前指令同步到指令面板 |
-
-指令面板就是手机 QQ 里输入 `/` 后弹出的指令列表。开启 `panel.autoSync` 后，每次机器人就绪都会把插件内置命令（含说明）推到私聊全局面板；没有面板时创建，已有本插件建的面板（`remark` 为 `qqterm:commands`）时原地更新。
-
-### 自定义菜单（menu）
-
-| 配置 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `menu.autoSync` | boolean | `true` | 机器人就绪后自动同步单聊自定义菜单 |
-
-菜单是**私聊窗口底部**的七个固定入口：`会话状态`（`/status`）、`会话列表`（`/sessions`）、`重置会话`（`/reset`）、`压缩会话`（`/compact`）、`长期目标`（`/goal`），以及两个直接带子菜单的折叠项——`权限预设`（`查看权限` / `仅可查看` / `工作区内修改` / `完全权限` / `自动审查`）和 `思考强度`（`查看强度` / `关闭` / `低` / `高` / `最高`）。点击任意一项都会把对应命令填进输入框，权限与当前会话仍由命令自己校验。
-
-菜单是机器人级全局配置，所有用户看到同一份，而且改完要退出对话框再进来才看得到新内容——所以这里只放静态动作，不做按会话变化的动态文案（上下文占比看 `/status`）。机器人就绪时同步一次，内容没变不会重复写；`menu.autoSync=false` 可关掉自动同步。菜单接口是整体覆盖：每次同步写入本插件这一份固定入口，其它按钮不会保留。
+- `ask_user_question`：单选生成内联按钮（点一个其余变灰），多选回复编号；逐题推进，问题级超时 `askTimeoutMs`。
+- `approval/request`：关键操作通过「允许 / 拒绝」按钮确认；按钮发不出去时降级成纯文本。
+- 轮次失败：默认用「重发 / 放弃」卡片询问（`retryOffer`）；卡片失效后可用 `/retry` 重发上一条用户消息。
+- 提问 / 审批的路由与会话一致：当前会话直接发；其它会话的按钮带 `#短id`。如果提问降级成了纯文本，回复时用 `/to #短id` 指明会话。
 
 ## 内置命令
 
-| 命令 | 说明 |
-|------|------|
-| `/new` | 开始新会话（清空上下文）；工作区用 `--dir`（`-d`）指定：`/new --dir <工作区\|路径>`；剩下的文字是提示词，会立刻作为第一条消息发出；加 `--worktree`（`-w`）则以当前 HEAD 为基点建工作树再开会话；加 `--background`（`-b`）则另开一条会话在后台跑，不切走当前会话（必须带提示词）；不停旧会话，直接执行 |
-| `/clear`（别名 `/reset`） | 停止当前会话并在原工作区开启新会话；`/clear all` 停掉所有已获取会话；有会话时先发确认卡，5 分钟内点 ✅ 才执行 |
-| `/compact` | 压缩会话历史（摘要替换旧记录，保留上下文）；成败按宿主命令结果，回复原样带出宿主文本 |
-| `/goal` | 设定或查看当前会话的长期目标；`/goal <目标>` 设定，`edit` / `pause` / `resume` / `clear` 管理；回复原样带出宿主文本 |
-| `/sessions`（别名 `/session`） | 会话管理：默认按工作区分组列出工作中会话（含状态与当前项），`all` 看全部会话 |
-| `/rename` | 修改当前会话名（标题固定，不被自动标题覆盖） |
-| `/to` | 向指定会话发消息，或在它提问时提交答案 |
-| `/ls` | 列出目录里的子目录与文件：点目录逐层进入，点文件直接发送（`/get`） |
-| `/get` | 把工作区里的文件发到当前聊天（图片 / 视频 / 语音按类型发送） |
-| `/model` | 查看或切换当前会话的模型（下一轮生效） |
-| `/reasoning`（别名 `/think`） | 查看或切换当前会话的思考强度（档位由模型决定） |
-| `/preset` | 查看或切换当前 agent preset |
-| `/permission` | 查看或切换权限预设（沙箱模式 + 审批策略，当前会话立即生效；仅绑定用户可用） |
+| 指令 | 说明 |
+|---|---|
+| `/new` | 新建会话；`--dir`（`-d`）指定工作区，`--worktree`（`-w`）让第一条消息先建工作树，`--background`（`-b`）后台另开一条且不动当前会话；剩下的文字作为提示词立即发出；旧会话继续跑 |
+| `/clear`（别名 `/reset`） | 停止当前会话，下一条消息在原工作区开新会话；`/clear all` 停掉所有已获取会话；先发 5 分钟确认卡 |
+| `/compact` | 压缩会话历史（摘要替换旧记录），回复带出宿主命令的结果 |
+| `/goal` | 设定或查看当前会话的长期目标；`/goal <目标>` 设定，`edit` / `pause` / `resume` / `clear` 管理 |
+| `/sessions`（别名 `/session`） | 会话管理：默认列出 QQ 持有的会话（含重启后尚未打开的冷会话），`all` 看全部，`archived` 看归档 |
+| `/rename` | 修改当前会话标题；`/sessions rename <id> <标题>` 改已打开会话 |
+| `/to` | 向指定会话发消息；目标在等答案时提交答案；尚未打开的会话先接回再发 |
+| `/ls` | 列出目录里的子目录与文件，点目录进入、点文件发送 |
+| `/get` | 把文件发到当前聊天（图片 / 视频 / 语音按类型发送），路径不限 |
+| `/model` | 查看或切换当前会话的模型 |
+| `/reasoning`（别名 `/think`） | 查看或切换当前会话的思考强度 |
+| `/preset` | 查看或切换当前 agent preset（只对新建会话生效） |
+| `/permission` | 查看或切换当前会话的权限预设（仅绑定用户） |
 | `/cost` | 查看当前会话的 token 消耗 |
-| `/status` | 查看会话状态：会话名与短 id / 工作区 / 工作树 / 模型 / 思考强度 / 上下文 / token |
-| `/stop` | 中止当前生成；`/stop all` 中止所有已获取会话中正在生成的 |
-| `/help` | 查看所有指令；`/help <命令>` 查看该命令的参数与用法 |
-| `/plugins` | 插件管理：不带参数列出已安装插件，`install <包名>` / `update <包名> [版本]` 走 registry，`reload` 应用磁盘上的插件变更（仅绑定用户可用） |
+| `/status` | 查看会话状态：会话、状态、工作区、工作树、模型、思考强度、preset、权限、上下文 |
+| `/stop` | 中止当前生成；`/stop <id>` 停指定已获取会话；`/stop all` 停全部 |
+| `/retry` | 重发当前会话上一条用户消息 |
+| `/help` | 查看所有指令；`/help <命令>` 查看参数与用法 |
+| `/plugins` | 插件管理：列出、`install` / `update`、`reload`（仅绑定用户） |
 
-> 参数按命令行习惯写：空格分隔，值里要有空格就用成对的 `"` 或 `'` 包起来（`/ls "D:\My Repo"`、`/rename "新的 标题"`、`/to #短id "看下这段"`）。整行就是一个值的命令（`/ls`、`/get`、`/rename`、`/goal`、`/model`、`/reasoning`、`/preset`、`/permission`）写不写引号都行；`-` 开头的词一律当参数，认不出的回「未知参数」并给用法，不会被静默忽略或当成正文。
+补充说明：
 
-> 指令名拼错（如 `/modle`、`/sesions`）不会被当作提问转发给大模型：机器人直接回「没有这个指令」，能猜到意图时给出可点击的正确指令。只有「斜杠 + ASCII 指令名」算指令，`/usr/local/bin`、`/今天` 这类文本照旧交给模型；全角 `／` 与半角 `/` 等价，中文输入法下可以直接敲。
+- 参数统一支持引号：空格分隔，带空格的值用引号包起来；`--dir=值` 等价于 `--dir 值`。引号没闭合回「引号没有闭合 + 用法」，认不出的参数回「未知参数 + 用法」，不会静默跳过。
+- 拼错的 `/` 指令会在入站层拦下并提示用法，不会转发给模型；前缀匹配有歧义时按「指代不清」拒绝。
+- 宿主缺某条命令依赖的服务时，整条命令不出现，输入按未知指令处理。
 
-### 插件安装、更新与热重载（`/plugins`）
+### `/new` 用法
 
-`/plugins` 调宿主的插件管理服务，包管理只管从 registry 安装的 bundle：
+| 写法 | 效果 |
+|---|---|
+| `/new` | 清掉当前指针，下一条消息在原工作区建新会话；旧会话继续跑 |
+| `/new <提示词>` | 立刻在新会话发出这条提示词 |
+| `/new --dir <工作区>` | 在指定工作区开新会话（`-d`，只收一个词） |
+| `/new --background <提示词>` | 后台另开一条，不动当前会话与工作区（`-b`，必须带提示词） |
+| `/new --worktree [提示词]` | 下一条消息先建工作树（`-w`，见「工作区」） |
 
-- `/plugins` 列出已安装的第三方插件，后台查到新版本的行尾带 `→ 新版本` 与「更新」链接；`/plugins 2` 翻页。
-- 后台会定时查 registry（启动 2 分钟后一次，之后每 6 小时一次），查到新版本只在列表里标 `→ 新版本`，不主动发消息、也不自动安装。
-- `/plugins install <包名>` 装完即生效：宿主会 reconcile profile，不需要再发 `/plugins reload`。
-- `/plugins update <包名> [版本]` 不带版本时取 registry 上最新的兼容版本；装新版失败会自动装回旧版本。
-- 依赖带构建脚本时 pnpm 默认拒绝执行，结果里给「继续安装」按钮，点了才授予该包在本 profile 的构建权限。
-- `/plugins reload` 应用磁盘上已变更的插件文件：只替换实际变更的插件，需要重启的改动会如实回报。
-- 本地 tgz 快照（`pnpm dev:reload`）先换包再 `/plugins reload`，不在 install / update 里。
+- 参数和提示词顺序随意，剩下的文字连起来作为提示词；`--` 之后的全部算提示词。
+- `-w` 与 `-b` 可合写为 `-wb`；短参数连写时带值的 `-d` 放最后（`-wbd <工作区>`）。
+- `--dir` 只收一个词；路径带空格时用引号包起来，也认 `--dir=路径`。
+- 参数校验先于动会话：不存在的目录 / 文件直接拒绝，当前会话不受影响。
+- 带参数的 `/new` 只对绑定用户开放；裸 `/new` 不限。
+- 不知道路径时先用 `/ls` 走到目标目录，再照着用法发 `/new --dir`。
 
-## 工作区（workspace）
+### `/sessions` 用法
 
-工作区是宿主对「一个目录 + 跑在这个目录里的会话」的持久分组记录（`ctx.workspaceRegistry`），Web 侧栏看到的项目分组就是它。本插件遵循同一套规则：
-
-- **没有 `cwd` 配置**：会话的工作目录由宿主决定。
-- **新会话落在宿主的默认工作区**（首次使用时建在 `Documents/deepseek-harness/default-workspace`）；宿主没有默认工作区时退回 dsh 的启动目录。
-- **工作区跟着会话走**：`/sessions resume` 切到哪个会话，这个聊天的工作目录就变成那个会话的目录；之后 `/new` 也留在同一个工作区，重启后依然记得（记录在 `~/.dsh-qqterm/model-prefs.json` 的 `dirs` 里）。
-- **按需开在 Git 工作树里**：`/new` 默认就地；加 `--worktree`（`-w`）后，第一条消息以当时目录的 HEAD 为基点建一棵工作树（分支 `dsh-<会话短 id>`），会话落在这棵树里，与 Web 侧一致；`/new --worktree --dir <工作区|路径>` 先换目录再建树。未提交改动不随树走。读不到当时的 HEAD 或建树失败时这一轮不创建会话（不退回主检出），回原因与下一步；意图保留，重发即重试。不是 Git 仓库或沙箱只读时就地创建（只读在 `/new` 时就提示换权限），没有工作树服务时 `--worktree` 按未知参数处理。`/status` 多一行工作树与基点；归档会删掉干净的工作树并保留分支，有改动则整棵留下。
-- **显示名用目录名**：工作区标题由宿主按目录最后一段自动命名，你手动改过的标题不会被覆盖。
-- **没有工作区注册表时**：`/sessions` 仍按目录分组，组标题只显示路径；`/new --dir` 只认绝对路径，不能按名字或目录名匹配，用法页与回执也只给路径。
-
-### 换工作区（`/new --dir <工作区>`）
-
-工作区就是会话的 `cwd`。它在会话创建时写进会话 header，宿主没有修改它的接口，所以换工作区只能在**会话落盘之前**生效——入口就是 `/new` 本身：
-
-| 用法 | 说明 |
-|------|------|
-| `/new --dir <名字\|路径>` | 一步到位：在新工作区开新会话（`-d` 是简写） |
-| `/new <提示词>` | 在当前工作区开新会话，并把这条提示词立刻发出去 |
-| `/ls` | 拿不准路径时先列目录，点条目逐层进入 |
-
-- 工作区认**标题**、**目录名**（大小写不敏感，支持唯一前缀）或**绝对路径**；换完的下一条消息会在新目录里创建会话，宿主的侧边栏里同时出现对应工作区。目录不存在或不是目录会被拒绝，不会留下半改状态；`/new --dir <路径>` 会先校验再动会话，路径写错不会把当前会话弄丢。部署里没有 workspaceRegistry 时只认绝对路径。
-- **工作区只用 `--dir` 写**：`--dir <工作区>`（`-d`）只收后面一个词，带空格的路径加引号——`/new -d "D:\My Repo"`。位置参数留给提示词，两者不会撞车。
-- **带提示词开新会话**：参数和提示词顺序随意，剩下的文字连起来就是提示词——`/new --dir repo 修一下登录页` 与 `/new 修一下登录页 --dir repo` 等价。不给提示词时与旧版一致（只清指针，等下一条消息再建）；`--worktree` 与提示词同时给时，工作树在发这条提示词的那一刻建好。`--prompt` 参数已经删除，写了按未知参数回绝。空格分隔参数，带空格的路径或提示词加引号（`/new --dir "D:\My Repo" "看下 -w 这个参数"`，也可写 `--dir=repo`）；开关可合写，`/new -wb 修一下` 等于 `-w -b`，带值的 `-d` 只能收尾（`-wbd <工作区>`）；`--` 之后一律当提示词。
-- 不知道路径怎么写就用 `/ls`：列出当前工作区的子目录与文件，点目录逐层进入、点文件直接发到聊天；每个条目填进输入框的都是绝对路径，点进第几层都不会跑偏。
-- **后台开一条会话**：`/new --background <提示词>`（`-b`）另开一条会话并把提示词发出去，当前会话与这个聊天的工作区都不动——这条会话进「已获取集合」，输出、提问、审批照样回 QQ（正文前标 `#短id`），要切过去用 `/sessions resume #短id`。可与 `--dir`、`--worktree` 组合；必须带提示词，不给就回绝。
-- 与 `/sessions` 同一权限面：只允许**私聊 + 唯一绑定用户**（`access.owner`）——换工作区等于换 agent 能读写的目录。不带参数的 `/new` 不受限制。
-
-### 会话管理（`/sessions`）
-
-`/sessions` 默认回答“QQ 现在持有哪些会话”：已获取的在内存里，重启前获取过的由 `model-prefs.json` 里的会话名册补全（点一下就恢复）；全部视图与 Web 侧栏同一来源（宿主 `sessionQuery` / `sessionPersistence`）。
-
-| 用法 | 说明 |
-|------|------|
-| `/sessions` | 按工作区分组列出工作中会话（当前项优先）；组标题带工作区路径，组内每行展示 `生成中` / `空闲`，当前项行尾 `✅`；重启后还没打开的会话也列出、按 `空闲` 显示；当前指针不在列表里时单独补一行（只给 id）；行首只有 8 位短 id，不编号；行尾给「回复」「停止」「归档」快捷操作（`/to #短id`、`/stop #短id`、`/sessions archive #短id`；当前会话不给回复，只给正在生成的会话停止入口）；每页 10 条 |
-| `/sessions <页码>` | 工作中会话列表的下一页，例如 `/sessions 2`；页脚给出 `上一页 · 第 1/2 页 · 下一页` |
-| `/sessions all` | 按工作区分组列出全部会话（组内先置顶），跨项目找会话用；已持有会话标 `📌`，不标当前项；组内只用短 id，工作中会话的行尾同样给「回复」「停止」「归档」（已归档的不给）；每页 10 条 |
-| `/sessions all <页码>` | 全部会话视图的下一页；翻页后仍会重复页首会话所属的工作区标题；页脚格式相同 |
-| `/sessions resume <id>` | 把当前聊天切到该会话，历史接上继续聊（目标若已归档会顺带取消归档），工作区跟着切；目标用 8 位短 id |
-| `/sessions rename <id> <新标题>` | 修改会话名；标题会被固定，不被自动标题覆盖。目标须已打开（先 `/sessions resume`） |
-| `/sessions archive [页码]` | 不带目标时列出所有工作区的归档候选（与 `/sessions all` 同源），按工作区分组，标题给 `X 个工作区 · Y 个会话`，候选不编号；只给页码时翻页，例如 `/sessions archive 2` |
-| `/sessions archive <id>[,<id>…]` | 归档会话：从本命令与 Web 侧栏隐藏，**磁盘日志保留**，可随时取消归档；多个目标用英文逗号分隔（一次最多 10 个） |
-| `/sessions archived [页码]` | 查看已归档会话，按工作区分组，组标题与 `/sessions all` 同写法，标题给 `X 个工作区 · Y 个会话`；每条只给短 id 与标题，点一下把 `/sessions unarchive <id>` 填进输入框；底部的翻页与返回列表也是链接 |
-| `/sessions unarchive <id>[,<id>…]` | 取消归档，让它重新出现在列表里 |
-| `/to <会话> <文本>` | 向指定会话发一条消息；目标在等 `ask_user_question` 时，文本会作为答案提交；还没打开的会话先接回来再发，不改当前会话；已归档的会话不接回来，提示先取消归档 |
-| `/to <会话>` | 目标在等答案时进入「下一条消息作为回答」模式 |
+| 写法 | 效果 |
+|---|---|
+| `/sessions` | 列出 QQ 持有的会话（含重启后尚未打开的冷会话），按工作区分组 |
+| `/sessions <页码>` | 翻页（一页 10 条） |
+| `/sessions all` | 列出全部会话，含别的项目 |
+| `/sessions resume <id>` | 打开指定会话（已归档的会先取消归档）；失败不新建 |
+| `/sessions rename <id> <标题>` | 改已打开会话的标题；冷会话会提示先恢复 |
+| `/sessions archive` | 列出可归档的会话；`<页码>` 翻页 |
+| `/sessions archive <id>[,<id>...]` | 归档一个或多个（逗号分隔，最多 10 个） |
+| `/sessions archived` | 列出已归档的会话 |
+| `/sessions unarchive <id>[,<id>...]` | 取消归档 |
 
 注意：
 
-- **句柄规则**：所有目标一律用 8 位短 id（形如 `#3f2a9b1c`，`#` 可省略）；列表不编号，翻页、分组后也不存在「第几条」这种写法，避免和实际行对不上。
-- **分页**：多页列表的页脚统一为 `上一页 · 第 1/2 页 · 下一页`，缺哪边省略哪边；页码不放在标题里，也不显示「还有 N 个」。
-- 状态词只在工作中会话列表里出现：`生成中`（agent 正在跑）、`空闲`（没有在跑，含重启后还没打开的）；列表里不存在「待恢复」这一档。`/new` 之后没有当前指针，不会补这一行。其它视图只给已持有会话标 `📌`（表示 QQ 已持有），不标当前，也不显示状态。
-- 只允许**私聊**使用，且操作者必须是唯一绑定用户（`access.owner`）——会话标题、归档状态都涉及其他聊天的数据；未配置用户时命令直接不可用。
-- 归档走宿主 `workspaceRegistry.archiveSession`，只写 registry 的全局归档集，**不删任何文件**；本插件不提供物理删除，需要清理磁盘请到 Web 端或手动处理。`workspaceRegistry` 是可选服务（不在 `inject` 里）：缺它时这些命令照常可用，只是不列归档、也不提供归档 / 取消归档子命令（按未知子命令处理）。
-- 归档前会释放该会话在本进程内的 agent；如果它就是当前会话，还会清掉聊天映射，下一条消息落到全新会话——归档会话会被宿主的 `agent/pre-step` 闸门拒绝，继续挂在它上面聊天会收不到回复。
-- **多个会话可以同时活着**：普通消息、`/sessions resume`、`/to` 实际拿到 agent 的会话都会加入「已获取集合」。所有已获取会话的输出、提问、审批都会发回 QQ；当前会话不加标记，其它会话的消息在正文前单独一行标 `#短id · 标题`，正文后空一行、单独一行给「回复」「恢复」两个链接。已获取集合只在运行期存在，但会话名册（`held`，最近 20 个）写进 `model-prefs.json`：重启后列表照常列出这些会话，`/sessions resume` 才真正打开；当前会话仍由启动自动恢复。
-- **切走不释放**：`/sessions resume` 只改当前指针，旧会话继续在后台跑、输出继续回 QQ；`/new` 只清掉当前指针，旧会话同样继续跑。插件卸载时只 dispose 自己创建的 agent，Web/TUI 创建的只丢引用。
-- **问答按会话路由**：当前会话直接回文本；其它会话的按钮带 session id，点按钮就能答；没有选项按钮的问题在正文引导行给「回答」「恢复」两个链接。一条没走按钮或 `/to` 的纯文本不会误发给当前模型，会提示用按钮或 `/to`。
-- 持有列表按最近人类消息时间倒序排（同时间按 id 升序），当前会话不置顶、只在行尾标 ✅；行里的时间就是排序用的那个时间（取不到时回退创建时间，仍取不到就不显示时间）。`/sessions all` 的工作区内顺序同样按这个时间倒序（与 Web 侧栏同一份 `updatedAt`），置顶会话仍在最前，工作区顺序不变。
-- 跨工作区恢复后，agent 会在**那个会话自己的目录**里干活；相对路径（含 `/get` 的相对写法）也以该目录为准。
+- 会话 id 一律 8 位短 id，行里不编号；目标可以带 `#`，前缀至少 4 位且必须唯一。
+- 分页一页 10 条，页脚 `上一页 · 第 1/2 页 · 下一页`，缺哪边省略。
+- 状态（生成中 / 空闲）只在默认列表标；其它视图只标 `📌`。
+- 只在 C2C 私聊、且发送者等于 `access.owner` 时可用。
+- 归档只改宿主状态，不删会话记录；当前会话被归档时指针清空，下一条消息落到新会话。没有 `workspaceRegistry` 时归档子命令按未知子命令处理。
+- 多份活跃会话同时产出时，每条回复正文前有 `> #短id · 标题`，正文后是「回复」「恢复」链接；切走不释放，排队只发生在同一会话内部。
+- 排序按最近一条人类消息倒序，同一时间按 id 升序；当前项不置顶，只靠行尾 `✅`。
+- 跨工作区恢复会在会话自己的目录里跑。
+
+### `/plugins`
+
+- 列出 registry 里的插件包，有新版本的项带「→ 新版本」和更新链接。
+- `install` / `update` 立即调宿主的 reconcile：安装新版本、更新时选最新的兼容版本，失败回滚旧版本；带构建脚本的包会先停下来等「继续安装」按钮。
+- `reload` 按已加载模块的磁盘身份替换变化的项，磁盘没变时提示没有变更。
+- 本地 tgz 开发包先用 `pnpm dev:reload` 打快照并装进开发 profile，再发 `/plugins reload`。
+- 启动 2 分钟后检查一次更新，之后每 6 小时一次；仅绑定用户可执行。
 
 ## 核心模块
 
 ```
 src/
-├── index.ts                    # Cordis 插件入口（async apply）
-├── config.ts                   # 配置 Schema
-├── types.ts                    # 全局类型定义
-├── setup/                      # 凭据绑定（扫码）
-│   ├── index.ts                # 绑定编排（ensureCredentials）
-│   ├── binding-service.ts      # 扫码状态机（宿主内唯一事实源）
-│   ├── bind-routes.ts          # 端内绑定页路由（/qqterm/bind）
-│   ├── presenters.ts           # 呈现策略（终端/浏览器降级）
-│   ├── qr-svg.ts               # 二维码 SVG 渲染（宿主侧）
-│   └── persist.ts              # 凭据写入 cordis.patch.yml
-├── client/                     # 浏览器半边（dsh.client Web Bundle）
-│   ├── index.ts                # 设置页入口注册
-│   ├── bind-page.ts            # 端内绑定页（二维码 + 状态轮询）
-│   └── config-panel.ts         # 设置面板（可编辑配置）
-├── gateway/                    # 网关装配
-│   ├── bootstrap.ts            # 启动装配（监听 session/event 等）
-│   └── middleware-setup.ts     # 中间件链配置
-├── transport/                  # 传输层
-│   ├── inbound.ts              # QQ 入站消息 → agent.followup()
-│   ├── outbound.ts             # session/event → QQ sendMarkdown
-│   ├── outbound-images.ts      # 助手消息 image 块 → QQ 图片
-│   ├── reply-store.ts          # 被动回复凭证（msgid/eventid + 用量，msgid 落盘）
-│   ├── reply-bot.ts            # bot 实例装饰：所有发送统一取被动凭证
-│   ├── tool-presenter.ts       # 工具调用展示
-│   └── chunker.ts              # Markdown 文本切分
-├── session/                    # 会话管理层
-│   └── session-manager.ts      # 聊天会话 → Agent 映射与后台会话切换
-├── model/                      # 模型路由层
-│   ├── model-resolver.ts       # 路由解析
-│   ├── prefs-store.ts          # 偏好持久化
-│   └── settings-reader.ts      # settings.yaml 只读
-├── features/                   # 交互特性
-│   ├── question-channel.ts     # ask_user_question 问答通道
-│   ├── approval-channel.ts     # approval 审批确认通道
-│   ├── retry-channel.ts        # 失败重发卡片
-│   ├── command-panel.ts        # 指令面板同步
-│   └── command-menu.ts         # 自定义菜单同步
-├── media/                      # 多媒体
-│   ├── send-media.ts           # 媒体发送（按扩展名分发）
-│   └── media-cleaner.ts        # 媒体 TTL 清理
-├── middleware/                 # 中间件
-│   ├── question-answer.ts      # 问答答案处理
-│   ├── unknown-command.ts      # 拼错指令拦截（不转发给模型）
-│   └── attachment.ts           # 附件处理
-├── shared/                     # 共享工具
-│   ├── utils.ts                # 通用函数
-│   ├── entries.ts              # loader entry 快照（重载 / 安装共用）
-│   ├── dirs.ts                 # 数据目录（~/.dsh-qqterm）
-│   ├── scope.ts                # scope/peer 提取
-│   └── send-helper.ts          # 分块发送
-├── reload/                     # 热重载（/plugins reload，应用磁盘变更）
-├── plugins/                    # /plugins（安装 / 更新插件）
-└── commands/                   # 斜杠命令
+├── index.ts                     # Cordis 插件入口：inject、命令注册、事件接线
+├── config.ts                    # 配置 Schema
+├── host/adapter.ts              # 宿主服务适配：必需服务与可选服务软读
+├── setup/                       # 凭据绑定
+│   ├── binding-service.ts       # 扫码绑定状态机
+│   ├── bind-routes.ts           # 端内绑定页路由
+│   └── persist.ts               # 凭据写回 profile
+├── client/                      # 浏览器半边
+│   ├── config-panel.ts          # 设置页（绑定 / 换凭据 / 解绑 / 配置编辑）
+│   └── bind-page.ts             # 端内扫码页
+├── gateway/                     # 网关装配
+│   ├── bootstrap.ts             # 启动与重连
+│   ├── gateway-session.ts       # 单连接生命周期
+│   └── middleware-setup.ts      # 中间件链
+├── transport/                   # 入站与出站
+│   ├── inbound.ts               # 入站消息
+│   ├── outbound.ts              # 回复与推送
+│   ├── send.ts                  # 统一发送路径（分片 → 入队 → 重试）
+│   ├── outbox.ts                # 待发队列
+│   ├── chunker.ts               # Markdown 感知切分
+│   ├── deliverables.ts          # present 交付文件
+│   └── file-links.ts            # 本地文件链接改写
+├── session/                     # 会话
+│   ├── session-manager.ts       # 当前会话、已获取集合、名册
+│   ├── worktree.ts              # 工作树创建与恢复
+│   └── session-id.ts            # 会话 id 与短 id
+├── model/                       # 模型 / 思考强度 / preset
+│   ├── model-resolver.ts        # 解析顺序
+│   ├── prefs-store.ts           # 偏好持久化
+│   └── settings-reader.ts       # settings.yaml 只读
+├── features/                    # 交互特性
+│   ├── question-channel.ts      # 问答通道
+│   ├── approval-channel.ts      # 审批通道
+│   ├── retry-channel.ts         # 失败重发
+│   ├── command-panel.ts         # 指令面板
+│   └── command-menu.ts          # 自定义菜单
+├── middleware/                  # 入站中间件
+│   ├── question-answer.ts       # 答案处理
+│   ├── unknown-command.ts       # 拼错指令拦截
+│   ├── multiline-command.ts     # 多行指令
+│   └── attachment.ts            # 附件
+├── media/                       # 媒体发送与 TTL 清理
+├── shared/                      # 共享工具（分页、内联指令、数据目录）
+├── reload/                      # /plugins reload
+├── plugins/                     # /plugins 安装与更新
+└── commands/                    # 斜杠命令
 ```
 
 ## 会话路由
@@ -337,15 +347,26 @@ src/
 
 ## 设计原则
 
-- **纯 Cordis 插件** — 遵循 dsh "Plugins, not loop changes" 原则
-- **声明式依赖** — `inject` 列出全部必需服务（会话、模型、工作区、归档、工具、附件、Web 服务等），缺任一就不激活，不在运行时探测或降级；可选服务有五个：`agentPresets`（缺失时 `/preset` 整条命令不出现、建会话不挂 preset）、`webServer`（缺失时不注册端内绑定页，扫码只走终端）与 `workspaceRegistry`（缺失时 `/sessions` 仍按目录分组，组标题只有路径、无置顶 / 归档，归档子命令按未知子命令处理，`/new` 只保留绝对路径写法）、`worktrees`（缺失时新会话就地创建，聊天里不出现工作树字样，`--worktree` 按未知参数处理）；因服务缺失而不可用的整条命令或子命令不出现，输入时按未知指令 / 未知子命令处理（`/plugins reload` 在没有 hmr 时同样如此）；`sessionController` 不参与功能，只被 adapter 软读一次 `list()` 取 `/sessions` 排序用的最近活动时间，缺失时按创建时间排
-- **一个当前会话 + 多份已获取会话** — 任何 QQ 窗口续写同一个当前会话；`/sessions resume` 与 `/to` 获取过的会话继续活着并把输出发回 QQ
-- **Preset 支持** — 可通过 `agent-presets` 服务挂载预设（工具集、prompt 等）；`/preset` 改的是全局值，与设置页「设为默认」一致。该服务可选，缺失时 `/preset` 整条命令不出现
-- **Markdown 输出** — 回复以 Markdown 格式发送，支持代码块/表格感知切分
-- **图片转发** — 助手消息里的图片内容块按出现位置作为 QQ 图片发出，文本在图片处切成前后两条消息
-- **交付文件** — `present` 声明的文件在轮末发送给用户（默认启用，路径不限）
-- **问答互动** — 支持 `ask_user_question`，单选生成内联按钮（点一个其余变灰）、多选回复编号，逐题推进 + 问题级超时
-- **操作确认** — 支持 `approval/request`，关键操作通过「允许/拒绝」按钮请求用户确认
+- **纯 Cordis 插件** — 遵循 dsh「Plugins, not loop changes」原则。
+- **声明式依赖** — `inject` 列出 14 个必需服务：`agents`、`llm`、`agentDefaultModel`、`sessionProjections`、`sessionPersistence`、`sessionQuery`、`sessionTitle`、`permissionPresets`、`settings`、`commands`、`tools`、`attachments`、`workingDirectory`、`pluginManager`。缺任一就不激活，不在运行时探测或降级。
+- **可选服务软读** — 可选能力不进 `inject`，在使用点现查；缺失只缩小能力面，不改变语义，也不解释、不提示。
+
+| 可选服务 | 缺了以后 |
+|---|---|
+| `agentPresets` | `/preset` 不注册，建会话不挂 preset |
+| `webServer` | 端内绑定页不注册，扫码只走终端 / 浏览器 |
+| `workspaceRegistry` | `/sessions` 仍按目录分组，但组标题只有路径，没有 `📌` / 归档入口；归档子命令按未知处理；`/new --dir` 只认绝对路径 |
+| `worktrees` | `/new --worktree` 按未知参数处理，新会话就地创建 |
+| `sessionController` | `/sessions` 的排序退化为创建时间 |
+
+- **一个当前会话 + 多份已获取会话** — 任何 QQ 窗口续写同一个当前会话；`/sessions resume` 与 `/to` 获取过的会话继续活着并把输出发回 QQ。
+- **薄层** — 模型、preset、思考强度、权限、压缩、工作区都转发给宿主；插件只留通道独有的一层：入站解析、分片、附件、回复目标、绑定、多会话寻址与文案渲染。
+- **Markdown 输出** — 回复以 Markdown 格式发送，支持代码块 / 表格感知切分。
+- **图片转发** — 助手消息里的图片内容块按出现位置作为 QQ 图片发出，文本在图片处切成前后两条消息。
+- **交付文件** — `present` 声明的文件在轮末发送给用户（默认启用，路径不限）。
+- **问答互动** — 支持 `ask_user_question`，单选生成内联按钮（点一个其余变灰）、多选回复编号，逐题推进 + 问题级超时。
+- **操作确认** — 支持 `approval/request`，关键操作通过「允许 / 拒绝」按钮请求用户确认。
+- **单用户私聊** — 只服务 `access.owner`，群消息一律拒绝。
 
 ## 本地开发
 
@@ -353,16 +374,33 @@ src/
 # 安装依赖
 pnpm install
 
-# 构建
+# 类型检查 + 打包
 pnpm build
 
-# 开发模式（watch）
-pnpm dev
+# 跑测试
+pnpm test
 
-# 用 --patch 方式调试
-export QQBOT_APPID="xxx" QQBOT_SECRET="xxx"
-npx @deepseek-ai/dsh web --patch /path/to/dsh-qqterm/cordis.dev.yml
+# 类型检查 watch（客户端改动要手动 build）
+pnpm dev
 ```
+
+| 命令 | 用途 |
+|---|---|
+| `pnpm build` | 类型检查 + 打包，产出 `lib/index.js` 与 `lib/client.js` |
+| `pnpm build:client` | 只重建客户端 |
+| `pnpm dev` | 类型检查 watch |
+| `pnpm test` | 跑测试（vitest） |
+| `pnpm typecheck:client` | 客户端类型检查 |
+| `pnpm dev:reload` | 打本地 tgz 快照并装进开发 profile |
+| `pnpm run lint` | 没有 eslint 配置，不是门禁 |
+
+测试放顶层 `tests/`，按模块镜像 `src/`，不访问真实 `~/.dsh`、真实凭据或外网。
+
+## 延伸阅读
+
+- [入站 / 出站路径](./docs/inbound-outbound-paths.md)
+- [多会话设计](./docs/multi-conversation-design.md)
+- [文案风格](./docs/copy-style.md)
 
 ## License
 
