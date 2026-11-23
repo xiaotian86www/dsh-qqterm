@@ -87,7 +87,7 @@ export function sessionArchiveLink(sessionId: string, label = '归档'): string 
  * 给了入口也只会回一句「没有进行中的生成」。
  */
 export function sessionStopLink(sessionId: string, label = '停止'): string {
-  return `<qqbot-cmd-input text="/stop #${shortSessionId(sessionId)}" show="${label}"/>`;
+  return commandLink(`/stop #${shortSessionId(sessionId)}`, label);
 }
 
 /** 尾部链接行（正文下方独占一行）：回复 + 恢复 [+ 停止] [+ 归档] */
