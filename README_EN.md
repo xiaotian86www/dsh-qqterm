@@ -7,6 +7,7 @@
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 [![QQ Bot](https://img.shields.io/badge/QQ_Bot-API_v2-red)](https://bot.q.qq.com/wiki/)
 [![Node](https://img.shields.io/badge/node-%E2%89%A522.12-brightgreen)](https://nodejs.org/)
+[![Version](https://img.shields.io/badge/version-0.0.1-blue)](./CHANGELOG_EN.md)
 
 <br/>
 
@@ -16,15 +17,98 @@
 
 ## What it is
 
-QQ SuperTerm (`dsh-qqterm`) is a QQ channel terminal for [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness). It puts the dsh agent into a QQ private chat: a message is one turn, and any `/` command lets you inspect and switch sessions, models, reasoning effort, and permission presets — or let the agent read and write a workspace and send files back.
+QQ SuperTerm (`dsh-qqterm`) is a QQ channel terminal for [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness). It **brings no agent capability of its own**: it exposes the full capability surface of the host and its installed plugins inside a QQ private chat. Whatever the host can do — models, reasoning effort, presets, permissions, compaction, workspaces, worktrees, plugin installs, MCP and tools — can be done from QQ. The surface follows the host and its plugins, so the plugin version never promises a stale feature list.
 
-Highlights:
+What it does own is channel adaptation: inbound parsing, splitting and delivery, attachments, reply targets, binding, multi-session addressing, and copy. The test is one sentence — **delete the QQ layer: does this code still stand? If it does, it belongs to the host; the plugin may ask, never rule.**
 
-- **The chat window is the terminal** — conversation, commands, panels, and menus all live in QQ private chat; no separate web page or client.
-- **Switchable sessions** — `/sessions` groups sessions by workspace, `/to` messages any session, and background sessions keep running and posting their output back to QQ.
-- **Close to host behaviour** — models, presets, reasoning effort, and permission presets all go through dsh's own selection paths; the plugin keeps no parallel preferences.
-- **It can actually do work** — workspace read/write, attachment understanding, file sending, `ask_user_question`, and `approval` confirmations.
-- **Single-user private chat** — only the bound user is served; group chats are unsupported. One QR scan finishes binding.
+In that layer exactly one thing qualifies as a feature: **multi-session management**. QQ has a single chat window while dsh can run many sessions at once; the name, the current pointer, addressing, quick actions, and background delivery all have to be invented on the channel side. So the tour starts there.
+
+## Multi-session management
+
+dsh can run many sessions at once; QQ has one chat window. This layer is the only feature dsh-qqterm owns, and the focus of the project: the host provides sessions, but not "which one is current", "how to switch inside a chat", or "how a background run comes back".
+
+### One current session, a roster
+
+- Across the bot there is exactly one current session: ordinary messages continue it, and its key is fixed at `qqterm:${appId}:chat`.
+- Sessions touched by `/sessions resume`, `/to`, or a background message join the acquired set, and their output, questions, and approvals all return to QQ.
+- The roster keeps the latest 20 sessions (`model-prefs.json`); after a restart the list still shows cold sessions, and `/sessions resume` is what actually opens one.
+- Switching away does not release: changing which session is current leaves the old one running, and the next resume continues its full history. Sessions are never reclaimed for idleness.
+
+### Addressing: 8-character short ids
+
+| Form | Meaning |
+|---|---|
+| `#a1b2c3d4` | Full short id; `#` is only a visual prefix |
+| `a1b2c3d4` | Accepted without `#` |
+| `a1b2` | Prefix, at least 4 characters and unique |
+| `#a1b2,a3c4` | Batch, comma-separated (full-width commas too), at most 10 per command |
+
+Rows are **never numbered**: after paging and grouping, "the third row" is bound to be wrong, so the short id is the only handle.
+
+### Quick actions: tapping fills in the command
+
+- Every `/sessions` row ends with its actions: Reply / Stop (only while generating) / Archive; every archived row offers Unarchive; a workspace group header taps into `/new --dir <path>`.
+- Every reply, question, approval, and failure card from a non-current session ends with Reply and Resume; Stop is added while it generates, Archive when the deployment can archive.
+- A tap fills the smallest command (`/to #a1b2c3d4 `, `/stop #a1b2c3d4`, `/sessions archive #a1b2c3d4`) into the input box and **never executes it for you**: a stray tap changes nothing, and `/to` keeps the trailing space so the cursor lands at the start of the message body.
+- Tapping and typing take the same command path, so authorization, copy, and logs exist once; the equivalent command is always visible next to the action.
+
+### Background sessions report back
+
+- Output from a non-current session starts with a separate line `> #short-id · title` and ends with a blank line carrying the action row.
+- Replies from the current session carry no signature, so "signed = not the session you are watching".
+- Questions and approvals carry the same `#short-id`; when one degrades to plain text, reply with `/to #short-id` to name the session.
+
+### Every command changes only the fact it names
+
+| Command | Changes | Leaves alone |
+|---|---|---|
+| `/to <id>` | Sends the message to the target; a not-yet-open session is resumed first | The current pointer |
+| `/sessions resume <id>` | The current pointer (and reattaches history) | Other sessions |
+| `/new` | Clears the current pointer; the next message opens a new session | The old session keeps running |
+| `/new --background` | Opens a background session and sends the prompt now | The current pointer and workspace |
+| `/stop [<id>\|all]` | Aborts generation and discards that session's queued messages | The pointer |
+| `/clear` / `/clear all` | Stops the current session (`all`: every session) and clears the pointer (`all` also empties the acquired set) | Session logs |
+| `/sessions archive` | The host's archive state | Session records |
+
+### Archiving and restoring
+
+- Archiving only changes host `workspaceRegistry` state: the session disappears from this list and the web sidebar, its log is kept, and it can be unarchived at any time.
+- There is no physical delete: the host exposes no delete API, deleting directories by storage layout is irreversible, and on Windows it collides with file locks.
+- `/sessions resume` on an archived session unarchives it first and says so in the receipt.
+- Archiving a session with a worktree makes the host remove a clean tree and keep the branch; the plugin only reports.
+- If the current session is archived its pointer is cleared, and the next message lands in a new session.
+- In a deployment without `workspaceRegistry`, archive subcommands are treated as unknown.
+
+### Generating and queueing
+
+- Queueing only happens inside one session: messages to the same session run in arrival order and different sessions never block each other.
+- While a session generates, where a new prompt lands follows the host's `ui-conversation.busyEnter`: by default it queues after the current turn (receipt `✅ Queued`, with a `/steer` action); when the host is set to steer, it is consumed at the next step (receipt `✅ Steered`).
+- `/steer` changes only one queued message's placement without aborting the turn; `/stop` aborts and discards queued messages.
+
+### Common forms
+
+| Form | Effect |
+|---|---|
+| `/sessions` | List sessions held by QQ, grouped by workspace, 10 per page |
+| `/sessions all` | List every session, including other projects |
+| `/sessions <page>` | Page through |
+| `/sessions resume <id>` | Open a session (an archived one is unarchived first); failure never creates one |
+| `/sessions rename <id> <title>` | Rename an opened session; resume a cold one first |
+| `/sessions archive` | List sessions that can be archived; `<page>` pages through |
+| `/sessions archive <id>[,<id>…]` | Archive one or more (at most 10) |
+| `/sessions archived` | List archived sessions |
+| `/sessions unarchive <id>[,<id>…]` | Unarchive |
+
+- Only a generating session carries `⚡` at the start of its row (the default list and `/sessions all` alike); idle rows have no state word, and the trailing `✅` (current) / `📌` (held) are markers that may share a row with `⚡`.
+- Sorting is by most recent human message, descending, with ties by id ascending; the current session is not pinned and is marked only by `✅`.
+- The paging footer is `Previous · Page 1/2 · Next`, omitting whichever side is missing.
+- Available only in C2C private chat and when the sender equals `access.owner`.
+
+## Requirements
+
+- Node.js ≥ 22.12 (see `engines` in `package.json`).
+- Host deepseek-harness 0.2.2-rc.1 / 0.2.2-rc.3 (see `dsh.compatibility` in `package.json`); after a major host upgrade the settings section and QR binding need re-verification.
+- A QQ bot (Bot API v2) AppID and AppSecret; only `access.owner` is served and only private chat is supported.
 
 ## Architecture
 
@@ -158,20 +242,6 @@ The menu has six fixed entries: Session status, Session list, Reset session, Com
 
 ## Sessions, workspaces, and interaction
 
-### One current session, many acquired sessions
-
-Across the bot there is exactly one current session: ordinary messages continue it, and its key is fixed at `qqterm:${appId}:chat`.
-
-Any number of background sessions may exist: agents obtained through ordinary messages, `/sessions resume`, or `/to` join the acquired set, and their output, questions, and approvals all return to QQ. Replies from the current session are sent as-is; replies from other sessions start with a separate line `> #short-id · title`, followed by the body and a blank line carrying Reply and Resume links (plus Stop while generating, and Archive when archiving is available).
-
-The acquired set is runtime-only; the session roster (the latest 20) is written to `model-prefs.json`, so the list still appears after a restart and `/sessions resume` is what actually opens a session. The current session is still restored automatically at startup.
-
-Switching away does not release: `/sessions resume` changes which session is current and the old one keeps running; the next resume continues its full history.
-
-Queueing happens only inside a single session: messages to the same session run in arrival order, while different sessions do not block each other. Sessions are not reclaimed for idleness; as long as the process lives and the agent is not unloaded, they stay available.
-
-While a session is generating, the placement of a new prompt follows the host's `ui-conversation.busyEnter`: by default it queues after the current turn (receipt `✅ Queued`, with a `/steer` action); when the host is set to steer, it is consumed at the next step (receipt `✅ Steered`). `/steer` changes only one queued message's placement and does not abort the current turn; `/stop` aborts and discards queued messages.
-
 ### Workspaces
 
 Workspaces are the host's `workspaceRegistry` concept; dsh-qqterm keeps no directory list of its own.
@@ -213,13 +283,13 @@ Workspaces are the host's `workspaceRegistry` concept; dsh-qqterm keeps no direc
 
 | Command | Description |
 |---|---|
-| `/new` | New session; `--dir` (`-d`) picks the workspace, `--worktree` (`-w`) makes the first message create a worktree first, `--background` (`-b`) opens another session in the background without touching the current one; the remaining text is sent immediately as the prompt; the old session keeps running |
+| `/new` | New session; `--dir` (`-d`) picks the workspace, `--worktree` (`-w`) makes the first message create a worktree first, `--background` (`-b`) opens another session in the background without touching the current one; the remaining text is sent immediately as the prompt; replying to a message carries its quote along and a quote alone opens the session too; the old session keeps running |
 | `/clear` (alias `/reset`) | Stop the current session; the next message opens a new one in the original workspace; `/clear all` stops every acquired session; a 5-minute confirmation card comes first |
 | `/compact` | Compact session history (summaries replace older records); the reply includes the host command's result |
 | `/goal` | Set or view the current session's long-term goal; `/goal <goal>` sets it, `edit` / `pause` / `resume` / `clear` manage it |
-| `/sessions` (alias `/session`) | Session management: by default lists sessions held by QQ (including cold sessions not yet opened after a restart), `all` shows everything, `archived` shows archived sessions |
+| `/sessions` (alias `/session`) | Session management: by default lists sessions held by QQ (including cold sessions not yet opened after a restart), `all` shows everything, `archived` shows archived sessions; addressing, quick actions, and archive semantics live in "Multi-session management" |
 | `/rename` | Rename the current session; `/sessions rename <id> <title>` renames an opened session |
-| `/to` | Send a message to a given session; submits an answer when that session is waiting for one; a not-yet-open session is resumed first |
+| `/to` | Send a message to a given session; submits an answer when that session is waiting for one; a not-yet-open session is resumed first; replying to a message places its quote ahead of the body (except while the target awaits an answer) |
 | `/ls` | List subdirectories and files in a directory; click a directory to enter, a file to send |
 | `/get` | Send a file to the current chat (images / videos / voice by type); any path |
 | `/model` | View or switch the current session's model |
@@ -256,31 +326,6 @@ Notes:
 - Arguments are validated before the session is touched: a missing directory or file is rejected and the current session is unaffected.
 - `/new` with arguments is available only to the bound user; bare `/new` is unrestricted.
 - If you do not know the path, use `/ls` to walk to the target directory, then follow the usage with `/new --dir`.
-
-### `/sessions` usage
-
-| Form | Effect |
-|---|---|
-| `/sessions` | List sessions held by QQ (including cold sessions not yet opened after a restart), grouped by workspace |
-| `/sessions <page>` | Page through (10 per page) |
-| `/sessions all` | List every session, including other projects |
-| `/sessions resume <id>` | Open a given session (an archived one is unarchived first); failure never creates a session |
-| `/sessions rename <id> <title>` | Rename an opened session; a cold session gets a "resume first" prompt |
-| `/sessions archive` | List sessions that can be archived; `<page>` pages through |
-| `/sessions archive <id>[,<id>...]` | Archive one or more (comma-separated, at most 10) |
-| `/sessions archived` | List archived sessions |
-| `/sessions unarchive <id>[,<id>...]` | Unarchive |
-
-Notes:
-
-- Session ids are always 8-character short ids and are never numbered in rows; a target may carry `#`, and a prefix must be at least 4 characters and unique.
-- 10 rows per page; the footer is `Previous · Page 1/2 · Next`, omitting whichever side is missing.
-- State (generating / idle) is shown only in the default list; other views mark only `📌`.
-- Available only in C2C private chat and when the sender equals `access.owner`.
-- Archiving changes host state only and never deletes session records; if the current session is archived, its pointer is cleared and the next message lands in a new session. Without `workspaceRegistry`, archive subcommands are treated as unknown.
-- When several active sessions produce output at once, every reply starts with `> #short-id · title` and ends with Reply and Resume links; switching away does not release, and queueing happens only inside one session.
-- Sorting is by most recent human message, descending, with ties by id ascending; the current session is not pinned and is marked only by `✅` at the end of its row.
-- Resuming across workspaces runs in the session's own directory.
 
 ### `/plugins`
 
@@ -366,10 +411,6 @@ Resolution order: acquired record → in-process live agent → persisted restor
 - **One current session + many acquired sessions** — any QQ window continues the same current session; sessions obtained through `/sessions resume` and `/to` stay alive and post their output back to QQ.
 - **Thin layer** — model, preset, reasoning effort, permission, compaction, and workspace are forwarded to the host; the plugin keeps only the channel-specific layer: inbound parsing, splitting, attachments, reply targets, binding, multi-session addressing, and copy rendering.
 - **Markdown output** — replies are sent as Markdown, with code-block and table-aware splitting.
-- **Image forwarding** — image content blocks in assistant messages are sent as QQ images at their position, and text is split into two messages around each image.
-- **Deliverables** — files declared via `present` are sent to the user at the end of the turn (enabled by default, any path).
-- **Questions** — `ask_user_question` is supported; single-choice renders inline buttons (picking one greys out the rest), multi-select replies with numbers, questions advance one at a time, with a per-question timeout.
-- **Approvals** — `approval/request` is supported; sensitive actions ask the user to confirm with Allow / Deny buttons.
 - **Single-user private chat** — only `access.owner` is served; group messages are always rejected.
 
 ## Local development
@@ -405,6 +446,7 @@ Tests live in the top-level `tests/` directory, mirror `src/` by module, and nev
 - [Inbound / outbound paths](./docs/inbound-outbound-paths.md)
 - [Multi-session design](./docs/multi-conversation-design.md)
 - [Copy style](./docs/copy-style.md)
+- [Changelog and known limitations](./CHANGELOG_EN.md)
 
 ## License
 
