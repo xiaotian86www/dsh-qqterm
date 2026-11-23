@@ -240,7 +240,7 @@ describe('checkUpdates', () => {
   }
 
   const bundle = (name: string, over: Record<string, unknown> = {}) => ({
-    name, official: false, installed: true, enabled: true, updatable: true, removable: true, ...over,
+    name, official: false, installed: true, enabled: true, update: 'registry', removable: true, ...over,
   });
   const listed = (installed: string, version?: string) => ({
     status: 'listed',
@@ -248,9 +248,14 @@ describe('checkUpdates', () => {
     versions: version === undefined ? [] : [{ version, tags: ['latest'], prerelease: false, bundle: true }],
   });
 
-  it('只查可自动更新的包，把新版本写进缓存', async () => {
+  it('只查 registry 安装的包，把新版本写进缓存', async () => {
     const { installer, listVersions } = setup(
-      [bundle('dsh-a'), bundle('dsh-local', { updatable: false }), bundle('dsh-official', { official: true })],
+      [
+        bundle('dsh-a'),
+        bundle('dsh-local', { update: undefined }),
+        bundle('dsh-git', { update: 'git' }),
+        bundle('dsh-official', { official: true }),
+      ],
       async (name) => (name === 'dsh-a' ? listed('1.0.0', '1.1.0') : listed('1.0.0')),
     );
 

@@ -16,7 +16,7 @@ const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi
 const config = ConfigSchema({ appId: 'app', appSecret: 'secret' } as QQTermConfig);
 
 function bundle(over: Partial<BundleInfoLike> & { name: string }): BundleInfoLike {
-  return { official: false, installed: true, enabled: true, updatable: true, removable: true, ...over };
+  return { official: false, installed: true, enabled: true, update: 'registry', removable: true, ...over };
 }
 
 function makeCtx(raw: string, bot?: unknown): SlashCommandHandlerContext {
@@ -209,7 +209,7 @@ describe('/plugins install', () => {
 
 describe('/plugins update', () => {
   it('本地安装的包不发请求', async () => {
-    const h = harness({ info: bundle({ name: 'dsh-x', updatable: false }) });
+    const h = harness({ info: bundle({ name: 'dsh-x', update: undefined }) });
     expect(await h.command.handler(makeCtx('update dsh-x', h.bot))).toBe('⚠️ 本地安装，不能自动更新');
     expect(h.run).not.toHaveBeenCalled();
   });

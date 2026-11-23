@@ -10,7 +10,7 @@ function bundle(over: Partial<BundleInfoLike> & { name: string }): BundleInfoLik
     official: false,
     installed: true,
     enabled: true,
-    updatable: true,
+    update: 'registry',
     removable: true,
     ...over,
   };
@@ -40,19 +40,21 @@ describe('renderPluginList', () => {
 
   it('只有查到新版本的行才给更新链接，本地安装的不给', () => {
     const text = renderPluginList([
-      bundle({ name: 'dsh-reg', version: '2.0.0', updatable: true }),
-      bundle({ name: 'dsh-local', version: '1.0.0', updatable: false, enabled: false }),
-    ], 1, { 'dsh-reg': '2.1.0', 'dsh-local': '2.0.0' });
+      bundle({ name: 'dsh-reg', version: '2.0.0' }),
+      bundle({ name: 'dsh-local', version: '1.0.0', update: undefined, enabled: false }),
+      bundle({ name: 'dsh-git', version: '3.0.0', update: 'git' }),
+    ], 1, { 'dsh-reg': '2.1.0', 'dsh-local': '2.0.0', 'dsh-git': '3.1.0' });
 
     expect(text).toContain(
       '**dsh-reg** · `2.0.0` → `2.1.0` · <qqbot-cmd-input text="/plugins update dsh-reg" show="更新"/>',
     );
     expect(text).toContain('**dsh-local** · `1.0.0` · 已停用');
     expect(text).not.toContain('/plugins update dsh-local');
+    expect(text).not.toContain('/plugins update dsh-git');
   });
 
   it('没有查到新版本时不给更新链接', () => {
-    const text = renderPluginList([bundle({ name: 'dsh-reg', version: '2.0.0', updatable: true })], 1);
+    const text = renderPluginList([bundle({ name: 'dsh-reg', version: '2.0.0' })], 1);
     expect(text).toContain('**dsh-reg** · `2.0.0`');
     expect(text).not.toContain('/plugins update dsh-reg');
   });

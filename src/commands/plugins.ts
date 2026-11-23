@@ -3,7 +3,7 @@
  *
  * 安装 / 更新只负责「读参数、回执、把活交出去」：真正的安装从当前 fiber 里踢出去做，
  * 因为它会 reconcile profile，可能连这个命令的 fiber 一起换掉。结果由 installer 落盘后
- * 补发，见 src/plugins/index.ts。`reload` 是原来的 /bot-reload，并入同一条命令。
+ * 补发，见 src/plugins/index.ts。
  */
 import type { QQBot, SlashCommandHandlerContext } from '@tencent-connect/qqbot-nodejs';
 import type { SlashCommand, CommandDeps } from './types.ts';
@@ -82,7 +82,7 @@ export function pluginsCommand({ config, logger, installer, reloader }: CommandD
             const info = await installer.find(target);
             if (info === undefined || !info.installed) return `⚠️ 没有这个插件: ${target}`;
             // 本地包（tgz / 目录）宿主不给 update，请求发出去只会多一条 already-installed
-            if (!info.updatable) return '⚠️ 本地安装，不能自动更新';
+            if (info.update !== 'registry') return '⚠️ 本地安装，不能自动更新';
           }
 
           // 上一轮的结果可能还没送到：run() 会改写成 running，那一轮就再也读不到了。
