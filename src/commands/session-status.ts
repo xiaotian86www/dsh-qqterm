@@ -16,6 +16,7 @@ import { commandLink } from '../shared/inline.ts';
 import { sessionTargetLabel, sessionTitleOf } from '../transport/session-source.ts';
 import { effortLabel } from '../model/effort-label.ts';
 import { presetLabel } from './permission.ts';
+import { RUNNING_MARK } from './sessions.ts';
 import { errorMessage } from '../shared/utils.ts';
 
 /** 上下文占用：占用 / 窗口 / 剩余（窗口没上报时只给占用量） */
@@ -47,9 +48,12 @@ function formatDuration(ms: number): string {
 /**
  * 生成状态：先给步数与累计时长（看出跑了多久、是否在动），最后说现在在做什么；
  * 「生成中」与「正在 read」是同一件事，不重复写。
+ *
+ * `⚡` 与 /sessions 行首标记是同一个符号，值的第一个 token 就是它，后面才是现场：
+ * 同一个状态不因入口不同长出两种长相。
  */
 function renderState(progress: SessionTurnProgress | undefined): string {
-  if (!progress) return '生成中';
+  if (!progress) return `${RUNNING_MARK} 生成中`;
   const parts: string[] = [];
   if (progress.step !== undefined) parts.push(`第 ${progress.step} 步`);
   // elapsedMs 是本轮从 turn/start 起的累计时间；标「共」避免被读成当前这一步的耗时
@@ -57,6 +61,7 @@ function renderState(progress: SessionTurnProgress | undefined): string {
   parts.push(progress.waiting === 'tool'
     ? (progress.toolName ? `正在 \`${progress.toolName}\`` : '正在执行工具')
     : '等待模型响应');
+  parts[0] = `${RUNNING_MARK} ${parts[0]}`;
   return parts.join(' · ');
 }
 
@@ -84,7 +89,7 @@ async function renderStatus(
     const title = record === undefined ? undefined : sessionTitleOf(record);
     lines.push(`**会话**: ${sessionTargetLabel(status.sessionId, title)}`);
 
-    // 状态：生成中 / 空闲以及生成中的现场都收在这一行
+    // 状态：生成中（⚡ 开头）与空闲都收在这一行
     const progress = running ? manager.getTurnProgress(scope, peerId) : undefined;
     lines.push(`**状态**: ${running ? renderState(progress) : '空闲'}`);
     if (running && progress) {

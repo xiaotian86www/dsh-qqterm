@@ -2,9 +2,9 @@
  * 会话管理命令：/sessions（别名 /session）
  *
  * 子命令：
- *   /sessions                     列出 QQ 已持有的会话（跨工作区，带状态 / 当前项）
+ *   /sessions                     列出 QQ 已持有的会话（跨工作区，生成中行首 ⚡，当前项 ✅）
  *   /sessions <页码>              持有列表的下一页（超过一页时才用）
- *   /sessions all                 按工作区分组列出全部会话（只标 📌，不标当前）
+ *   /sessions all                 按工作区分组列出全部会话（标 📌 与行首 ⚡，不标当前）
  *   /sessions archived [页码]     列出已归档的会话（每条都可点击取消归档）
  *   /sessions resume <id>         把当前聊天切到指定会话，接上历史继续
  *   /sessions archive [页码]       列出可归档的会话，每条都可点击归档
@@ -264,21 +264,23 @@ function workspaceHeader(
 }
 
 /**
- * 持有列表里的会话状态。
+ * 生成中的行首标记。
  *
- * 其它视图不展示状态，只标 `📌`；状态词只出现在 `/sessions` 默认视图。
- * 重启后还没打开的会话没有生成现场，按「空闲」列出：列表里只有「生成中 /
- * 空闲」两档，不存在「待恢复」这一档。
+ * 列表只展示「生成中」这一档：空闲是默认态，不占位置、不写状态词；重启后
+ * 还没打开的会话没有生成现场，同样不加标记，不存在「待恢复」这一档。
  */
-function statusOf(entry: WorkspaceSession): string {
-  if (entry.subagent) return entry.live ? '生成中' : '空闲';
-  return entry.running ? '生成中' : '空闲';
+export const RUNNING_MARK = '⚡';
+
+/**
+ * 会话是否正在生成：子会话看 `live`（还没被丢弃就算活着），其余看 `running`。
+ * 冷行两者都为 false。判定只在这一个函数里，渲染处不各自比较字段。
+ */
+function isGenerating(entry: WorkspaceSession): boolean {
+  return entry.subagent ? entry.live : entry.running;
 }
 
-/** 一行会话的展示文本：`#9d2c4410 · 标题 · 生成中 · 3d 前 ✅` */
+/** 一行会话的展示文本：`⚡ #9d2c4410 · 标题 · 3d 前 ✅`（空闲行没有 ⚡） */
 interface RowOptions {
-  /** 展示生成状态（只在持有列表里开） */
-  showStatus?: boolean;
   /** 给持有会话加 `📌` 标记（工作区 / 全部 / 归档候选） */
   showHeld?: boolean;
   /** 展示当前项 `✅`（只在持有列表里开） */
@@ -291,14 +293,15 @@ function renderRow(entry: WorkspaceSession, options: RowOptions = {}): string {
   body.push(shortTitle(entry));
   // 子会话紧跟父行，纯文本行没有缩进与按钮，用这个词说明自己不是独立会话
   if (entry.subagent) body.push('子会话');
-  if (options.showStatus) body.push(statusOf(entry));
   const time = formatRelativeTime(entry.updatedAt);
   if (time !== '—') body.push(time);
   // 持有标记固定放行尾
   if (options.showHeld && entry.held) body.push('📌');
   // 当前项标记放行尾，与 /model、/preset 的按钮标签一致
   const tail = options.showCurrent && entry.current ? ' ✅' : '';
-  return `${body.join(' · ')}${tail}`;
+  // 状态图标放行首、标记放行尾：生成中的行以 ⚡ 开头，其余行仍以 #id 开头
+  const mark = isGenerating(entry) ? `${RUNNING_MARK} ` : '';
+  return `${mark}${body.join(' · ')}${tail}`;
 }
 
 /**
@@ -746,7 +749,7 @@ function groupHeldOrder(entries: readonly WorkspaceSession[]): WorkspaceSession[
  * 渲染持有列表（`/sessions`，可分页）。
  *
  * 这里才是「QQ 正在使用哪些会话」：按工作区分组（组标题与 `/sessions all`
- * 同一套写法），组内展示生成状态与当前项；目标一律用 8 位短 id。
+ * 同一套写法），组内用行首 ⚡ 标生成中、行尾 ✅ 标当前项；目标一律用 8 位短 id。
  *
  * @param entries 已持有会话（已按工作区分组，组内按最近人类消息时间倒序）
  * @param currentId 当前指针；不在持有列表里时单独补一行
@@ -778,11 +781,13 @@ function renderHeldList(
     : undefined;
   const fields: string[] = [];
   // 当前项不在这一页时单独补一行：翻到第 2 页也能看到当前是哪个。
-  // 指针指向的会话不在名单里（例如刚 /new 过或名册被清）就只给 id，不编状态。
+  // 指针指向的会话不在名单里（例如刚 /new 过或名册被清）就只给 id，不编状态；
+  // 生成中的写法与会话行一致，⚡ 紧跟在字段名后面。
   if (currentLineId !== undefined) {
-    fields.push(currentEntry === undefined
-      ? `**当前**: ${displayId(currentLineId)}`
-      : `**当前**: ${displayId(currentLineId)} · ${statusOf(currentEntry)}`);
+    const mark = currentEntry !== undefined && isGenerating(currentEntry)
+      ? `${RUNNING_MARK} `
+      : '';
+    fields.push(`**当前**: ${mark}${displayId(currentLineId)}`);
   }
 
   const lines: string[] = [
@@ -803,13 +808,10 @@ function renderHeldList(
     if (groupIndex > 0) lines.push('');
     lines.push(...workspaceHeader(group.title, group.path, group.missing, true), '');
     for (const row of group.rows) {
-      lines.push(renderLine(row, renderRow(row, {
-        showStatus: true,
-        showCurrent: true,
-      }), quickLinks(row, archivable)));
+      lines.push(renderLine(row, renderRow(row, { showCurrent: true }), quickLinks(row, archivable)));
       // 子会话不是独立目标（/sessions resume 解析不到），只作为父行后的说明
       for (const child of row.children ?? []) {
-        lines.push(renderRow(child, { showStatus: true }));
+        lines.push(renderRow(child));
       }
     }
   });
@@ -881,8 +883,8 @@ function groupRows(
 /**
  * 渲染全部会话的分组列表（`/sessions all`，按会话分页）。
  *
- * 每行只给 8 位短 id，不编号；持有会话加 `📌` 标记，但不标当前项
- * （当前只在 `/sessions` 里标）。
+ * 每行只给 8 位短 id，不编号；持有会话加 `📌` 标记，生成中的行首标 ⚡，
+ * 但不标当前项（当前只在 `/sessions` 里标）。
  *
  * 一页 10 条会话，跨工作区连续；翻页后仍会重复当前页首条所属工作区的
  * 标题。会话全部归档的工作区放在最后一页，避免每页重复。

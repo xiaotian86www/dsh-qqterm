@@ -172,7 +172,7 @@ describe('/status（有会话）', () => {
 
   it('生成中与空闲都收在状态一行里', async () => {
     const running = await run(makeManager({ agentStatus: 'running' }));
-    expect(running).toContain('**状态**: 生成中');
+    expect(running).toContain('**状态**: ⚡ 生成中');
     expect(running).not.toContain('**会话**: `#9d2c4410` · 生成中');
     const idle = await run(makeManager({ agentStatus: 'idle' }));
     expect(idle).toContain('**状态**: 空闲');
@@ -226,7 +226,7 @@ describe('/status（有会话）', () => {
         toolName: 'read',
       },
     }));
-    expect(text).toContain('**状态**: 第 3 步 · 共 2m10s · 正在 `read`');
+    expect(text).toContain('**状态**: ⚡ 第 3 步 · 共 2m10s · 正在 `read`');
     expect(text).not.toContain('**本轮**');
     expect(text).not.toContain('**进度**');
   });
@@ -241,7 +241,7 @@ describe('/status（有会话）', () => {
         retry: { attempt: 2, delayMs: 10_000, since: Date.now() },
       },
     }));
-    expect(text).toContain('**状态**: 共 45s · 等待模型响应');
+    expect(text).toContain('**状态**: ⚡ 共 45s · 等待模型响应');
     expect(text).toContain('**重试**: 第 2 次 · ');
     expect(text).toContain('后重发');
   });
@@ -255,9 +255,9 @@ describe('/status（有会话）', () => {
     expect(text).not.toContain('等待模型响应');
   });
 
-  it('生成中但没有进度事件时只写「生成中」', async () => {
+  it('生成中但没有进度事件时只写「⚡ 生成中」', async () => {
     const text = await run(makeManager({ agentStatus: 'running' }));
-    expect(text).toContain('**状态**: 生成中\n');
+    expect(text).toContain('**状态**: ⚡ 生成中\n');
     expect(text).not.toContain('**本轮**');
     expect(text).not.toContain('**进度**');
   });

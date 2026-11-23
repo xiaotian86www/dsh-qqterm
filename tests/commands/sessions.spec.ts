@@ -196,11 +196,13 @@ describe('/sessions 持有视图', () => {
     expect(text).toContain('### 🗂 工作中会话（1 个工作区 · 2 个会话）');
     expect(text).toContain('**repo** · <qqbot-cmd-input text="/new --dir /repo" show="/repo"/>');
     expect(text).not.toContain('未分组');
-    expect(text).toContain('#cccc1111 · 当前会话 · 生成中');
-    expect(text).toContain('#dddd2222 · 旧会话 · 空闲');
+    // 状态图标放行首：只有生成中的行以 ⚡ 开头
+    expect(text).toContain('show="⚡ #cccc1111 · 当前会话 · ');
+    expect(text).toContain('show="#dddd2222 · 旧会话 · ');
+    expect(text).not.toContain('⚡ #dddd2222');
+    expect(text).not.toContain('空闲');
     expect(text).not.toMatch(/^\d+\. /m);
-    expect(text).toMatch(/<qqbot-cmd-input text="\/sessions resume #cccc1111" show="#cccc1111 · 当前会话 · 生成中 · [^"]* ✅"\/>/);
-    expect(text).toContain('<qqbot-cmd-input text="/sessions resume #dddd2222" show="#dddd2222 · 旧会话');
+    expect(text).toMatch(/<qqbot-cmd-input text="\/sessions resume #cccc1111" show="⚡ #cccc1111 · 当前会话 · [^"]* ✅"\/>/);
     // 默认视图只列持有集合，不把工作区里的非持有会话混进来
     expect(text).not.toContain('修复登录 bug');
   });
@@ -284,7 +286,7 @@ describe('/sessions 持有视图', () => {
     const text = await run(manager, '');
 
     expect(text).toContain('### 🗂 工作中会话（1 个工作区 · 1 个会话 · 1 个子会话）');
-    expect(text).toContain('#ffff9999 · 子代理任务 · 子会话 · 生成中');
+    expect(text).toContain('⚡ #ffff9999 · 子代理任务 · 子会话');
     // 子会话不单独成目标：解析不到，给 resume 链接只会报错
     expect(text).not.toContain('/sessions resume #ffff9999');
     expect(text).toContain('<qqbot-cmd-input text="/sessions resume #cccc1111"');
@@ -309,7 +311,7 @@ describe('/sessions 持有视图', () => {
     expect(text).not.toContain(' ✅');
   });
 
-  it('重启后还没打开的会话也按空闲列出，不出现「待恢复」', async () => {
+  it('重启后还没打开的会话不加状态标记，不出现「待恢复」', async () => {
     const manager = makeManager({
       listHeldSessions: vi.fn(async () => [
         entry({ id: 'session-cold1111', title: '旧会话', held: false, live: false, running: false }),
@@ -317,7 +319,8 @@ describe('/sessions 持有视图', () => {
     });
     const text = await run(manager, '');
 
-    expect(text).toContain('#cold1111 · 旧会话 · 空闲');
+    expect(text).toContain('#cold1111 · 旧会话 · ');
+    expect(text).not.toContain('⚡');
     expect(text).not.toContain('待恢复');
   });
 
@@ -345,8 +348,9 @@ describe('/sessions 持有视图', () => {
     // 组标题与 /sessions all 同一写法，组之间空行；行内不再重复工作区后缀
     expect(text).toContain('**repo** · <qqbot-cmd-input text="/new --dir /repo" show="/repo"/>');
     expect(text).toContain('**docs** · <qqbot-cmd-input text="/new --dir /docs" show="/docs"/>');
-    expect(text).toContain('show="#aaaa1111 · 本区会话 · 空闲');
-    expect(text).toContain('show="#bbbb2222 · 别的项目 · 空闲');
+    expect(text).toContain('show="#aaaa1111 · 本区会话 · ');
+    expect(text).toContain('show="#bbbb2222 · 别的项目 · ');
+    expect(text).not.toContain('⚡');
     expect(text.indexOf('**repo**')).toBeLessThan(text.indexOf('**docs**'));
   });
 
@@ -609,6 +613,7 @@ describe('/sessions all', () => {
     expect(text).not.toContain(' ✅');
     expect(text).not.toContain('生成中');
     expect(text).not.toContain('空闲');
+    expect(text).not.toContain('⚡');
   });
 
   it('全部会话同样在行尾给回复、停止与归档入口', async () => {
@@ -628,6 +633,8 @@ describe('/sessions all', () => {
     const text = await run(manager, 'all');
     const lineOf = (id: string): string => text.split('\n').find((line) => line.includes(id)) ?? '';
 
+    // 行首 ⚡ 与默认视图同一形态：/sessions all 也标生成中
+    expect(lineOf('#held')).toContain('show="⚡ #held · ');
     expect(lineOf('#held')).toContain(
       '<qqbot-cmd-input text="/to #held " show="回复"/>'
         + ' · <qqbot-cmd-input text="/stop #held" show="停止"/>'
@@ -637,6 +644,7 @@ describe('/sessions all', () => {
     expect(lineOf('#cold')).toContain('text="/to #cold " show="回复"');
     expect(lineOf('#cold')).toContain('text="/sessions archive #cold" show="归档"');
     expect(lineOf('#cold')).not.toContain('show="停止"');
+    expect(lineOf('#cold')).not.toContain('⚡');
   });
 
   it('按工作区分组列出：只给短 id，不编号', async () => {
@@ -1393,7 +1401,7 @@ describe('没有 workspaceRegistry 的部署', () => {
 
     expect(text).toContain('### 🗂 工作中会话（1 个工作区 · 1 个会话）');
     expect(text).toContain('show="/repo"');
-    expect(text).toContain('#aaaa0001 · 当前的 · 生成中');
+    expect(text).toContain('⚡ #aaaa0001 · 当前的');
     expect(text).not.toContain('**repo**');
     expect(text).not.toContain('show="归档"');
     expect(text).toContain('show="全部会话"');
