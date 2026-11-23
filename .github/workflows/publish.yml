@@ -1,0 +1,82 @@
+name: Publish
+
+# 打包发布走 npmjs 的可信发布（OIDC）：不需要在仓库里放 NPM_TOKEN。
+# 前提是在 npmjs 的包设置里登记过本仓库 + 本工作流文件名，并把「允许直接发布」勾上；
+# 没登记时 npm 会退回匿名请求，报 404 / 401。
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: '只上传到暂存区（npm stage publish），随后在 npmjs 网页批准'
+        type: boolean
+        default: false
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  # OIDC 取换 npm 令牌的唯一前提，删掉这一行发布必失败。
+  id-token: write
+
+jobs:
+  publish:
+    name: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.4.2
+
+      # 不设 registry-url：它会在 .npmrc 写死 _authToken=${NODE_AUTH_TOKEN}，
+      # 占位符会被当成真令牌发出去，OIDC 就走不到。registry 在 publish 时显式传。
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          package-manager-cache: false
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: 校验 tag 与 package.json 版本一致
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          version="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$version" ]; then
+            echo "::error::tag v$tag 与 package.json 的 $version 不一致，拒绝发布"
+            exit 1
+          fi
+
+      - name: 构建
+        run: pnpm build
+
+      - name: 测试
+        run: pnpm test
+
+      - name: 发布
+        run: |
+          set -euo pipefail
+          if [ "${{ inputs.stage }}" = "true" ]; then
+            echo "只上传暂存区，需在 npmjs 网页批准"
+            npm stage publish --access public --registry=https://registry.npmjs.org/
+          else
+            npm publish --access public --registry=https://registry.npmjs.org/
+          fi
+
+      - name: 写入任务摘要
+        if: always()
+        run: |
+          name="$(node -p "require('./package.json').name")"
+          version="$(node -p "require('./package.json').version")"
+          echo "### $name@$version" >> "$GITHUB_STEP_SUMMARY"
+          echo "模式：${STAGE_MODE}" >> "$GITHUB_STEP_SUMMARY"
+          echo "https://www.npmjs.com/package/$name/v/$version" >> "$GITHUB_STEP_SUMMARY"
+        env:
+          STAGE_MODE: ${{ inputs.stage == true && 'stage-only' || 'direct' }}

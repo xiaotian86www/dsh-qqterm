@@ -47,11 +47,11 @@
   "author": "xiaotian86www <xiaotian86www@163.com>",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/xiaotian86www/dsh-qqbot.git"
+    "url": "git+https://github.com/xiaotian86www/dsh-qqterm.git"
   },
-  "homepage": "https://github.com/xiaotian86www/dsh-qqbot#readme",
+  "homepage": "https://github.com/xiaotian86www/dsh-qqterm#readme",
   "bugs": {
-    "url": "https://github.com/xiaotian86www/dsh-qqbot/issues"
+    "url": "https://github.com/xiaotian86www/dsh-qqterm/issues"
   },
   "publishConfig": {
     "access": "public",
