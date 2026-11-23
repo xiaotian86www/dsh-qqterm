@@ -70,11 +70,16 @@ export function pluginsCommand({ config, logger, installer, reloader }: CommandD
           if (installer === undefined) return '⚠️ 当前 profile 没有插件管理能力';
           if (words[1] !== undefined) return `⚠️ 未知参数: ${words[1]} · 用法: /help plugins`;
           // 检查只读 registry、写更新缓存，不碰 profile：可以就地等结果，不必脱离 fiber
+          let text: string;
           try {
-            return renderPluginCheck(await installer.checkUpdates());
+            text = renderPluginCheck(await installer.checkUpdates());
           } catch (err) {
             return `❌ 检查插件更新失败: ${errorText(err)}`;
           }
+          // SDK 只把 handler 的返回值按纯文本发；命令链接必须走 markdown 发送路径，
+          // 否则会退化成裸标签（与列表视图同一条路）
+          await sendMarkdownChunked(cmdCtx, text, config.textChunkLimit);
+          return { kind: 'noop' as const };
         }
 
         if (sub === 'install' || sub === 'update') {
