@@ -6,6 +6,12 @@ User-visible changes to QQ SuperTerm (`dsh-qqterm`). The format follows [Keep a 
 
 ## [Unreleased]
 
+## [0.0.2] - 2026-11-24
+
+### Fixed
+
+- Screenshots, further reading, and the repository entry on the package page work again: 0.0.1 was published from a commit before the repository address was fixed, so `repository` still pointed at the non-existent `dsh-qqbot` and npm rewrote the README's relative paths against it, leaving broken images, 404 doc links, and a dead repository entry; from this version on the metadata points at `xiaotian86www/dsh-qqterm`.
+
 ## [0.0.1] - 2026-11-23
 
 The first release: DeepSeek Harness inside a QQ private chat.
