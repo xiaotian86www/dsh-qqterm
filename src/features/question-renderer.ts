@@ -83,23 +83,23 @@ export function formatQuestion(
     lines.push(`${i + 1}. ${o.label}${o.description ? ` · ${o.description}` : ''}`);
   });
 
-  // 底部引导：用引用块（>）与正文区分。
-  // 非当前会话保留自己的引导行：卡片里已经有选项按钮，行内链接只补「回答 / 恢复」
-  // 这种兜底入口，不再套消息那套尾部链接行（那是给正文回复用的）。
+  // 底部引导：需要说明时用引用块（>）与正文区分；可点的「回答 / 恢复」入口
+  // 另起一行平铺，不放进引用。卡片里已经有选项按钮，行内链接只补兜底入口，
+  // 不再套消息那套尾部链接行（那是给正文回复用的）。
   if (nonCurrent && context.sessionId !== undefined) {
     // 多选没有选项按钮，先说明编号格式，再给「回答 / 恢复」入口
     if (multi) {
       lines.push('', '> 💡 多个编号用逗号分隔（如 1,3）');
       lines.push(
         '',
-        `> ${sessionReplyLink(context.sessionId, '回答')} · ${sessionResumeLink(context.sessionId)}`,
+        `${sessionReplyLink(context.sessionId, '回答')} · ${sessionResumeLink(context.sessionId)}`,
       );
     } else if (withButtons) {
-      lines.push('', `> 👇 点击下方按钮选择 · 或者${sessionReplyLink(context.sessionId, '直接回复')}`);
+      lines.push('', `👇 点击下方按钮选择 · 或者${sessionReplyLink(context.sessionId, '直接回复')}`);
     } else {
       lines.push(
         '',
-        `> ${sessionReplyLink(context.sessionId, '回答')} · ${sessionResumeLink(context.sessionId)}`,
+        `${sessionReplyLink(context.sessionId, '回答')} · ${sessionResumeLink(context.sessionId)}`,
       );
     }
   } else if (opts.length > 0) {

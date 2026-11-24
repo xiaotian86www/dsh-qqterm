@@ -124,12 +124,15 @@ describe('formatQuestion', () => {
     expect(text).not.toContain('[#');
     expect(text).toContain('show="回答"');
     expect(text).toContain('show="恢复"');
+    expect(text).toContain('\n\n<qqbot-cmd-input');
+    expect(text).not.toContain('> <qqbot-cmd-input');
   });
 
   it('非当前会话带按钮时引导点按钮，同时留「直接回复」链接', () => {
     const text = formatQuestion(q2(), true, { sessionId: 'session-04de1556', isCurrent: false, title: '修登录' });
     expect(text.startsWith('> `#04de1556` · 修登录\n\n**❓ 需要你的回答**\n\n')).toBe(true);
-    expect(text).toContain('点击下方按钮选择');
+    expect(text).toContain('👇 点击下方按钮选择');
+    expect(text).not.toContain('> 👇 点击下方按钮选择');
     expect(text).toContain('show="直接回复"');
   });
 
@@ -138,6 +141,7 @@ describe('formatQuestion', () => {
     const text = formatQuestion(q, true, { sessionId: 'session-04de1556', isCurrent: false });
     expect(text).toContain('> 💡 多个编号用逗号分隔（如 1,3）');
     expect(text).toContain('show="回答"');
+    expect(text).not.toContain('> <qqbot-cmd-input');
   });
 
   it('当前会话不标来源行', () => {
