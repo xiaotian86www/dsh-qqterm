@@ -240,6 +240,17 @@ Sync is a whole-table overwrite with the remark fixed to `qqterm:commands`; unch
 
 The menu has six fixed entries: Session status, Session list, Reset session, Compact session, Permission preset, Reasoning effort. Permission and reasoning open submenus; the rest point straight at their command. The menu is a bot-wide whole-table overwrite, not per user.
 
+### Local commands and directories
+
+`/run`, `/ls`, and `/get` are the channel's own extensions: they operate this computer remotely from QQ and never go through the host's shell or sandbox. All three share one base — **the directory the dsh process was started in** (`process.cwd()`), independent of the session workspace and the run directory, and unaffected by a runtime `cd`.
+
+| Setting | Type | Default | Description |
+|---|---|---|---|
+| `exec.shell` | string | The actual `cmd.exe` path on Windows; `/bin/sh` otherwise | Shell used to run `/run`; the platform default is written into the config (Windows prefers `ComSpec`); clearing it means empty (an error before execution), never re-defaulted at runtime |
+| `exec.shellArgs` | string[] | Windows `["/d","/s","/c"]`; otherwise `["-c"]` | Argument template for the shell, `{command}` replaced in place; the platform default is written into the config and used literally at runtime (empty = pass no arguments), switching shells never rewrites it |
+
+Absolute paths in `/get` and `/ls` ignore the base; a `/run` command is typed by the user, so its consequences are the user's, and it is not wrapped in the host sandbox.
+
 ## Sessions, workspaces, and interaction
 
 ### Workspaces
@@ -252,7 +263,7 @@ Workspaces are the host's `workspaceRegistry` concept; dsh-qqterm keeps no direc
 - Matching order: workspace title → directory name (case-insensitive, unique prefix) → absolute path. Without `workspaceRegistry` only absolute paths are accepted.
 - The title defaults to the last path segment and can be changed in the web sidebar; a manually edited title is never overwritten automatically.
 - Worktrees: `/new --worktree` makes the next message create a tree from the current directory's HEAD first, then opens the session in that tree, on branch `dsh-<short session id>`. Uncommitted changes do not travel into the tree. If HEAD cannot be read or tree creation fails, no session is created that round; the reply gives the reason and next step, the intent is kept, and resending retries. A directory that is not a Git repository opens the session in place with a notice; a read-only sandbox is refused at `/new` on the spot. When a session is archived, the host removes a clean worktree and keeps the branch, and keeps the tree if there are uncommitted changes.
-- Run directory and workspace are two different things: a runtime `cd` only changes the run directory (the base for relative paths in `/get` and `/ls`); workspace grouping, the workspace line in `/status`, and the landing point of the next `/new` still use the session's `header.cwd` at creation. For a worktree session, the workspace is the main repository root and the tree is only the run directory.
+- Run directory and workspace are two different things: a runtime `cd` only changes the run directory, while `/get` and `/ls` keep using the directory the dsh process was started in; workspace grouping, the workspace line in `/status`, and the landing point of the next `/new` still use the session's `header.cwd` at creation. For a worktree session, the workspace is the main repository root and the tree is only the run directory.
 
 ### Models, presets, and reasoning effort
 
@@ -290,8 +301,9 @@ Workspaces are the host's `workspaceRegistry` concept; dsh-qqterm keeps no direc
 | `/sessions` (alias `/session`) | Session management: by default lists sessions held by QQ (including cold sessions not yet opened after a restart), `all` shows everything, `archived` shows archived sessions; addressing, quick actions, and archive semantics live in "Multi-session management" |
 | `/rename` | Rename the current session; `/sessions rename <id> <title>` renames an opened session |
 | `/to` | Send a message to a given session; submits an answer when that session is waiting for one; a not-yet-open session is resumed first; replying to a message places its quote ahead of the body (except while the target awaits an answer) |
-| `/ls` | List subdirectories and files in a directory; click a directory to enter, a file to send |
-| `/get` | Send a file to the current chat (images / videos / voice by type); any path |
+| `/ls` | List subdirectories and files in the current directory (where the dsh process was started); click a directory to enter, a file to send; paths may be absolute or start with `~` |
+| `/get` | Send a file to the current chat (images / videos / voice by type); any path, relative ones resolved against the same base |
+| `/run` | Run a local command in the current directory (shell is the OS one, configurable via `exec`); `--timeout <seconds>` changes the timeout (120 s by default, 600 s max) |
 | `/model` | View or switch the current session's model |
 | `/reasoning` (alias `/think`) | View or switch the current session's reasoning effort |
 | `/preset` | View or switch the current agent preset (only affects new sessions) |

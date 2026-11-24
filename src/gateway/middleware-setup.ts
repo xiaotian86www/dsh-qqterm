@@ -36,17 +36,21 @@ import {
 import type { ReplyStore } from '../transport/reply-store.ts';
 import { QUOTE_CONTENT_LIMIT } from '../transport/prompt-body.ts';
 
-export function setupMiddlewares(
-  bot: QQBot,
-  config: QQTermConfig,
-  manager: SessionManager,
-  logger: Logger,
-  replyStore: ReplyStore,
-  reloader?: Reloader,
-  installer?: PluginInstaller,
+/** setupMiddlewares 的依赖（位置参数一多就会数错，收成一个对象） */
+export interface MiddlewareSetupOptions {
+  bot: QQBot;
+  config: QQTermConfig;
+  manager: SessionManager;
+  logger: Logger;
+  replyStore: ReplyStore;
+  reloader?: Reloader;
+  installer?: PluginInstaller;
   /** 发兜底文本用的函数（bootstrap 注入 sender.text） */
-  sendText?: UnknownCommandSend,
-): SlashCommand[] {
+  sendText?: UnknownCommandSend;
+}
+
+export function setupMiddlewares(options: MiddlewareSetupOptions): SlashCommand[] {
+  const { bot, config, manager, logger, replyStore, reloader, installer, sendText } = options;
   // 1. 错误兜底（最外层洋葱皮）
   bot.use(errorHandler());
 

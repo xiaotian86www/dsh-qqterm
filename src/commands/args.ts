@@ -11,6 +11,9 @@
  *   参数，剩下的词是位置参数；认不出的参数只回 error，不猜。
  * - 整行就是一个值的命令（路径、标题、提示词）走 parseRest：两端成对的引号
  *   去掉，其余原样，写不写引号都对。
+ *
+ * 载荷是一条命令、必须原样交给 shell 的命令（/run）给 parseArgs 开 `rest`：开关
+ * 只认命令前面那段，第一个位置参数起到行尾原样进 `rest`。
  */
 
 /** 引号没有闭合 */
@@ -23,6 +26,8 @@ export const QUOTE_OPEN_TEXT = '⚠️ 引号没有闭合';
 export interface RawToken {
   value: string;
   quoted: boolean;
+  /** 这个词在原文里的起点；`rest` 模式靠它切出载荷原文（合写拆出的词沿用原词起点） */
+  offset?: number;
 }
 
 /**
@@ -35,32 +40,38 @@ export function tokenize(raw: string): { tokens: RawToken[]; error?: TokenizeErr
   let quote: string | undefined;
   let quoted = false;
   let started = false;
-  for (const ch of raw) {
+  let start = 0;
+  for (let index = 0; index < raw.length; index += 1) {
+    const ch = raw[index] as string;
     if (quote !== undefined) {
       if (ch === quote) quote = undefined;
       else current += ch;
       continue;
     }
     if (ch === '"' || ch === "'") {
-      if (!started) quoted = true;
+      if (!started) {
+        quoted = true;
+        start = index;
+      }
       quote = ch;
       started = true;
       continue;
     }
     if (/\s/.test(ch)) {
       if (started) {
-        tokens.push({ value: current, quoted });
+        tokens.push({ value: current, quoted, offset: start });
         current = '';
         quoted = false;
         started = false;
       }
       continue;
     }
+    if (!started) start = index;
     current += ch;
     started = true;
   }
   if (quote !== undefined) return { tokens, error: 'quote-open' };
-  if (started) tokens.push({ value: current, quoted });
+  if (started) tokens.push({ value: current, quoted, offset: start });
   return { tokens };
 }
 
@@ -121,6 +132,12 @@ export interface ParseSpec {
   flags?: readonly FlagSpec[];
   /** 认 `--`：之后的词一律当位置参数（提示词里要写 `-w` 时用） */
   terminator?: boolean;
+  /**
+   * 载荷模式：第一个位置参数起到行尾的**原文**进 `rest`，之后的词不再识别参数。
+   * 给载荷是一条命令、必须原样交给 shell 的命令用（/run）：把它们拼回 `words`
+   * 会丢掉引号，还会把管道与 `&&` 拆散。开关因此只写在载荷前面。
+   */
+  rest?: boolean;
 }
 
 /** 解析结果 */
@@ -133,6 +150,8 @@ export interface ParsedArgs {
   values: Map<string, string>;
   /** 列表参数的值，按出现顺序累积 */
   lists: Map<string, string[]>;
+  /** 载荷原文（只在 `spec.rest` 时给出）：第一个位置参数起、到行尾 */
+  rest?: string;
   /** 用户写错时的回执：有值就直接回它，别动状态 */
   error?: string;
 }
@@ -156,7 +175,9 @@ function expandShortFlags(tokens: readonly RawToken[], known: readonly FlagSpec[
       expanded.push(token);
       continue;
     }
-    for (const letter of token.value.slice(1)) expanded.push({ value: `-${letter}`, quoted: false });
+    for (const letter of token.value.slice(1)) {
+      expanded.push({ value: `-${letter}`, quoted: false, offset: token.offset });
+    }
   }
   return expanded;
 }
@@ -202,17 +223,29 @@ export function parseArgs(raw: string, spec: ParseSpec): ParsedArgs {
   }
   const known = spec.flags ?? [];
   const queue = expandShortFlags(tokens, known, spec.terminator === true);
+  /** 载荷模式下的原文：第一个位置参数（或 `--` 之后）起，到行尾 */
+  let rest: string | undefined;
   for (let i = 0; i < queue.length; i += 1) {
     const token = queue[i] as RawToken;
     // 引号包着的词、不带 `-` 的词都是位置参数
     if (token.quoted || !looksLikeParam(token)) {
-      if (token.value !== '') words.push(token.value);
+      if (token.value === '') continue;
+      // 载荷模式：从这里到行尾原样交出去，后面的词不再当参数
+      if (spec.rest === true) {
+        rest = raw.slice(token.offset ?? 0).trimEnd();
+        break;
+      }
+      words.push(token.value);
       continue;
     }
     // `--` 终止参数识别：提示词里要写字面量 `-w` 时这样写
     if (spec.terminator === true && token.value === '--') {
-      for (const rest of queue.slice(i + 1)) {
-        if (rest.value !== '') words.push(rest.value);
+      if (spec.rest === true) {
+        rest = raw.slice((token.offset ?? 0) + 2).trimStart();
+        break;
+      }
+      for (const remaining of queue.slice(i + 1)) {
+        if (remaining.value !== '') words.push(remaining.value);
       }
       break;
     }
@@ -248,5 +281,7 @@ export function parseArgs(raw: string, spec: ParseSpec): ParsedArgs {
     if (collected === undefined) lists.set(flag.name, names);
     else collected.push(...names);
   }
-  return { words, flags, values, lists };
+  return rest === undefined
+    ? { words, flags, values, lists }
+    : { words, flags, values, lists, rest };
 }

@@ -6,6 +6,15 @@ User-visible changes to QQ SuperTerm (`dsh-qqterm`). The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- `/run`: run a local command in the current directory, with `--timeout <seconds>` (120 s by default, 600 s max); oversized output is trimmed to its tail. The plugin spawns the process itself and does not go through the host's shell capability: the working directory is the host process's current directory (independent of the session workspace or the run directory), the shell is the OS one (`exec.shell` / `exec.shellArgs`), The command is user-initiated, so its consequences are the user's; the command text is handed to the shell verbatim from its first word, so quotes, pipes and `&&` are never re-quoted.
+
+### Changed
+
+- `/ls` and `/get` now resolve relative paths against the host process's current directory (`process.cwd()`) instead of the run directory; absolute paths still work as before.
+- `exec.shell` and `exec.shellArgs` now default to the platform's values in the config (the actual `cmd.exe` path and `["/d","/s","/c"]` on Windows, `/bin/sh` and `["-c"]` otherwise) instead of being derived only at runtime, so they are visible and editable; both are used literally at runtime, clearing one means empty (`/run` reports "no shell configured"), and nothing is re-defaulted or rewritten for the chosen shell.
+
 ## [0.0.2] - 2026-11-24
 
 ### Fixed

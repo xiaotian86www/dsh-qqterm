@@ -7,18 +7,18 @@ import { looksLikeParam, parseArgs, parseRest, quoteArg, tokenize } from '../../
 describe('tokenize', () => {
   it('按空格切词，连续空白不产生空词', () => {
     expect(tokenize('  a   b\tc ').tokens).toEqual([
-      { value: 'a', quoted: false },
-      { value: 'b', quoted: false },
-      { value: 'c', quoted: false },
+      { value: 'a', quoted: false, offset: 2 },
+      { value: 'b', quoted: false, offset: 6 },
+      { value: 'c', quoted: false, offset: 8 },
     ]);
   });
 
   it('引号包住的空白留在同一个词里，引号本身去掉', () => {
     const { tokens } = tokenize('install "dsh  x" --allow-builds=a');
     expect(tokens).toEqual([
-      { value: 'install', quoted: false },
-      { value: 'dsh  x', quoted: true },
-      { value: '--allow-builds=a', quoted: false },
+      { value: 'install', quoted: false, offset: 0 },
+      { value: 'dsh  x', quoted: true, offset: 8 },
+      { value: '--allow-builds=a', quoted: false, offset: 17 },
     ]);
   });
 
@@ -27,7 +27,7 @@ describe('tokenize', () => {
   });
 
   it('引号没闭合只报错，尽量保留已切出来的词', () => {
-    expect(tokenize('a "b c')).toEqual({ tokens: [{ value: 'a', quoted: false }], error: 'quote-open' });
+    expect(tokenize('a "b c')).toEqual({ tokens: [{ value: 'a', quoted: false, offset: 0 }], error: 'quote-open' });
   });
 
   it('空串与纯空白没有词', () => {
@@ -156,6 +156,34 @@ describe('parseArgs', () => {
 
   it('引号没闭合时回命令名对应的用法', () => {
     expect(parseArgs('--dir "D:\\My Repo', spec).error).toBe('⚠️ 引号没有闭合 · 用法: /help demo');
+  });
+
+  it('载荷模式：第一个位置参数起到行尾原样进 rest', () => {
+    const parsed = parseArgs('ls -la  "a b" && echo', { ...spec, rest: true });
+    expect(parsed.rest).toBe('ls -la  "a b" && echo');
+    expect(parsed.words).toEqual([]);
+    expect(parsed.error).toBeUndefined();
+  });
+
+  it('载荷模式：开关只认载荷前面的，后面的不再判未知参数', () => {
+    const parsed = parseArgs('--dir repo npm test --json', { ...spec, rest: true });
+    expect(parsed.values.get('dir')).toBe('repo');
+    expect(parsed.rest).toBe('npm test --json');
+    expect(parsed.error).toBeUndefined();
+  });
+
+  it('载荷模式：`--` 之后原样是载荷', () => {
+    expect(parseArgs('--dir repo -- -w', { ...spec, rest: true }).rest).toBe('-w');
+    expect(parseArgs('--', { ...spec, rest: true }).rest).toBe('');
+  });
+
+  it('不开载荷模式时不带 rest 字段', () => {
+    expect(parseArgs('a b', spec)).toEqual({
+      words: ['a', 'b'],
+      flags: new Set<string>(),
+      values: new Map<string, string>(),
+      lists: new Map<string, string[]>(),
+    });
   });
 });
 

@@ -128,11 +128,17 @@ export async function bootstrapGateway(
   const installer = createPluginInstaller(ctx, logger, { notify: sender.text });
 
   // ── 中间件链 ──
-  const commands = setupMiddlewares(
-    bot, config, manager, logger, replyStore, reloader, installer,
+  const commands = setupMiddlewares({
+    bot,
+    config,
+    manager,
+    logger,
+    replyStore,
+    reloader,
+    installer,
     // 插件只做 C2C：SDK 的 ReplyTarget 里 group 分支不会走到这里
-    (target, body) => sender.text(target as ReplyTarget, body),
-  );
+    sendText: (target, body) => sender.text(target as ReplyTarget, body),
+  });
 
   // ── 入站：经过中间件链后的消息交给 dsh agent ──
   bot.on('message', async (mCtx: MiddlewareContext) => {
