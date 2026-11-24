@@ -1389,8 +1389,10 @@ describe('getOrCreate — 新会话开在工作树里', () => {
     // 落点是工作区（主仓库），会话的运行目录才是树
     expect(manager.chatDirectory()).toBe(repo);
     expect(new PrefsStore().getDirectory(KEY)).toBe(repo);
-    // /status 的工作区仍是主仓库（与 /sessions 分组同源），live 目录只留给 /get、/ls
+    // /status 的工作区仍是主仓库（与 /sessions 分组同源），这里的分支事实也取主仓库的，
+    // live 目录只留给 /get、/ls。展示层在树会话里只给树的分支，不在这里顶替
     expect((await manager.chatWorkspaceInfo('c2c', PEER))?.path).toBe(repo);
+    expect((await manager.chatWorkspaceInfo('c2c', PEER))?.branch).toBe('main');
     expect((await manager.currentWorkspaceInfo('c2c', PEER))?.path).toBe(tree.path);
     expect(record.worktreeNotice).toContain('✅ 已在新工作树 `dsh-1a2b3c4d-9f0e` 里开启会话');
     expect(record.worktreeNotice).toContain('🌿 从 `main` 拉出');
@@ -1405,6 +1407,19 @@ describe('getOrCreate — 新会话开在工作树里', () => {
     const again = await manager.getOrCreate('c2c', PEER, PEER, REPLY);
     expect(again).toBe(record);
     expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it('读不到 HEAD 时工作区信息没有分支字段，其余照旧', async () => {
+    const repo = makeRepo();
+    const { registry } = createRegistry(async ({ resumeSessionId }) => { throw notFound(resumeSessionId); });
+    const { ctx } = worktreeCtx({ head: null });
+    const manager = createManagerWithCtx(registry, ctx);
+    await manager.changeChatWorkspace('c2c', PEER, repo);
+
+    const info = await manager.chatWorkspaceInfo('c2c', PEER);
+    expect(info?.path).toBe(repo);
+    expect(info?.missing).toBe(false);
+    expect(info?.branch).toBeUndefined();
   });
 
   it('建树失败：会话不保留、指针不落盘，意图保留可重试', async () => {

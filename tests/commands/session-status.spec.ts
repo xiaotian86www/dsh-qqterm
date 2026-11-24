@@ -31,7 +31,7 @@ interface StubOptions {
   /** 会话日志里的标题（默认没有，模拟宿主还没生成标题） */
   title?: string;
   context?: { used?: number; window?: number };
-  workspace?: { title: string; path: string; missing: boolean } | undefined;
+  workspace?: { title: string; path: string; missing: boolean; branch?: string } | undefined;
   /** 会话所在工作树（默认没有） */
   worktree?: { branch: string; baseCommit: string; path: string } | undefined;
   /** 思考强度视图：默认支持 high、未显式设置 */
@@ -80,7 +80,7 @@ function makeManager(options: StubOptions = {}) {
     listPermissionPresets: vi.fn(() => [{ id: 'workspace-write', name: '工作区内修改' }]),
     chatWorkspaceInfo: vi.fn(async () => ('workspace' in options
       ? options.workspace
-      : { title: 'repo', path: 'D:\\repo', missing: false })),
+      : { title: 'repo', path: 'D:\\repo', missing: false, branch: 'main' })),
     worktreeOf: vi.fn(() => options.worktree),
   } as unknown as SessionManager;
 }
@@ -122,14 +122,14 @@ describe('/status（有会话）', () => {
     expect(text).toContain('### 📊 会话状态');
     expect(text).toContain('**会话**: 「修登录」 · `#9d2c4410`');
     expect(text).toContain('**状态**: 空闲');
-    expect(text).toContain('**工作区**: repo · `D:\\repo`');
+    expect(text).toContain('**工作区**: repo · `D:\\repo` (`main`)');
     expect(text).toContain('**模型**: deepseek/deepseek-v4');
     expect(text).toContain('**思考强度**: 高');
     expect(text).toContain('**Preset**: default');
     expect(text).toContain('**权限**: 工作区内修改 (workspace-write)');
   });
 
-  it('会话在工作树里时多给一行分支与树路径', async () => {
+  it('会话在工作树里时多给一行树路径与分支', async () => {
     const text = await run(makeManager({
       worktree: {
         branch: 'dsh-1a2b3c4d-9f0e',
@@ -138,8 +138,11 @@ describe('/status（有会话）', () => {
       },
     }));
     expect(text).toContain(
-      '**工作树**: `dsh-1a2b3c4d-9f0e` · `D:\\repo\\.agents\\worktrees\\dsh-1a2b3c4d-9f0e`',
+      '**工作树**: `D:\\repo\\.agents\\worktrees\\dsh-1a2b3c4d-9f0e` (`dsh-1a2b3c4d-9f0e`)',
     );
+    // 树会话只显示树的分支：工作区行不再重复主仓库的分支
+    expect(text).toContain('**工作区**: repo · `D:\\repo`');
+    expect(text).not.toContain('`D:\\repo` (`main`)');
   });
 
   it('没有工作树的会话不出现这一行', async () => {
@@ -215,6 +218,12 @@ describe('/status（有会话）', () => {
     expect(text).not.toContain('repo ·');
   });
 
+  it('工作区不是 Git 仓库时不显示分支', async () => {
+    const text = await run(makeManager({ workspace: { title: 'repo', path: 'D:\\repo', missing: false } }));
+    expect(text).toContain('**工作区**: repo · `D:\\repo`');
+    expect(text).not.toContain('`D:\\repo` (`');
+  });
+
   it('生成中依次给步数、总时长与正在执行的工具', async () => {
     const text = await run(makeManager({
       agentStatus: 'running',
@@ -278,7 +287,7 @@ describe('/status（没有会话）', () => {
   it('展示模型 / 思考强度 / preset / 权限的默认值，不标「默认」', async () => {
     const text = await run(makeManager({ active: false }));
     expect(text).toContain('**会话**: 未建立');
-    expect(text).toContain('**工作区**: repo · `D:\\repo`');
+    expect(text).toContain('**工作区**: repo · `D:\\repo` (`main`)');
     expect(text).toContain('**模型**: deepseek/deepseek-v4');
     expect(text).toContain('**思考强度**: 高');
     expect(text).toContain('**Preset**: default');
