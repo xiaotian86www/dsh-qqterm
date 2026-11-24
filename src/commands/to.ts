@@ -1,5 +1,5 @@
 /**
- * `/to <会话> <文本>` — 向指定会话发 prompt，或在它等答案时提交答案。
+ * `/to <会话> -- <文本>` — 向指定会话发 prompt，或在它等答案时提交答案。
  *
  * 目标可以是当前会话、已获取的会话，或只在磁盘上的会话——最后一种先按 id 接回来
  * 再发（与 `/sessions resume` 同一条路）。命令不改 current：发完仍回到原来的
@@ -7,6 +7,9 @@
  *
  * 目标正在等 `ask_user_question` 时，文本必须走答案通道，不能当新 prompt
  * 排在问题后面——否则永远答不上。空文本进入「下一条消息作为回答」模式。
+ *
+ * 正文只认一种格式：`--` 之后整段是正文（`--` 前没有正文）。目标后直接跟文字的
+ * 旧写法按参数错误回绝，不再兼容。
  */
 import type { CommandDeps, SlashCommand } from './types.ts';
 import { parseRest } from './args.ts';
@@ -27,11 +30,15 @@ import { errorMessage } from '../shared/utils.ts';
 const USAGE = [
   '### 📖 /to 用法',
   '',
-  '`/to <会话> <文本>` 向会话发消息',
+  '`/to <会话> -- <文本>` 向会话发消息',
+  '`--` 之后整段是正文，不必再包引号；目标后直接跟文字的写法不再接受',
   '目标在等答案时，文本作为回答；没打开的会话会先接回来',
   '回复一条消息再发：被引用的内容会一起带上（目标在等答案时不带）',
-  '`--` 之后的文字原样当正文：回复链接已经带好 `--`，点开补正文即可',
+  '没有正文时写 `/to <会话> --`：只带引用，或进入「下一条消息作为回答」模式',
 ].join('\n');
+
+/** 正文没写在 `--` 之后时回绝：/to 只认一种正文格式 */
+const BODY_FORMAT = '⚠️ 正文要写在 -- 之后 · 用法: /help to';
 
 /** 把分组列表摊平成可解析的会话清单 */
 function flattenGroups(groups: readonly WorkspaceGroup[]): WorkspaceSession[] {
@@ -53,14 +60,15 @@ function displayId(id: string): string {
 }
 
 /**
- * 去掉正文前的 `--` 分隔符（只在它单独成词时去掉）。
+ * 取会话之后的正文：只认 `--` 之后的整段。
  *
- * 回复链接已经把 `--` 写进输入框，点开的用户只需要往后补正文；正文本身以 `--` 开头
- * 时仍写作 `-- --foo` 这样不会被吞，交给后面的文字原样保留。
+ * `/to #id`（或 `/to #id --`）是空正文，留给「只带引用」与「下一条消息作为回答」；
+ * `/to #id -- 文本` 是标准写法；`/to #id 文本`、`/to #id --foo` 都是旧写法，回绝。
  */
-function stripTerminator(text: string): string {
-  if (text === '--') return '';
-  return /^--\s/.test(text) ? text.slice(2).trimStart() : text;
+function parseToText(rest: string): { ok: true; text: string } | { ok: false } {
+  const trimmed = rest.trim();
+  if (trimmed === '' || trimmed === '--') return { ok: true, text: '' };
+  return /^--\s/.test(trimmed) ? { ok: true, text: trimmed.slice(2).trimStart() } : { ok: false };
 }
 
 export function toCommand({ manager, config, logger }: CommandDeps): SlashCommand {
@@ -77,11 +85,13 @@ export function toCommand({ manager, config, logger }: CommandDeps): SlashComman
       // 第一个 token 是会话，其余整体是文本（允许空格、换行）
       const match = /^(\S+)(?:\s+([\s\S]*))?$/.exec(raw);
       const targetArg = match?.[1] ?? '';
-      // 回复链接会在会话后面带一个 `--`：之后的文字原样当正文，用户不用再包引号
-      const text = parseRest(stripTerminator(match?.[2] ?? ''));
       if (targetArg === '') {
         return '⚠️ 缺少会话 · 用法: /help to';
       }
+      // 正文只写在 `--` 之后：回复链接已经带好，点开补正文即可
+      const parsed = parseToText(match?.[2] ?? '');
+      if (!parsed.ok) return BODY_FORMAT;
+      const text = parseRest(parsed.text);
 
       // 带引用的命令：引用取不到就什么都不发
       const taken = await takeQuote(cmdCtx, config.media, logger);

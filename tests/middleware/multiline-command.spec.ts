@@ -38,32 +38,32 @@ function harness(content: string): Harness {
 
 describe('preserveMultilineCommands', () => {
   it('单行指令不动正文', async () => {
-    const h = harness('/to #abc 你好');
+    const h = harness('/to #abc -- 你好');
     await preserveMultilineCommands(['to'])(h.ctx, async () => {
       h.seen.push(h.ctx.message.content ?? '');
     });
 
-    expect(h.seen).toEqual(['/to #abc 你好']);
-    expect(h.ctx.message.content).toBe('/to #abc 你好');
+    expect(h.seen).toEqual(['/to #abc -- 你好']);
+    expect(h.ctx.message.content).toBe('/to #abc -- 你好');
   });
 
   it('多行指令先把换行换成占位符，出栈还原原文', async () => {
-    const h = harness('/to #abc 第一行\n第二行');
+    const h = harness('/to #abc -- 第一行\n第二行');
     await preserveMultilineCommands(['to'])(h.ctx, async () => {
       h.seen.push(h.ctx.message.content ?? '');
     });
 
-    expect(h.seen).toEqual([`/to #abc 第一行${NEWLINE_MARK}第二行`]);
-    expect(h.ctx.message.content).toBe('/to #abc 第一行\n第二行');
+    expect(h.seen).toEqual([`/to #abc -- 第一行${NEWLINE_MARK}第二行`]);
+    expect(h.ctx.message.content).toBe('/to #abc -- 第一行\n第二行');
   });
 
   it('CRLF 也按一个换行占位', async () => {
-    const h = harness('/to #abc 第一行\r\n第二行');
+    const h = harness('/to #abc -- 第一行\r\n第二行');
     await preserveMultilineCommands(['to'])(h.ctx, async () => {
       h.seen.push(h.ctx.message.content ?? '');
     });
 
-    expect(h.seen).toEqual([`/to #abc 第一行${NEWLINE_MARK}第二行`]);
+    expect(h.seen).toEqual([`/to #abc -- 第一行${NEWLINE_MARK}第二行`]);
   });
 
   it('不像指令的多行文本不动', async () => {
@@ -94,14 +94,14 @@ describe('restoreMultilineCommands', () => {
       ...h.ctx,
       command: {
         name: 'to',
-        raw: `#abc 第一行${NEWLINE_MARK}第二行`,
-        args: ['#abc', `第一行${NEWLINE_MARK}第二行`],
+        raw: `#abc -- 第一行${NEWLINE_MARK}第二行`,
+        args: ['#abc', '--', `第一行${NEWLINE_MARK}第二行`],
       },
     } as unknown as SlashCommandHandlerContext;
 
     await (commands[0] as SlashCommand).handler(ctx);
 
-    expect(received).toEqual({ raw: '#abc 第一行\n第二行', args: ['#abc', '第一行\n第二行'] });
+    expect(received).toEqual({ raw: '#abc -- 第一行\n第二行', args: ['#abc', '--', '第一行\n第二行'] });
   });
 
   it('正文里没有占位符时原样传给 handler', async () => {
@@ -118,12 +118,12 @@ describe('restoreMultilineCommands', () => {
     const h = harness('');
     const ctx = {
       ...h.ctx,
-      command: { name: 'to', raw: '#abc 你好', args: ['#abc', '你好'] },
+      command: { name: 'to', raw: '#abc -- 你好', args: ['#abc', '--', '你好'] },
     } as unknown as SlashCommandHandlerContext;
 
     await (commands[0] as SlashCommand).handler(ctx);
 
-    expect(raw).toBe('#abc 你好');
+    expect(raw).toBe('#abc -- 你好');
   });
 });
 
@@ -158,18 +158,18 @@ describe('多行指令走真实 slashCommand', () => {
       },
     ]);
 
-    const { h, fellThrough } = await run(commands, '/to #abc 第一行\n第二行');
+    const { h, fellThrough } = await run(commands, '/to #abc -- 第一行\n第二行');
 
     expect(fellThrough).toBe(false);
-    expect(raw).toBe('#abc 第一行\n第二行');
+    expect(raw).toBe('#abc -- 第一行\n第二行');
     expect(h.stops).toEqual(['command:matched:to']);
     expect(h.sent).toEqual(['✅ 已发送']);
-    expect(h.ctx.message.content).toBe('/to #abc 第一行\n第二行');
+    expect(h.ctx.message.content).toBe('/to #abc -- 第一行\n第二行');
   });
 
   it('没有这层兜底时，多行指令会漏到下游（回归背景）', async () => {
     const commands: SlashCommand[] = [{ name: 'to', handler: () => 'ok' }];
-    const h = harness('/to #abc 第一行\n第二行');
+    const h = harness('/to #abc -- 第一行\n第二行');
     const slash = slashCommand({ autoHelp: false, prefixes: ['/'], commands });
     let fellThrough = false;
 
