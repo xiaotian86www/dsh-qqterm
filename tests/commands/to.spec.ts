@@ -169,7 +169,7 @@ describe('/to', () => {
     const manager = makeManager({ sendTo: { ok: false, reason: 'locked', sessionId: TARGET } });
     const text = await run(manager, `#3f2a9b1c hi`);
     expect(text).toContain('正在别处使用');
-    expect(text).toContain('等它释放后再发一次');
+    expect(text).toContain('⚠️ 这个会话正在别处使用');
   });
 
   it('列表里没有、但有 live 会话时，名字从会话日志的标题取', async () => {
@@ -210,7 +210,7 @@ describe('/to', () => {
     expect(manager.sendTo).not.toHaveBeenCalled();
   });
 
-  it('带引用时把引用块拼在正文前面，回执贴 📎', async () => {
+  it('带引用时把引用块拼在正文前面，回执不额外提引用', async () => {
     const manager = makeManager();
 
     const text = await run(manager, '#3f2a9b1c 继续修登录', {
@@ -226,7 +226,7 @@ describe('/to', () => {
       '[Quoted message begins]\n上次的报错栈\n[Quoted message ends]\n[Current message]\n继续修登录',
       { scope: 'c2c', targetId: 'user1' },
     );
-    expect(text).toBe('✅ 已发送到「目标会话」 · `#3f2a9b1c`\n📎 已带上引用');
+    expect(text).toBe('✅ 已发送到「目标会话」 · `#3f2a9b1c`');
   });
 
   it('只有引用没有正文时，整条消息就是引用块', async () => {
@@ -244,7 +244,7 @@ describe('/to', () => {
     );
   });
 
-  it('目标在等回答时不带引用，回执说明为什么', async () => {
+  it('目标在等回答时带引用整条拒绝，什么都不发', async () => {
     const manager = makeManager({
       awaiting: true,
       sendTo: { ok: true, kind: 'answered', sessionId: TARGET },
@@ -252,10 +252,8 @@ describe('/to', () => {
 
     const text = await run(manager, '#3f2a9b1c 2', { source: 'msg_elements', text: '引用原文' });
 
-    expect(manager.sendTo).toHaveBeenCalledWith(
-      'c2c', 'user1', 'user1', TARGET, '2', { scope: 'c2c', targetId: 'user1' },
-    );
-    expect(text).toBe('✅ 已回答「目标会话」 · `#3f2a9b1c`\n💡 目标在等回答，引用这次没有一起发送');
+    expect(manager.sendTo).not.toHaveBeenCalled();
+    expect(text).toBe('⚠️ 不支持带引用的答案');
   });
 
   it('引用取不到时什么都不发', async () => {

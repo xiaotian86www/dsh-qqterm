@@ -84,7 +84,7 @@ export async function handleInbound(
       // 工作树失败是最常见的一种：说清「会话没建」或「目录回不来」，别混进通用兜底
       const text = err instanceof WorktreeError
         ? worktreeErrorText(err)
-        : '⚠️ 处理消息时出现异常，请稍后重试。';
+        : '⚠️ 处理消息时出现异常';
       await sendText(replyTarget, text);
     } catch (sendErr) {
       logger.error(`fallback reply failed: ${errorMessage(sendErr)}`);
