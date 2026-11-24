@@ -1395,7 +1395,7 @@ describe('getOrCreate — 新会话开在工作树里', () => {
     expect((await manager.chatWorkspaceInfo('c2c', PEER))?.branch).toBe('main');
     expect((await manager.currentWorkspaceInfo('c2c', PEER))?.path).toBe(tree.path);
     expect(record.worktreeNotice).toContain('✅ 已在新工作树 `dsh-1a2b3c4d-9f0e` 里开启会话');
-    expect(record.worktreeNotice).toContain('🌿 从 `main` 拉出');
+    expect(record.worktreeNotice).toContain('从 `main` 拉出');
     expect(manager.worktreeOf('c2c', PEER)).toEqual({
       branch: tree.branch,
       baseCommit: tree.baseCommit,

@@ -62,7 +62,7 @@ export function worktreeNotice(
   const origin = parent === undefined
     ? `基点 \`${shortCommit(tree.baseCommit)}\``
     : `从 \`${parent}\` 拉出`;
-  return `✅ 已在新工作树 \`${tree.branch}\` 里开启会话\n🌿 ${origin} · 路径: \`${tree.path}\``;
+  return `✅ 已在新工作树 \`${tree.branch}\` 里开启会话\n${origin} · 路径: \`${tree.path}\``;
 }
 
 /** 明确要求开树却没能开成时的就地提示（会话照常开了，不是失败） */
