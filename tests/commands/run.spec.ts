@@ -212,10 +212,16 @@ describe('/run 执行', () => {
     expect(request).toMatchObject({ command: 'npm test', timeoutMs: 30_000 });
   });
 
-  it('命令以 - 开头时用 -- 隔开', async () => {
-    const { request } = await run('-- -la');
+  it('命令写在 -- 之后：整段原样交给 shell，- 开头的参数也不当参数', async () => {
+    const { request } = await run('-- ls -la');
 
-    expect(request).toMatchObject({ command: '-la' });
+    expect(request).toMatchObject({ command: 'ls -la' });
+  });
+
+  it('-- 之后整段是命令：管道与 && 不用再包一层引号', async () => {
+    const { request } = await run('-- echo "a b" && ls | wc -l');
+
+    expect(request).toMatchObject({ command: 'echo "a b" && ls | wc -l' });
   });
 
   it('命令前写错参数时不执行，回未知参数', async () => {
@@ -282,12 +288,41 @@ describe('parseRunArgs', () => {
     });
   });
 
-  it('-- 之后不再解析参数，- 开头的命令这样写', () => {
+  it('-- 之后整段是命令：多词、管道、- 开头的参数都原样', () => {
     expect(parseRunArgs('-- -la')).toEqual({ ok: true, request: { command: '-la', timeoutMs: 120_000 } });
+    expect(parseRunArgs('-- echo hi')).toEqual({ ok: true, request: { command: 'echo hi', timeoutMs: 120_000 } });
+    expect(parseRunArgs('-- ls -la | sort')).toEqual({
+      ok: true,
+      request: { command: 'ls -la | sort', timeoutMs: 120_000 },
+    });
+    expect(parseRunArgs('--timeout 30 -- npm test -- --watch')).toEqual({
+      ok: true,
+      request: { command: 'npm test -- --watch', timeoutMs: 30_000 },
+    });
+  });
+
+  it('-- 之后整段被一对引号包住时去掉这对引号，中间的引号原样', () => {
     expect(parseRunArgs('--timeout 30 -- "npm test"')).toEqual({
       ok: true,
       request: { command: 'npm test', timeoutMs: 30_000 },
     });
+    expect(parseRunArgs('-- echo "a b"')).toEqual({
+      ok: true,
+      request: { command: 'echo "a b"', timeoutMs: 120_000 },
+    });
+    expect(parseRunArgs('-- "a" "b"')).toEqual({
+      ok: true,
+      request: { command: '"a" "b"', timeoutMs: 120_000 },
+    });
+  });
+
+  it('-- 之前再给词是写错，不静默丢弃', () => {
+    expect(rejectText('echo hi -- echo there')).toBe('⚠️ 只能给一条命令 · 有空格就用引号包起来，或写到 -- 之后 · 用法: /help run');
+  });
+
+  it('-- 之后为空回缺命令', () => {
+    expect(rejectText('-- ')).toContain('缺少要执行的命令');
+    expect(rejectText('--timeout 30 --')).toContain('缺少要执行的命令');
   });
 
   it('命令前认不出的参数回未知参数', () => {

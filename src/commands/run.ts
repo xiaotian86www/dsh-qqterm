@@ -3,23 +3,25 @@
  *
  *   /run <命令>                 在当前目录执行一条命令（默认 120 秒超时）
  *   /run --timeout <秒> <命令>   指定超时（最长 600 秒）
+ *   /run -- <命令>               `--` 之后整段是命令，原样交给 shell
  *
  * 与 `/ls`、`/get` 同属扩展功能：插件自己起进程，不经过宿主的任何能力面。工作
  * 目录是宿主进程的当前目录（三个命令共用同一个基准），与会话的工作区、运行目录都
  * 无关；shell 用操作系统自带的那个，可在 `exec.shell` 里换。命令是用户亲手发起的，
  * 后果由用户承担，不套宿主的沙箱（见 shell/local-exec.ts）。
  *
- * 参数走共用解析器（args.ts 的 parseArgs）：空格是分隔符，所以整条命令算一个位置
- * 参数——有空格就用引号包起来（`/run "cd /d D:\\source && dir"`）。多出来的词按参数
- * 错误回绝，`-` 开头的词按参数识别，插件不把词拼回字符串：管道与 `&&` 由 shell 在
- * 自己的命令行里解释。
+ * 参数走共用解析器（args.ts 的 parseArgs）：命令写在 `--` 之后，整段原样交给 shell
+ * （`/run -- cd /d D:\\source && dir`）；没有 `--` 时整条命令算一个位置参数——有空格
+ * 就用引号包起来（`/run "cd /d D:\\source && dir"`）。多出来的词按参数错误回绝，`-`
+ * 开头的词按参数识别，插件不把词拼回字符串：管道与 `&&` 由 shell 在自己的命令行里
+ * 解释。
  *
  * 与 `/ls`、`/get` 同一权限面：能在目标机上执行命令，等于能碰 agent 手里的一切，
  * 只允许唯一绑定用户（`access.owner`）。
  */
 import type { CommandDeps, SlashCommand } from './types.ts';
 import type { Logger } from '../types.ts';
-import { ArgError, optionValue, parseArgs } from './args.ts';
+import { ArgError, optionValue, parseArgs, parseRest } from './args.ts';
 import type { CommandArgs, CommandSpec } from './args.ts';
 import { sendMarkdownChunked } from '../shared/index.ts';
 import { sessionAdminAuth } from './sessions.ts';
@@ -46,9 +48,9 @@ const USAGE = [
   '',
   '`/run <命令>` 在当前目录执行，默认 120 秒超时',
   '`/run --timeout <秒> <命令>` 改超时（1–600 秒，`-t` 同义）',
-  '空格是分隔符，整条命令算一个参数：有空格就整条用引号包起来',
-  '例如 `/run "cd /d D:\\source && dir"`；多出来的词按参数错误回绝',
-  '`-` 开头的词按参数识别，`--` 之后不再解析参数',
+  '整条命令写在 `--` 之后，原样交给 shell，例如 `/run -- cd /d D:\\source && dir`',
+  '整条用引号包起来也一样，例如 `/run "cd /d D:\\source && dir"`；多出来的词按参数错误回绝',
+  '`--` 之前只放参数；命令自己带 `-` 开头的参数时，写在 `--` 之后',
   '当前目录 = dsh 进程启动时所在的位置；shell 用操作系统自带的，可在 `exec` 配置里换',
 ].join('\n');
 
@@ -63,15 +65,16 @@ export type RunParse =
   | { ok: true; request: RunRequest }
   | { ok: false; text: string };
 
-/** 缺秒数 / 秒数越界 / 多给词的签发回执 */
+/** 缺命令 / 缺秒数 / 秒数越界 / 多给词的回执 */
+const MISSING_COMMAND = '⚠️ 缺少要执行的命令 · 用法: /help run';
 const TIMEOUT_MISSING = '⚠️ --timeout 后要跟秒数 · 用法: /help run';
-const EXTRA_WORDS = '⚠️ 只能给一条命令 · 整条命令用引号包起来 · 用法: /help run';
+const EXTRA_WORDS = '⚠️ 只能给一条命令 · 有空格就用引号包起来，或写到 -- 之后 · 用法: /help run';
 const TIMEOUT_RANGE = '⚠️ 超时秒数要在 1–600 之间 · 用法: /help run';
 
-/** 只认 `--timeout`（`-t`）；其余词都是位置参数，`--` 之后不再解析 */
+/** 只认 `--timeout`（`-t`）；`--` 之后整段是命令，原样交给 shell */
 const RUN_SPEC: CommandSpec = {
   command: 'run',
-  terminator: 'words',
+  terminator: true,
   options: [{
     name: 'timeout',
     alias: 't',
@@ -119,12 +122,20 @@ export function parseRunArgs(raw: string): RunParse {
     throw error;
   }
 
-  // 一条命令就是一个位置参数：多出来的词是写错，不猜着拼回字符串
-  const [command] = parsed.words;
-  if (command === undefined) return { ok: false, text: '⚠️ 缺少要执行的命令 · 用法: /help run' };
-  if (parsed.words.length > 1) return { ok: false, text: EXTRA_WORDS };
-
   const timeoutMs = optionValue<number>(parsed, 'timeout') ?? DEFAULT_TIMEOUT_MS;
+
+  // 写了 `--`：之后整段就是命令，原样交给 shell；前面再给词是写错，不静默丢弃
+  if (parsed.rest !== undefined) {
+    if (parsed.words.length > 0) return { ok: false, text: EXTRA_WORDS };
+    const command = parseRest(parsed.rest);
+    if (command === '') return { ok: false, text: MISSING_COMMAND };
+    return { ok: true, request: { command, timeoutMs } };
+  }
+
+  // 没有 `--`：一条命令就是一个位置参数，多出来的词不猜着拼回字符串
+  const [command] = parsed.words;
+  if (command === undefined) return { ok: false, text: MISSING_COMMAND };
+  if (parsed.words.length > 1) return { ok: false, text: EXTRA_WORDS };
   return { ok: true, request: { command, timeoutMs } };
 }
 

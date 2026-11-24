@@ -29,7 +29,6 @@ const spec: CommandSpec = {
     { name: 'background', alias: 'b' },
     { name: 'allow-builds', kind: 'list' },
   ],
-  terminator: 'words',
 };
 
 /** 取写错时的回执；没写错返回 undefined */
@@ -137,11 +136,14 @@ describe('parseArgs', () => {
     expect(errorOf('-wx')).toBe('⚠️ 未知参数: -wx · 用法: /help demo');
   });
 
-  it('`--` 之后与引号里的合写不拆', () => {
-    expect(parseArgs('-- -wb', spec).words).toEqual(['-wb']);
+  it('引号里的合写不拆，也不当参数', () => {
     const quoted = parseArgs('看下 "-wb"', spec);
     expect(quoted.words).toEqual(['看下', '-wb']);
     expect(optionValue<boolean>(quoted, 'worktree')).toBe(false);
+  });
+
+  it('没声明 terminator 时 `--` 回未知参数，不静默吞掉', () => {
+    expect(errorOf('-- -wb')).toBe('⚠️ 未知参数: -- · 用法: /help demo');
   });
 
   it('带值参数 `--dir 值` 与 `--dir=值` 等价，重复给取最后一次', () => {
@@ -179,10 +181,11 @@ describe('parseArgs', () => {
     expect(optionValue<boolean>(parsed, 'worktree')).toBe(false);
   });
 
-  it('`--` 之后的词一律是位置参数', () => {
-    const parsed = parseArgs('--dir repo -- -w --dir', spec);
+  it('`--` 之后的原文整段进 rest，不再切词也不认参数', () => {
+    const parsed = parseArgs('--dir repo -- -w --dir "x" y', { ...spec, terminator: true });
     expect(optionValue<string>(parsed, 'dir')).toBe('repo');
-    expect(parsed.words).toEqual(['-w', '--dir']);
+    expect(parsed.words).toEqual([]);
+    expect(parsed.rest).toBe('-w --dir "x" y');
   });
 
   it('没写的选项：开关是 false，其余是 undefined', () => {
@@ -219,22 +222,22 @@ describe('parseArgs', () => {
     expect(errorOf('--timeout abc', timed)).toBe('⚠️ 超时秒数要在 1–600 之间 · 用法: /help run');
   });
 
-  it('rest 模式：`--` 之后整段原样进 rest，不再切词', () => {
-    const parsed = parseArgs('--dir repo -- 提 示 "x"', { ...spec, terminator: 'rest' });
+  it('`--` 之后的原文整段原样进 rest，不再切词', () => {
+    const parsed = parseArgs('--dir repo -- 提 示 "x"', { ...spec, terminator: true });
     expect(optionValue<string>(parsed, 'dir')).toBe('repo');
     expect(parsed.words).toEqual([]);
     expect(parsed.rest).toBe('提 示 "x"');
   });
 
-  it('rest 模式：`--` 之前的位置参数照旧切出来', () => {
-    const parsed = parseArgs('目标 -- 正 文', { ...spec, terminator: 'rest' });
+  it('`--` 之前的位置参数照旧切出来', () => {
+    const parsed = parseArgs('目标 -- 正 文', { ...spec, terminator: true });
     expect(parsed.words).toEqual(['目标']);
     expect(parsed.rest).toBe('正 文');
   });
 
-  it('rest 模式：没写 `--` 时没有 rest，`--` 后为空时 rest 是空串', () => {
-    expect(parseArgs('--dir repo 提示', { ...spec, terminator: 'rest' }).rest).toBeUndefined();
-    expect(parseArgs('--dir repo --', { ...spec, terminator: 'rest' }).rest).toBe('');
+  it('没写 `--` 时没有 rest，`--` 后为空时 rest 是空串', () => {
+    expect(parseArgs('--dir repo 提示', { ...spec, terminator: true }).rest).toBeUndefined();
+    expect(parseArgs('--dir repo --', { ...spec, terminator: true }).rest).toBe('');
   });
 
   it('引号没闭合时回命令名对应的用法', () => {

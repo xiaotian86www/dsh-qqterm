@@ -393,7 +393,7 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Slash
         parsed = parseArgs((cmdCtx.command?.raw ?? '').trim(), {
           command: 'sessions',
           // 标题写到 `--` 之后时整段原样；其余子命令照旧
-          terminator: 'rest',
+          terminator: true,
         });
       } catch (error) {
         if (!(error instanceof ArgError)) throw error;
