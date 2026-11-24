@@ -165,7 +165,7 @@ describe('QQ 消息全链路', () => {
     expect(text).toBeDefined();
     expect(text!.split('\n')[0]).toBe('> `#abcdef12` · 后台任务');
     expect(text).toContain('这条来自另一个会话');
-    expect(text).toContain('/to #abcdef12 ');
+    expect(text).toContain('/to #abcdef12 -- ');
     expect(text).toContain('/sessions resume #abcdef12');
   });
 

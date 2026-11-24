@@ -38,6 +38,7 @@ import { ownerOnlyAuth } from './auth.ts';
 import { parseArgs, quoteArg } from './args.ts';
 import { getScopePeer, formatRelativeTime, sendMarkdownChunked, shortSessionId } from '../shared/index.ts';
 import { cleanInline, clip, commandLink, commandLinkRaw } from '../shared/inline.ts';
+import { sessionReplyLink } from '../transport/session-source.ts';
 import type { ArchiveSessionOutcome, WorkspaceGroup, WorkspaceSession } from '../session/index.ts';
 import { errorMessage } from '../shared/utils.ts';
 import { pageCount, pageLinks, pageOutOfRange, pageSlice } from '../shared/paging.ts';
@@ -319,7 +320,7 @@ function renderLine(entry: WorkspaceSession, label: string, extra = ''): string 
 /**
  * 会话行尾的快捷操作：不改当前指针的三个动作，只给工作中的会话。
  *
- * - `回复`：把 `/to #短id ` 填进输入框，给这个会话发消息。当前会话本来就在跟它
+ * - `回复`：把 `/to #短id -- ` 填进输入框，给这个会话发消息。当前会话本来就在跟它
  *   说话，不给；其余一律给——列表不区分会话是否已打开，不给入口等于把「冷会话」
  *   这个概念漏到界面上（会话还没打开时 `/to` 会请先恢复）。
  * - `停止`：`/stop #短id`，只给正在生成的会话；空闲时没有可停的东西。
@@ -333,7 +334,7 @@ function renderLine(entry: WorkspaceSession, label: string, extra = ''): string 
 function quickLinks(entry: WorkspaceSession, archivable: boolean): string {
   const links: string[] = [];
   if (!entry.current) {
-    links.push(commandLink(`/to ${displayId(entry.id)} `, '回复'));
+    links.push(sessionReplyLink(entry.id));
   }
   if (entry.running) links.push(commandLink(`/stop ${displayId(entry.id)}`, '停止'));
   if (archivable) links.push(commandLink(`/sessions archive ${displayId(entry.id)}`, '归档'));

@@ -243,7 +243,7 @@ describe('/sessions 持有视图', () => {
 
     // 已获取的后台会话：回复 + 停止 + 归档，与恢复按钮同一行
     expect(lineOf('#dddd2222')).toContain(
-      '<qqbot-cmd-input text="/to #dddd2222 " show="回复"/>'
+      '<qqbot-cmd-input text="/to #dddd2222 -- " show="回复"/>'
         + ' · <qqbot-cmd-input text="/stop #dddd2222" show="停止"/>'
         + ' · <qqbot-cmd-input text="/sessions archive #dddd2222" show="归档"/>',
     );
@@ -252,7 +252,7 @@ describe('/sessions 持有视图', () => {
     expect(lineOf('#cccc1111')).toContain('text="/stop #cccc1111" show="停止"');
     expect(lineOf('#cccc1111')).toContain('text="/sessions archive #cccc1111"');
     // 还没打开的会话也照给：列表不区分打开与否，点了由 /to 提示先恢复
-    expect(lineOf('#eeee3333')).toContain('text="/to #eeee3333 " show="回复"');
+    expect(lineOf('#eeee3333')).toContain('text="/to #eeee3333 -- " show="回复"');
     expect(lineOf('#eeee3333')).toContain('text="/sessions archive #eeee3333"');
     // 空闲会话没有可停的东西，不给停止入口
     expect(lineOf('#eeee3333')).not.toContain('show="停止"');
@@ -636,12 +636,12 @@ describe('/sessions all', () => {
     // 行首 ⚡ 与默认视图同一形态：/sessions all 也标生成中
     expect(lineOf('#held')).toContain('show="⚡ #held · ');
     expect(lineOf('#held')).toContain(
-      '<qqbot-cmd-input text="/to #held " show="回复"/>'
+      '<qqbot-cmd-input text="/to #held -- " show="回复"/>'
         + ' · <qqbot-cmd-input text="/stop #held" show="停止"/>'
         + ' · <qqbot-cmd-input text="/sessions archive #held" show="归档"/>',
     );
     // 还没打开的会话也照给，列表不区分打开与否；它没在生成，不给停止
-    expect(lineOf('#cold')).toContain('text="/to #cold " show="回复"');
+    expect(lineOf('#cold')).toContain('text="/to #cold -- " show="回复"');
     expect(lineOf('#cold')).toContain('text="/sessions archive #cold" show="归档"');
     expect(lineOf('#cold')).not.toContain('show="停止"');
     expect(lineOf('#cold')).not.toContain('⚡');
@@ -1410,7 +1410,7 @@ describe('没有 workspaceRegistry 的部署', () => {
   it('行尾仍给回复入口，但不给归档（命令不可用）', async () => {
     const text = await run(pathOnlyManager(), '');
 
-    expect(text).toContain('text="/to #aaaa0001 " show="回复"');
+    expect(text).toContain('text="/to #aaaa0001 -- " show="回复"');
     expect(text).not.toContain('text="/sessions archive');
   });
 

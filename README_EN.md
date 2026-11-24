@@ -49,7 +49,7 @@ Rows are **never numbered**: after paging and grouping, "the third row" is bound
 
 - Every `/sessions` row ends with its actions: Reply / Stop (only while generating) / Archive; every archived row offers Unarchive; a workspace group header taps into `/new --dir <path>`.
 - Every reply, question, approval, and failure card from a non-current session ends with Reply and Resume; Stop is added while it generates, Archive when the deployment can archive.
-- A tap fills the smallest command (`/to #a1b2c3d4 `, `/stop #a1b2c3d4`, `/sessions archive #a1b2c3d4`) into the input box and **never executes it for you**: a stray tap changes nothing, and `/to` keeps the trailing space so the cursor lands at the start of the message body.
+- A tap fills the smallest command (`/to #a1b2c3d4 -- `, `/stop #a1b2c3d4`, `/sessions archive #a1b2c3d4`) into the input box and **never executes it for you**: a stray tap changes nothing, and `/to` ends with `--` and a space so the cursor lands at the start of the message body: whatever follows `--` is the text, and words with spaces or a leading `-` need no quoting.
 - Tapping and typing take the same command path, so authorization, copy, and logs exist once; the equivalent command is always visible next to the action.
 
 ### Background sessions report back
@@ -315,7 +315,7 @@ Workspaces are the host's `workspaceRegistry` concept; dsh-qqterm keeps no direc
 | `/goal` | Set or view the current session's long-term goal; `/goal <goal>` sets it, `edit` / `pause` / `resume` / `clear` manage it |
 | `/sessions` (alias `/session`) | Session management: by default lists sessions held by QQ (including cold sessions not yet opened after a restart), `all` shows everything, `archived` shows archived sessions; addressing, quick actions, and archive semantics live in "Multi-session management" |
 | `/rename` | Rename the current session; `/sessions rename <id> <title>` renames an opened session |
-| `/to` | Send a message to a given session; submits an answer when that session is waiting for one; a not-yet-open session is resumed first; replying to a message places its quote ahead of the body (except while the target awaits an answer) |
+| `/to` | Send a message to a given session (`/to <id> -- <text>`, where `--` may be omitted; reply links already carry it, so you only add the body); submits an answer when that session is waiting for one; a not-yet-open session is resumed first; replying to a message places its quote ahead of the body (except while the target awaits an answer) |
 | `/ls` | List subdirectories and files in the current directory (where the dsh process was started); click a directory to enter, a file to send; paths may be absolute or start with `~` |
 | `/get` | Send a file to the current chat (images / videos / voice by type); any path, relative ones resolved against the same base |
 | `/run` | Run a local command in the current directory (shell is the OS one, configurable via `exec`); `--timeout <seconds>` changes the timeout (120 s by default, 600 s max) |

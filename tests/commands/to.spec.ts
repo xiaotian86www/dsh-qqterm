@@ -105,6 +105,54 @@ describe('/to', () => {
     );
   });
 
+  it('回复链接带的 -- 只是分隔符：之后的文字原样当正文', async () => {
+    const manager = makeManager();
+
+    const text = await run(manager, '#3f2a9b1c -- 继续修登录');
+
+    expect(text).toBe('✅ 已发送到「目标会话」 · `#3f2a9b1c`');
+    expect(manager.sendTo).toHaveBeenCalledWith(
+      'c2c',
+      'user1',
+      'user1',
+      TARGET,
+      '继续修登录',
+      { scope: 'c2c', targetId: 'user1' },
+    );
+  });
+
+  it('-- 后面的正文不必包引号：dash 开头的词照原样发', async () => {
+    const manager = makeManager();
+
+    await run(manager, '#3f2a9b1c -- --foo bar');
+
+    expect(manager.sendTo).toHaveBeenCalledWith(
+      expect.anything(), expect.anything(), expect.anything(), TARGET, '--foo bar',
+      expect.anything(),
+    );
+  });
+
+  it('只有 -- 时正文为空，与不带正文同一条路', async () => {
+    const manager = makeManager({ sendTo: { ok: false, reason: 'empty', sessionId: TARGET } });
+
+    expect(await run(manager, '#3f2a9b1c --')).toContain('缺少文本');
+    expect(manager.sendTo).toHaveBeenCalledWith(
+      expect.anything(), expect.anything(), expect.anything(), TARGET, '',
+      expect.anything(),
+    );
+  });
+
+  it('--foo 不是一个 --，正文照原样保留', async () => {
+    const manager = makeManager();
+
+    await run(manager, '#3f2a9b1c --foo');
+
+    expect(manager.sendTo).toHaveBeenCalledWith(
+      expect.anything(), expect.anything(), expect.anything(), TARGET, '--foo',
+      expect.anything(),
+    );
+  });
+
   it('目标正在生成时按排队回执，带这条消息的插话入口', async () => {
     const manager = makeManager({
       current: true,
