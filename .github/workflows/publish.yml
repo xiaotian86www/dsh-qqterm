@@ -57,7 +57,30 @@ jobs:
       - name: 测试
         run: pnpm test
 
+      # 补打历史 tag 时版本可能已经发布或已在暂存队列里，重复上传会 409。
+      # 这里先探一次，命中就跳过上传，让重放的 tag 也能跑成绿的。
+      - name: 检查版本是否已存在
+        id: exists
+        run: |
+          set -euo pipefail
+          name="$(node -p "require('./package.json').name")"
+          version="$(node -p "require('./package.json').version")"
+          registry="https://registry.npmjs.org/"
+          present=false
+          if npm view "$name@$version" version --registry="$registry" >/dev/null 2>&1; then
+            present=true
+            echo "::notice::$name@$version 已在 registry 上，跳过上传"
+          fi
+          staged="$(npm stage list "$name" --registry="$registry" 2>/dev/null \
+            | awk -v v="$version" '$1=="version:"{cur=$2} $1=="status:"{if(cur==v && $2=="staged") f=1} END{print f?"yes":"no"}')"
+          if [ "$staged" = "yes" ]; then
+            present=true
+            echo "::notice::$name@$version 已在暂存队列里，跳过上传"
+          fi
+          echo "present=$present" >> "$GITHUB_OUTPUT"
+
       - name: 上传暂存区
+        if: steps.exists.outputs.present != 'true'
         run: npm stage publish --access public --registry=https://registry.npmjs.org/
 
       - name: 写入任务摘要
@@ -66,6 +89,11 @@ jobs:
           name="$(node -p "require('./package.json').name")"
           version="$(node -p "require('./package.json').version")"
           echo "### $name@$version" >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ steps.exists.outputs.present }}" = "true" ]; then
+            echo "结果：该版本已发布或已暂存，本次跳过上传" >> "$GITHUB_STEP_SUMMARY"
+            echo "https://www.npmjs.com/package/$name?v=$version" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           echo "模式：只上传暂存区，需在 npmjs 批准后才对外可见" >> "$GITHUB_STEP_SUMMARY"
-          echo "批准入口：https://www.npmjs.com/package/$name" >> "$GITHUB_STEP_SUMMARY"
+          echo "批准入口：https://www.npmjs.com/settings/xiaotian86www/staged-packages" >> "$GITHUB_STEP_SUMMARY"
           echo "https://www.npmjs.com/package/$name/v/$version" >> "$GITHUB_STEP_SUMMARY"
