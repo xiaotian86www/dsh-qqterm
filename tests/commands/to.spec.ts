@@ -89,10 +89,59 @@ beforeEach(() => {
 });
 
 describe('/to', () => {
-  it('按短 id 找到目标，文本原样交给 sendTo，且不改 current', async () => {
+  it('没包引号又被切成多段时按参数错误回绝，不发送', async () => {
     const manager = makeManager();
 
-    const text = await run(manager, '#3f2a9b1c 继续修登录');
+    const text = await run(manager, '#3f2a9b1c 旧 写法正文');
+
+    expect(text).toBe('⚠️ 正文只能一段：有空格就用引号包起来，或写到 -- 之后 · 用法: /help to');
+    expect(manager.sendTo).not.toHaveBeenCalled();
+  });
+
+  it('一段正文可以不带 --：没有空格的词原样发', async () => {
+    const manager = makeManager();
+
+    await run(manager, '#3f2a9b1c hi');
+
+    expect(manager.sendTo).toHaveBeenCalledWith(
+      expect.anything(), expect.anything(), expect.anything(), TARGET, 'hi',
+      expect.anything(),
+    );
+  });
+
+  it('引号包住的正文算一段：空格留在正文里', async () => {
+    const manager = makeManager();
+
+    await run(manager, '#3f2a9b1c "hello world"');
+
+    expect(manager.sendTo).toHaveBeenCalledWith(
+      expect.anything(), expect.anything(), expect.anything(), TARGET, 'hello world',
+      expect.anything(),
+    );
+  });
+
+  it('引号没闭合时回引号提示', async () => {
+    const manager = makeManager();
+
+    expect(await run(manager, '#3f2a9b1c "hello')).toBe('⚠️ 引号没有闭合 · 用法: /help to');
+    expect(manager.sendTo).not.toHaveBeenCalled();
+  });
+
+  it('-- 之后原样：引号也是正文的一部分', async () => {
+    const manager = makeManager();
+
+    await run(manager, '#3f2a9b1c -- "hello world"');
+
+    expect(manager.sendTo).toHaveBeenCalledWith(
+      expect.anything(), expect.anything(), expect.anything(), TARGET, '"hello world"',
+      expect.anything(),
+    );
+  });
+
+  it('按短 id 找到目标，-- 之后整段是正文，且不改 current', async () => {
+    const manager = makeManager();
+
+    const text = await run(manager, '#3f2a9b1c -- 继续修登录');
 
     expect(text).toBe('✅ 已发送到「目标会话」 · `#3f2a9b1c`');
     expect(manager.sendTo).toHaveBeenCalledWith(
@@ -105,13 +154,63 @@ describe('/to', () => {
     );
   });
 
+  it('-- 后面的正文不必包引号：dash 开头的词照原样发', async () => {
+    const manager = makeManager();
+
+    await run(manager, '#3f2a9b1c -- --foo bar');
+
+    expect(manager.sendTo).toHaveBeenCalledWith(
+      expect.anything(), expect.anything(), expect.anything(), TARGET, '--foo bar',
+      expect.anything(),
+    );
+  });
+
+  it('只有 -- 时正文为空，与不带正文同一条路', async () => {
+    const manager = makeManager({ sendTo: { ok: false, reason: 'empty', sessionId: TARGET } });
+
+    expect(await run(manager, '#3f2a9b1c --')).toContain('缺少文本');
+    expect(manager.sendTo).toHaveBeenCalledWith(
+      expect.anything(), expect.anything(), expect.anything(), TARGET, '',
+      expect.anything(),
+    );
+  });
+
+  it('--foo 是认不出的参数，按未知参数回绝', async () => {
+    const manager = makeManager();
+
+    expect(await run(manager, '#3f2a9b1c --foo')).toBe('⚠️ 未知参数: --foo · 用法: /help to');
+    expect(manager.sendTo).not.toHaveBeenCalled();
+  });
+
+  it('以 - 开头的正文要包引号，包住后原样发', async () => {
+    const manager = makeManager();
+    expect(await run(manager, '#3f2a9b1c -x')).toBe('⚠️ 未知参数: -x · 用法: /help to');
+
+    await run(manager, '#3f2a9b1c "-x"');
+
+    expect(manager.sendTo).toHaveBeenCalledWith(
+      expect.anything(), expect.anything(), expect.anything(), TARGET, '-x',
+      expect.anything(),
+    );
+  });
+
+  it('没有正文时 -- 可省：只给目标就是空正文', async () => {
+    const manager = makeManager({ sendTo: { ok: true, kind: 'answer-mode', sessionId: TARGET } });
+
+    expect(await run(manager, '#3f2a9b1c')).toBe('💡 请发送回答: 「目标会话」 · `#3f2a9b1c`');
+    expect(manager.sendTo).toHaveBeenCalledWith(
+      expect.anything(), expect.anything(), expect.anything(), TARGET, '',
+      expect.anything(),
+    );
+  });
+
   it('目标正在生成时按排队回执，带这条消息的插话入口', async () => {
     const manager = makeManager({
       current: true,
       sendTo: { ok: true, kind: 'queued', sessionId: TARGET, messageId: 'm-1' },
     });
 
-    const text = await run(manager, '#3f2a9b1c 继续修登录');
+    const text = await run(manager, '#3f2a9b1c -- 继续修登录');
 
     expect(text).toContain('✅ 已排队 · 本轮结束后发送');
     expect(text).toContain('/steer #3f2a9b1c m-1');
@@ -126,7 +225,7 @@ describe('/to', () => {
       sendTo: { ok: true, kind: 'steered', sessionId: TARGET, messageId: 'm-1' },
     });
 
-    const text = await run(manager, '#3f2a9b1c 继续修登录');
+    const text = await run(manager, '#3f2a9b1c -- 继续修登录');
 
     expect(text).toBe('✅ 已插话 · 下一步生效');
     expect(text).not.toContain('/steer');
@@ -139,18 +238,18 @@ describe('/to', () => {
       sendTo: { ok: true, kind: 'queued', sessionId: TARGET, messageId: 'm-1' },
     });
 
-    expect(await run(manager, '#3f2a9b1c hi'))
+    expect(await run(manager, '#3f2a9b1c -- hi'))
       .toBe('✅ 已排队 · 「目标会话」 · `#3f2a9b1c`');
   });
 
   it('目标在等答案时回「已回答」，不冒充新 prompt', async () => {
     const manager = makeManager({ sendTo: { ok: true, kind: 'answered', sessionId: TARGET } });
-    expect(await run(manager, `#3f2a9b1c 2`)).toBe('✅ 已回答「目标会话」 · `#3f2a9b1c`');
+    expect(await run(manager, `#3f2a9b1c -- 2`)).toBe('✅ 已回答「目标会话」 · `#3f2a9b1c`');
   });
 
   it('空文本 + 有待答问题时进入回答模式', async () => {
     const manager = makeManager({ sendTo: { ok: true, kind: 'answer-mode', sessionId: TARGET } });
-    expect(await run(manager, '#3f2a9b1c')).toBe('💡 请发送回答: 「目标会话」 · `#3f2a9b1c`');
+    expect(await run(manager, '#3f2a9b1c --')).toBe('💡 请发送回答: 「目标会话」 · `#3f2a9b1c`');
     expect(manager.sendTo).toHaveBeenCalledWith(
       expect.anything(), expect.anything(), expect.anything(), TARGET, '',
       expect.anything(),
@@ -159,7 +258,7 @@ describe('/to', () => {
 
   it('没有这个会话时给短 id 提示，不再让人先 resume', async () => {
     const manager = makeManager({ sendTo: { ok: false, reason: 'not-found', sessionId: TARGET } });
-    const text = await run(manager, `#3f2a9b1c hi`);
+    const text = await run(manager, `#3f2a9b1c -- hi`);
     expect(text).toContain('没有这个会话');
     expect(text).toContain('「目标会话」 · `#3f2a9b1c`');
     expect(text).not.toContain('/sessions resume');
@@ -167,7 +266,7 @@ describe('/to', () => {
 
   it('目标被别的客户端占着时给原因与下一步', async () => {
     const manager = makeManager({ sendTo: { ok: false, reason: 'locked', sessionId: TARGET } });
-    const text = await run(manager, `#3f2a9b1c hi`);
+    const text = await run(manager, `#3f2a9b1c -- hi`);
     expect(text).toContain('正在别处使用');
     expect(text).toContain('⚠️ 这个会话正在别处使用');
   });
@@ -180,18 +279,18 @@ describe('/to', () => {
         agent: { session: { snapshotEvents: () => [{ type: 'session/title', data: { title: '日志标题' } }] } },
       } as unknown as SessionRecord,
     });
-    const text = await run(manager, `${TARGET} hi`);
+    const text = await run(manager, `${TARGET} -- hi`);
     expect(text).toBe('✅ 已发送到「日志标题」 · `#3f2a9b1c`');
   });
 
   it('空文本且没有待答问题时提示用法', async () => {
     const manager = makeManager({ sendTo: { ok: false, reason: 'empty', sessionId: TARGET } });
-    expect(await run(manager, '#3f2a9b1c')).toContain('缺少文本');
+    expect(await run(manager, '#3f2a9b1c --')).toContain('缺少文本');
   });
 
   it('已归档的目标拒绝，并给取消归档入口', async () => {
     const manager = makeManager({ sendTo: { ok: false, reason: 'archived', sessionId: TARGET } });
-    const text = await run(manager, '#3f2a9b1c hi');
+    const text = await run(manager, '#3f2a9b1c -- hi');
     expect(text).toContain('该会话已归档');
     expect(text).toContain('/sessions unarchive #3f2a9b1c');
     // 归档与否由会话层判定，命令层不预读
@@ -200,7 +299,7 @@ describe('/to', () => {
 
   it('列表里没有、也没有 live agent 时给短 id 提示', async () => {
     const manager = makeManager({ groups: groups([entry({ id: CURRENT })]), live: false });
-    const text = await run(manager, '#3f2a9b1c hi');
+    const text = await run(manager, '#3f2a9b1c -- hi');
     expect(text).toContain('没有匹配的会话');
   });
 
@@ -213,7 +312,7 @@ describe('/to', () => {
   it('带引用时把引用块拼在正文前面，回执不额外提引用', async () => {
     const manager = makeManager();
 
-    const text = await run(manager, '#3f2a9b1c 继续修登录', {
+    const text = await run(manager, '#3f2a9b1c -- 继续修登录', {
       source: 'msg_elements',
       text: '上次的报错栈',
     });
@@ -232,7 +331,7 @@ describe('/to', () => {
   it('只有引用没有正文时，整条消息就是引用块', async () => {
     const manager = makeManager();
 
-    await run(manager, '#3f2a9b1c', { source: 'msg_elements', text: '只有引用' });
+    await run(manager, '#3f2a9b1c --', { source: 'msg_elements', text: '只有引用' });
 
     expect(manager.sendTo).toHaveBeenCalledWith(
       'c2c',
@@ -250,7 +349,7 @@ describe('/to', () => {
       sendTo: { ok: true, kind: 'answered', sessionId: TARGET },
     });
 
-    const text = await run(manager, '#3f2a9b1c 2', { source: 'msg_elements', text: '引用原文' });
+    const text = await run(manager, '#3f2a9b1c -- 2', { source: 'msg_elements', text: '引用原文' });
 
     expect(manager.sendTo).not.toHaveBeenCalled();
     expect(text).toBe('⚠️ 不支持带引用的答案');
@@ -259,7 +358,7 @@ describe('/to', () => {
   it('引用取不到时什么都不发', async () => {
     const manager = makeManager();
 
-    const text = await run(manager, '#3f2a9b1c hi', { source: 'none' });
+    const text = await run(manager, '#3f2a9b1c -- hi', { source: 'none' });
 
     expect(text).toBe('❌ 引用内容取不到，没有执行');
     expect(manager.sendTo).not.toHaveBeenCalled();

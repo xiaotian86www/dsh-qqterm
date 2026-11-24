@@ -6,6 +6,7 @@
  * 命令缺参时也只指向 `/help <命令>`，不再各自拼用法。
  */
 import type { CommandDeps, SlashCommand } from './types.ts';
+import { ArgError, parseArgs } from './args.ts';
 import { sendMarkdownChunked } from '../shared/index.ts';
 import { commandLink } from '../shared/inline.ts';
 
@@ -46,11 +47,19 @@ export function helpCommand(
       '`/help <命令>` 查看某个指令的用法',
     ].join('\n'),
     handler: async (cmdCtx) => {
-      const arg = (cmdCtx.command?.raw ?? '').trim();
+      // 参数走共用解析器：只收一个指令名，多写一段按参数错误回绝
+      let parsed;
+      try {
+        parsed = parseArgs(cmdCtx.command?.raw ?? '', { command: 'help' });
+      } catch (error) {
+        if (error instanceof ArgError) return error.message;
+        throw error;
+      }
       const commands = allCommands();
+      const [name] = parsed.words;
 
-      if (arg !== '') {
-        const name = arg.split(/\s+/)[0] ?? '';
+      if (name !== undefined) {
+        if (parsed.words.length > 1) return '⚠️ 只能看一个指令 · 用法: /help';
         const target = findCommand(commands, name);
         if (target === undefined) return '⚠️ 没有这个指令 · 用法: /help';
 

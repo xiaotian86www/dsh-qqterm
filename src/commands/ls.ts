@@ -1,32 +1,32 @@
 /**
  * 目录浏览命令：/ls
  *
- *   /ls              列出当前工作区的子目录
- *   /ls <路径>       列出指定目录（相对当前工作区 / 绝对路径 / `~` 开头都认）
+ *   /ls              列出当前目录的子目录
+ *   /ls <路径>       列出指定目录（相对当前目录 / 绝对路径 / `~` 开头都认）
  *
- * 用途是「在 QQ 里逛目录」：先看当前工作区有哪些项目，点目录进去继续看，点文件
- * 直接把它发到聊天里（`/get`）。所以每个条目都是一个可点击命令：目录填 `/ls <路径>`、
- * 文件填 `/get <路径>`。
+ * 与 `/run`、`/get` 同一组扩展功能：在 QQ 里远程逛这台电脑。根目录是宿主进程的
+ * 当前目录（三个命令共用同一个基准），与会话的工作区、运行目录都无关。
+ *
+ * 用途是「在 QQ 里逛目录」：点目录进去继续看，点文件直接把它发到聊天里（`/get`）。
+ * 所以每个条目都是一个可点击命令：目录填 `/ls <路径>`、文件填 `/get <路径>`。
  *
  * 不给 `.` / `..` 这类固定条目——在 QQ 里它们渲染成的按钮太小，点起来费劲，
  * 回上一级直接写路径更实在。
  *
- * 条目的命令文本一律用**绝对路径**：相对路径的基准会随「当前工作区」变化，点进
- * 第二层就会跑偏，而绝对路径点进任何一层都稳。
+ * 条目的命令文本一律用**绝对路径**：点进任何一层都稳。
  *
- * 与 `/new --dir <工作区>` 同一权限面：列目录等于让人看见 agent 能碰的文件系统，只允许
- * 唯一绑定用户（`access.owner`）。
+ * 与 `/run` 同一权限面：列目录等于让人看见这台电脑的文件系统，只允许唯一绑定用户
+ * （`access.owner`）。
  */
 import type { CommandDeps, SlashCommand } from './types.ts';
 import { parseRest } from './args.ts';
-import type { ChatScope } from '../types.ts';
-import { getScopePeer, sendMarkdownChunked } from '../shared/index.ts';
+import { sendMarkdownChunked } from '../shared/index.ts';
 import { commandLinkRaw } from '../shared/inline.ts';
 import { sessionAdminAuth } from './sessions.ts';
 import { readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, isAbsolute, join, resolve } from 'node:path';
-import { errorMessage } from '../shared/utils.ts';
+import { execRoot } from '../shell/local-exec.ts';
 
 /** 一次最多列多少个子目录（够逛，又不至于刷屏） */
 const MAX_ENTRIES = 40;
@@ -35,7 +35,7 @@ const USAGE = [
   '### 📖 /ls 用法',
   '',
   '`/ls [路径]` 列出子目录',
-  '不写路径看当前工作区；路径可用绝对路径或 `~`',
+  '不写路径看当前目录（dsh 进程启动时所在的位置）；路径可用绝对路径或 `~`',
 ].join('\n');
 
 /** 列目录的结果 */
@@ -44,27 +44,18 @@ type Listing =
   | { ok: false; reason: 'missing' | 'not-directory' | 'denied' };
 
 /** /ls — 列出目录里的子目录 */
-export function lsCommand({ manager, config, logger }: CommandDeps): SlashCommand {
+export function lsCommand({ config, logger }: CommandDeps): SlashCommand {
   return {
     name: 'ls',
-    // 列目录 = 暴露文件系统结构：与 /new --dir <工作区> 同一权限面
+    // 列目录 = 暴露文件系统结构：与 /run、/get 同一权限面
     scope: 'c2c',
     authorized: sessionAdminAuth(config, logger),
     description: '列出子目录',
     usage: USAGE,
     handler: async (cmdCtx) => {
-      const { scope, peerId } = getScopePeer(cmdCtx);
       // 整行都是路径：带空格的路径不用引号也对，写了引号就去掉
       const arg = parseRest(cmdCtx.command?.raw ?? '');
-
-      let text: string;
-      try {
-        text = await renderListing(manager, scope, peerId, arg);
-      } catch (err) {
-        const message = errorMessage(err);
-        logger?.warn(`/ls 失败: ${message}`);
-        text = `⚠️ 列目录失败: ${message}`;
-      }
+      const text = renderListing(arg);
 
       // 统一走 markdown 通道：否则 `###` 与 <qqbot-cmd-input> 会成为字面文本
       await sendMarkdownChunked(cmdCtx, text, config.textChunkLimit);
@@ -76,12 +67,12 @@ export function lsCommand({ manager, config, logger }: CommandDeps): SlashComman
 /**
  * 把参数解析成绝对路径。
  *
- * - 空 → 当前工作区目录；
+ * - 空 → 根目录（宿主进程当前目录）；
  * - `~` / `~/xxx` → home 目录（手机上比敲绝对路径省事）；
  * - 绝对路径 → 原样规范化；
- * - 其它 → 相对当前工作区解析。
+ * - 其它 → 相对根目录解析。
  *
- * @param base 当前工作区目录
+ * @param base 根目录（`execRoot`）
  * @param arg 用户输入（已 trim）
  */
 export function resolveLsTarget(base: string, arg: string): string {
@@ -127,17 +118,8 @@ function isDirectoryLink(parent: string, name: string): boolean {
 }
 
 /** 渲染 `/ls` 的输出 */
-async function renderListing(
-  manager: CommandDeps['manager'],
-  scope: ChatScope,
-  peerId: string,
-  arg: string,
-): Promise<string> {
-  const info = await manager.currentWorkspaceInfo(scope, peerId).catch(() => undefined);
-  if (!info) return '⚠️ 读不到当前工作区。';
-  if (info.missing) return `⚠️ 当前工作区目录不存在: \`${info.path}\``;
-
-  const target = resolveLsTarget(info.path, arg);
+function renderListing(arg: string): string {
+  const target = resolveLsTarget(execRoot(), arg);
   const listing = listEntries(target);
   if (!listing.ok) {
     switch (listing.reason) {

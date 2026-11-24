@@ -243,7 +243,7 @@ describe('/sessions 持有视图', () => {
 
     // 已获取的后台会话：回复 + 停止 + 归档，与恢复按钮同一行
     expect(lineOf('#dddd2222')).toContain(
-      '<qqbot-cmd-input text="/to #dddd2222 " show="回复"/>'
+      '<qqbot-cmd-input text="/to #dddd2222 -- " show="回复"/>'
         + ' · <qqbot-cmd-input text="/stop #dddd2222" show="停止"/>'
         + ' · <qqbot-cmd-input text="/sessions archive #dddd2222" show="归档"/>',
     );
@@ -252,7 +252,7 @@ describe('/sessions 持有视图', () => {
     expect(lineOf('#cccc1111')).toContain('text="/stop #cccc1111" show="停止"');
     expect(lineOf('#cccc1111')).toContain('text="/sessions archive #cccc1111"');
     // 还没打开的会话也照给：列表不区分打开与否，点了由 /to 提示先恢复
-    expect(lineOf('#eeee3333')).toContain('text="/to #eeee3333 " show="回复"');
+    expect(lineOf('#eeee3333')).toContain('text="/to #eeee3333 -- " show="回复"');
     expect(lineOf('#eeee3333')).toContain('text="/sessions archive #eeee3333"');
     // 空闲会话没有可停的东西，不给停止入口
     expect(lineOf('#eeee3333')).not.toContain('show="停止"');
@@ -636,12 +636,12 @@ describe('/sessions all', () => {
     // 行首 ⚡ 与默认视图同一形态：/sessions all 也标生成中
     expect(lineOf('#held')).toContain('show="⚡ #held · ');
     expect(lineOf('#held')).toContain(
-      '<qqbot-cmd-input text="/to #held " show="回复"/>'
+      '<qqbot-cmd-input text="/to #held -- " show="回复"/>'
         + ' · <qqbot-cmd-input text="/stop #held" show="停止"/>'
         + ' · <qqbot-cmd-input text="/sessions archive #held" show="归档"/>',
     );
     // 还没打开的会话也照给，列表不区分打开与否；它没在生成，不给停止
-    expect(lineOf('#cold')).toContain('text="/to #cold " show="回复"');
+    expect(lineOf('#cold')).toContain('text="/to #cold -- " show="回复"');
     expect(lineOf('#cold')).toContain('text="/sessions archive #cold" show="归档"');
     expect(lineOf('#cold')).not.toContain('show="停止"');
     expect(lineOf('#cold')).not.toContain('⚡');
@@ -898,10 +898,19 @@ describe('/sessions rename', () => {
       listHeldSessions: vi.fn(async () => [entry({ id: 'session-held01', held: true })]),
     });
 
-    const text = await run(manager, 'rename #held01 新的 会话名');
+    const text = await run(manager, 'rename #held01 -- 新的 会话名');
 
     expect(manager.renameSession).toHaveBeenCalledWith('session-held01', '新的 会话名');
     expect(text).toBe('✅ 会话名已改为「改好的名字」 · `#held01`');
+  });
+
+  it('没包引号又写成多段时按参数错误回绝', async () => {
+    const manager = makeManager({
+      listHeldSessions: vi.fn(async () => [entry({ id: 'session-held01', held: true })]),
+    });
+
+    expect(await run(manager, 'rename #held01 新的 会话名')).toBe('⚠️ 标题只能一段：有空格就用引号包起来，或写到 -- 之后 · 用法: /help sessions');
+    expect(manager.renameSession).not.toHaveBeenCalled();
   });
 
   it('标题带空格时加引号也照收，引号不进标题', async () => {
@@ -1183,6 +1192,34 @@ describe('/sessions archive', () => {
     expect(manager.archiveSession).not.toHaveBeenCalledWith('session-cccc0003');
   });
 
+  it('目标写成多段又没包引号时按参数错误回绝', async () => {
+    const manager = makeManager({
+      listWorkspaceSessions: vi.fn(async () => [
+        entry({ id: 'session-aaaa0001' }),
+        entry({ id: 'session-bbbb0002' }),
+      ]),
+    });
+
+    const text = await run(manager, 'archive #aaaa0001 #bbbb0002');
+
+    expect(text).toContain('目标只能一段');
+    expect(manager.archiveSession).not.toHaveBeenCalled();
+  });
+
+  it('整段目标可以写到 -- 之后', async () => {
+    const manager = makeManager({
+      listWorkspaceSessions: vi.fn(async () => [
+        entry({ id: 'session-aaaa0001', title: '一' }),
+        entry({ id: 'session-bbbb0002', title: '二' }),
+      ]),
+    });
+
+    const text = await run(manager, 'archive -- #aaaa0001,#bbbb0002');
+
+    expect(manager.archiveSession).toHaveBeenCalledTimes(2);
+    expect(text).toContain('已归档 2 个会话');
+  });
+
   it('全角逗号与 id 混用也能识别，重复目标只执行一次', async () => {
     const manager = makeManager({
       listWorkspaceSessions: vi.fn(async () => [
@@ -1323,6 +1360,34 @@ describe('/sessions unarchive', () => {
     expect(text).toContain('已取消归档 2 个会话');
     expect(text).toContain('<qqbot-cmd-input text="/sessions" show="工作中会话"/>');
   });
+
+  it('目标写成多段又没包引号时按参数错误回绝', async () => {
+    const manager = makeManager({
+      listWorkspaceSessions: vi.fn(async () => [
+        entry({ id: 'session-aaaa0001', archived: true }),
+        entry({ id: 'session-bbbb0002', archived: true }),
+      ]),
+    });
+
+    const text = await run(manager, 'unarchive #aaaa0001 #bbbb0002');
+
+    expect(text).toContain('目标只能一段');
+    expect(manager.unarchiveSession).not.toHaveBeenCalled();
+  });
+
+  it('整段目标可以写到 -- 之后', async () => {
+    const manager = makeManager({
+      listWorkspaceSessions: vi.fn(async () => [
+        entry({ id: 'session-aaaa0001', archived: true }),
+        entry({ id: 'session-bbbb0002', archived: true }),
+      ]),
+    });
+
+    const text = await run(manager, 'unarchive -- #aaaa0001,#bbbb0002');
+
+    expect(manager.unarchiveSession).toHaveBeenCalledTimes(2);
+    expect(text).toContain('已取消归档 2 个会话');
+  });
 });
 
 describe('sessionAdminAuth', () => {
@@ -1410,7 +1475,7 @@ describe('没有 workspaceRegistry 的部署', () => {
   it('行尾仍给回复入口，但不给归档（命令不可用）', async () => {
     const text = await run(pathOnlyManager(), '');
 
-    expect(text).toContain('text="/to #aaaa0001 " show="回复"');
+    expect(text).toContain('text="/to #aaaa0001 -- " show="回复"');
     expect(text).not.toContain('text="/sessions archive');
   });
 

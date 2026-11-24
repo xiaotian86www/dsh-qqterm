@@ -14,7 +14,7 @@ import {
   steeredPromptReceipt,
 } from '../transport/session-source.ts';
 import { sendMarkdownChunked } from '../shared/send-helper.ts';
-import { parseArgs, parseRest } from './args.ts';
+import { ArgError, parseArgs, parseRest } from './args.ts';
 import { matchSessionTarget } from './sessions.ts';
 
 /**
@@ -111,8 +111,13 @@ export function steerCommand({ manager, config }: CommandDeps): SlashCommand {
     ].join('\n'),
     handler: async (cmdCtx) => {
       const { scope, peerId } = getScopePeer(cmdCtx);
-      const parsed = parseArgs(cmdCtx.command?.raw ?? '', { command: 'steer' });
-      if (parsed.error !== undefined) return parsed.error;
+      let parsed;
+      try {
+        parsed = parseArgs(cmdCtx.command?.raw ?? '', { command: 'steer' });
+      } catch (error) {
+        if (error instanceof ArgError) return error.message;
+        throw error;
+      }
       const words = parsed.words;
       if (words.length > 2) return '⚠️ 参数过多 · 用法: /help steer';
 

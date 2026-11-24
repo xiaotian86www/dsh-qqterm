@@ -11,6 +11,7 @@ import { renameCommand } from './rename.ts';
 import { toCommand } from './to.ts';
 import { lsCommand } from './ls.ts';
 import { getCommand } from './get.ts';
+import { runCommand } from './run.ts';
 import { modelCommand } from './model.ts';
 import { reasoningCommand } from './reasoning.ts';
 import { costCommand } from './cost.ts';
@@ -36,6 +37,7 @@ export function buildCommandList(deps: CommandDeps): SlashCommand[] {
     toCommand(deps),
     lsCommand(deps),
     getCommand(deps),
+    runCommand(deps),
     modelCommand(deps),
     reasoningCommand(deps),
     costCommand(deps),

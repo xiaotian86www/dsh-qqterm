@@ -1,5 +1,5 @@
 /**
- * `/to <会话> <文本>` — 向指定会话发 prompt，或在它等答案时提交答案。
+ * `/to <会话> -- <文本>` — 向指定会话发 prompt，或在它等答案时提交答案。
  *
  * 目标可以是当前会话、已获取的会话，或只在磁盘上的会话——最后一种先按 id 接回来
  * 再发（与 `/sessions resume` 同一条路）。命令不改 current：发完仍回到原来的
@@ -7,9 +7,13 @@
  *
  * 目标正在等 `ask_user_question` 时，文本必须走答案通道，不能当新 prompt
  * 排在问题后面——否则永远答不上。空文本进入「下一条消息作为回答」模式。
+ *
+ * 正文有两种写法：一段参数（有空格就用引号包起来），或 `--` 之后的整段原样。
+ * 没包引号又有多段、或以 `-` 开头的词，按参数错误回绝。
  */
 import type { CommandDeps, SlashCommand } from './types.ts';
-import { parseRest } from './args.ts';
+import { ArgError, parseArgs } from './args.ts';
+import type { CommandArgs, CommandSpec } from './args.ts';
 import { getScopePeer, shortSessionId } from '../shared/index.ts';
 import {
   queuedPromptReceipt,
@@ -27,10 +31,16 @@ import { errorMessage } from '../shared/utils.ts';
 const USAGE = [
   '### 📖 /to 用法',
   '',
-  '`/to <会话> <文本>` 向会话发消息',
+  '`/to <会话> <文本>` 向会话发消息；正文有空格就用引号包起来',
+  '`/to <会话> -- <文本>` 正文写在 `--` 之后：整段原样，空格与换行都不必再包引号',
+  '正文只能一段：没包引号又有多段、或以 `-` 开头的词，按参数错误回绝',
   '目标在等答案时，文本作为回答；没打开的会话会先接回来',
   '回复一条消息再发：被引用的内容会一起带上（目标在等答案时整条不发）',
+  '没有正文时写 `/to <会话> --`：只带引用，或进入「下一条消息作为回答」模式',
 ].join('\n');
+
+/** 正文被切成多段时回绝：要么包引号，要么写在 `--` 之后 */
+const BODY_FORMAT = '⚠️ 正文只能一段：有空格就用引号包起来，或写到 -- 之后 · 用法: /help to';
 
 /** 把分组列表摊平成可解析的会话清单 */
 function flattenGroups(groups: readonly WorkspaceGroup[]): WorkspaceSession[] {
@@ -51,6 +61,40 @@ function displayId(id: string): string {
   return `#${shortSessionId(id)}`;
 }
 
+/** /to 的参数：目标 + 一段正文，或 `--` 之后的整段正文 */
+const TO_SPEC: CommandSpec = { command: 'to', terminator: 'rest' };
+
+/** 目标缺失 */
+const MISSING_TARGET = '⚠️ 缺少会话 · 用法: /help to';
+
+type ToParse = { ok: true; target: string; text: string } | { ok: false; error: string };
+
+/**
+ * 取会话与正文：一段参数，或 `--` 之后的整段。
+ *
+ * `/to #id`（或 `/to #id --`）是空正文，留给「只带引用」与「下一条消息作为回答」；
+ * `/to #id 你好` 与 `/to #id "你好 世界"` 是同一段参数；`--` 之后整段原样（空格、
+ * 换行、引号都不动）。没包引号又有多段、或正文以 `-` 开头，都按参数错误回绝。
+ * 目标、正文与 `--` 一律交给同一份 parseArgs，不在命令里另写切词规则。
+ */
+function parseToArgs(raw: string): ToParse {
+  let parsed: CommandArgs;
+  try {
+    parsed = parseArgs(raw, TO_SPEC);
+  } catch (error) {
+    if (error instanceof ArgError) return { ok: false, error: error.message };
+    throw error;
+  }
+  const [target, ...extra] = parsed.words;
+  if (target === undefined) return { ok: false, error: MISSING_TARGET };
+  if (parsed.rest !== undefined) {
+    if (extra.length > 0) return { ok: false, error: BODY_FORMAT };
+    return { ok: true, target, text: parsed.rest };
+  }
+  if (extra.length > 1) return { ok: false, error: BODY_FORMAT };
+  return { ok: true, target, text: extra[0] ?? '' };
+}
+
 export function toCommand({ manager, config, logger }: CommandDeps): SlashCommand {
   return {
     name: 'to',
@@ -59,16 +103,14 @@ export function toCommand({ manager, config, logger }: CommandDeps): SlashComman
     acceptsQuote: true,
     usage: USAGE,
     handler: async (cmdCtx) => {
-      const raw = (cmdCtx.command?.raw ?? '').trim();
       const { scope, peerId } = getScopePeer(cmdCtx);
 
-      // 第一个 token 是会话，其余整体是文本（允许空格、换行）
-      const match = /^(\S+)(?:\s+([\s\S]*))?$/.exec(raw);
-      const targetArg = match?.[1] ?? '';
-      const text = parseRest(match?.[2] ?? '');
-      if (targetArg === '') {
-        return '⚠️ 缺少会话 · 用法: /help to';
-      }
+      // 目标是一个位置参数，正文是一段参数或 `--` 之后的整段：回复链接已经带好
+      // `--`，点开补正文即可
+      const parsed = parseToArgs(cmdCtx.command?.raw ?? '');
+      if (!parsed.ok) return parsed.error;
+      const targetArg = parsed.target;
+      const text = parsed.text;
 
       // 带引用的命令：引用取不到就什么都不发
       const taken = await takeQuote(cmdCtx, config.media, logger);

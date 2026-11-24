@@ -85,7 +85,7 @@ function setup(opts?: {
 describe('OutboundRouter: 多会话标记', () => {
   const sourceOf = (id: string, title = '未命名会话'): string => `> \`#${id}\` · ${title}`;
   const footerOf = (id: string): string =>
-    `<qqbot-cmd-input text="/to #${id} " show="回复"/>`
+    `<qqbot-cmd-input text="/to #${id} -- " show="回复"/>`
     + ` · <qqbot-cmd-input text="/sessions resume #${id}" show="恢复"/>`;
 
   it('非当前会话：来源头 + 正文 + 动作链接行', async () => {

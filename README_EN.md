@@ -49,7 +49,7 @@ Rows are **never numbered**: after paging and grouping, "the third row" is bound
 
 - Every `/sessions` row ends with its actions: Reply / Stop (only while generating) / Archive; every archived row offers Unarchive; a workspace group header taps into `/new --dir <path>`.
 - Every reply, question, approval, and failure card from a non-current session ends with Reply and Resume; Stop is added while it generates, Archive when the deployment can archive.
-- A tap fills the smallest command (`/to #a1b2c3d4 `, `/stop #a1b2c3d4`, `/sessions archive #a1b2c3d4`) into the input box and **never executes it for you**: a stray tap changes nothing, and `/to` keeps the trailing space so the cursor lands at the start of the message body.
+- A tap fills the smallest command (`/to #a1b2c3d4 -- `, `/stop #a1b2c3d4`, `/sessions archive #a1b2c3d4`) into the input box and **never executes it for you**: a stray tap changes nothing, and `/to` ends with `--` and a space so the cursor lands at the start of the message body: whatever follows `--` is the text, and words with spaces or a leading `-` need no quoting.
 - Tapping and typing take the same command path, so authorization, copy, and logs exist once; the equivalent command is always visible next to the action.
 
 ### Background sessions report back
@@ -76,6 +76,7 @@ Rows are **never numbered**: after paging and grouping, "the third row" is bound
 - There is no physical delete: the host exposes no delete API, deleting directories by storage layout is irreversible, and on Windows it collides with file locks.
 - `/sessions resume` on an archived session unarchives it first and says so in the receipt.
 - Archiving a session with a worktree makes the host remove a clean tree and keep the branch; the plugin only reports.
+- Multiple targets go in one word separated by commas (`#a,#b`), or as the whole text after `--`; multiple unquoted words are rejected as a bad argument.
 - If the current session is archived its pointer is cleared, and the next message lands in a new session.
 - In a deployment without `workspaceRegistry`, archive subcommands are treated as unknown.
 
@@ -93,11 +94,11 @@ Rows are **never numbered**: after paging and grouping, "the third row" is bound
 | `/sessions all` | List every session, including other projects |
 | `/sessions <page>` | Page through |
 | `/sessions resume <id>` | Open a session (an archived one is unarchived first); failure never creates one |
-| `/sessions rename <id> <title>` | Rename an opened session; resume a cold one first |
+| `/sessions rename <id> <title>` | Rename an opened session; resume a cold one first; quote a title with spaces, or put it after `--` |
 | `/sessions archive` | List sessions that can be archived; `<page>` pages through |
-| `/sessions archive <id>[,<id>…]` | Archive one or more (at most 10) |
+| `/sessions archive <id>[,<id>…]` | Archive one or more (at most 10); targets are one word, or everything after `--` |
 | `/sessions archived` | List archived sessions |
-| `/sessions unarchive <id>[,<id>…]` | Unarchive |
+| `/sessions unarchive <id>[,<id>…]` | Unarchive; targets follow the same rule as archive |
 
 - Only a generating session carries `⚡` at the start of its row (the default list and `/sessions all` alike); idle rows have no state word, and the trailing `✅` (current) / `📌` (held) are markers that may share a row with `⚡`.
 - Sorting is by most recent human message, descending, with ties by id ascending; the current session is not pinned and is marked only by `✅`.
@@ -240,6 +241,32 @@ Sync is a whole-table overwrite with the remark fixed to `qqterm:commands`; unch
 
 The menu has six fixed entries: Session status, Session list, Reset session, Compact session, Permission preset, Reasoning effort. Permission and reasoning open submenus; the rest point straight at their command. The menu is a bot-wide whole-table overwrite, not per user.
 
+### Local commands and directories (special feature)
+
+`/run`, `/ls`, and `/get` are not forwards of host capabilities but a special feature this channel adds on its own: they operate this computer directly from QQ. They bypass the host's shell and sandbox and are not constrained by permission presets, the session workspace, or the run directory — the effect matches sitting at a terminal on this machine.
+
+All three share one base — **the directory the dsh process was started in** (`process.cwd()`), independent of the session workspace and the run directory, and unaffected by a runtime `cd`.
+
+`/run` takes exactly one command: spaces separate arguments, so wrap the whole command in quotes when it contains spaces, e.g. `/run "cd /d D:\source && dir"`. An extra word is rejected as a malformed argument; start the command with `--` when it begins with `-`; options such as `--timeout` go before the command. The command string goes to the shell verbatim, so pipes and `&&` are interpreted by the shell on its own command line.
+
+| Setting | Type | Default | Description |
+|---|---|---|---|
+| `exec.shell` | string | The actual `cmd.exe` path on Windows; `/bin/sh` otherwise | Shell used to run `/run`; the platform default is written into the config (Windows prefers `ComSpec`); clearing it means empty (an error before execution), never re-defaulted at runtime |
+| `exec.shellArgs` | string[] | Windows `["/d","/s","/c"]`; otherwise `["-c"]` | Argument template for the shell, `{command}` expanded in place into the whole command; the platform default is written into the config and used literally at runtime (empty = pass no arguments), switching shells never rewrites it |
+
+Absolute paths in `/get` and `/ls` ignore the base; a `/run` command is typed by the user, so its consequences are the user's, and it is not wrapped in the host sandbox.
+
+**Risks**
+
+This feature moves "run any command, read any file on this machine" onto QQ messages, and the risk is the same thing as the convenience:
+
+- Whoever can send a message can run commands. `access.owner` accepts exactly one user, but a stolen account, a hijacked login, or a misconfigured owner hands that person the same rights as the account running dsh: `/run` can modify files, install things, and reach the network; `/get` can send any readable file into the chat.
+- No sandbox, no second confirmation, no command allowlist. The plugin does not judge whether a command is dangerous and never asks "are you sure"; the host's sandbox and permission presets protect the host's own tools, not `/run`.
+- Commands run as the user running dsh, so they can touch everything that account can; the working directory and environment variables (credentials included) are visible to them.
+- Output and files travel through QQ: `/run` output comes back into the chat, `/get` sends files straight out.
+
+So this feature fits "one person, one own computer, a QQ account only they log into". If you do not accept the risks, do not use it: clearing `exec.shell` only makes `/run` fail (`/ls` and `/get` do not need a shell and keep working), and removing the whole group means not deploying a build that ships it. At minimum: set owner to yourself only, enable device lock and two-factor on the QQ account, and keep machine credentials out of session directories.
+
 ## Sessions, workspaces, and interaction
 
 ### Workspaces
@@ -252,7 +279,7 @@ Workspaces are the host's `workspaceRegistry` concept; dsh-qqterm keeps no direc
 - Matching order: workspace title → directory name (case-insensitive, unique prefix) → absolute path. Without `workspaceRegistry` only absolute paths are accepted.
 - The title defaults to the last path segment and can be changed in the web sidebar; a manually edited title is never overwritten automatically.
 - Worktrees: `/new --worktree` makes the next message create a tree from the current directory's HEAD first, then opens the session in that tree, on branch `dsh-<short session id>`. Uncommitted changes do not travel into the tree. If HEAD cannot be read or tree creation fails, no session is created that round; the reply gives the reason and next step, the intent is kept, and resending retries. A directory that is not a Git repository opens the session in place with a notice; a read-only sandbox is refused at `/new` on the spot. When a session is archived, the host removes a clean worktree and keeps the branch, and keeps the tree if there are uncommitted changes.
-- Run directory and workspace are two different things: a runtime `cd` only changes the run directory (the base for relative paths in `/get` and `/ls`); workspace grouping, the workspace line in `/status`, and the landing point of the next `/new` still use the session's `header.cwd` at creation. For a worktree session, the workspace is the main repository root and the tree is only the run directory.
+- Run directory and workspace are two different things: a runtime `cd` only changes the run directory, while `/get` and `/ls` keep using the directory the dsh process was started in; workspace grouping, the workspace line in `/status`, and the landing point of the next `/new` still use the session's `header.cwd` at creation. For a worktree session, the workspace is the main repository root and the tree is only the run directory.
 
 ### Models, presets, and reasoning effort
 
@@ -288,10 +315,11 @@ Workspaces are the host's `workspaceRegistry` concept; dsh-qqterm keeps no direc
 | `/compact` | Compact session history (summaries replace older records); the reply includes the host command's result |
 | `/goal` | Set or view the current session's long-term goal; `/goal <goal>` sets it, `edit` / `pause` / `resume` / `clear` manage it |
 | `/sessions` (alias `/session`) | Session management: by default lists sessions held by QQ (including cold sessions not yet opened after a restart), `all` shows everything, `archived` shows archived sessions; addressing, quick actions, and archive semantics live in "Multi-session management" |
-| `/rename` | Rename the current session; `/sessions rename <id> <title>` renames an opened session |
-| `/to` | Send a message to a given session; submits an answer when that session is waiting for one; a not-yet-open session is resumed first; replying to a message places its quote ahead of the body (except while the target awaits an answer) |
-| `/ls` | List subdirectories and files in a directory; click a directory to enter, a file to send |
-| `/get` | Send a file to the current chat (images / videos / voice by type); any path |
+| `/rename` | Rename the current session; `/sessions rename <id> <title>` renames an opened session (quote a title with spaces, or put it after `--`) |
+| `/to` | Send a message to a given session (`/to <id> <text>` passes the body as one argument, quoted when it contains spaces; `/to <id> -- <text>` also works and sends everything after `--` verbatim; multiple unquoted words or a body starting with `-` are rejected as bad arguments, and a bare target means an empty body; reply links already carry `--`, so you only add the body); submits an answer when that session is waiting for one; a not-yet-open session is resumed first; replying to a message places its quote ahead of the body (except while the target awaits an answer) |
+| `/ls` | List subdirectories and files in the current directory (where the dsh process was started); click a directory to enter, a file to send; paths may be absolute or start with `~` |
+| `/get` | Send a file to the current chat (images / videos / voice by type); any path, relative ones resolved against the same base |
+| `/run` | Run a local command in the current directory (shell is the OS one, configurable via `exec`); `--timeout <seconds>` changes the timeout (120 s by default, 600 s max) |
 | `/model` | View or switch the current session's model |
 | `/reasoning` (alias `/think`) | View or switch the current session's reasoning effort |
 | `/preset` | View or switch the current agent preset (only affects new sessions) |
@@ -315,12 +343,12 @@ Notes:
 | Form | Effect |
 |---|---|
 | `/new` | Clear the current pointer; the next message creates a new session in the original workspace; the old session keeps running |
-| `/new <prompt>` | Send this prompt immediately in the new session |
+| `/new <prompt>` | Send this prompt immediately in the new session (quote it when it contains spaces, or put it after `--`) |
 | `/new --dir <workspace>` | Open the new session in the given workspace (`-d`, one word only) |
 | `/new --background <prompt>` | Open another session in the background without touching the current session or workspace (`-b`, prompt required) |
 | `/new --worktree [prompt]` | Create a worktree before the next message (`-w`, see "Workspaces") |
 
-- Arguments and prompt may come in any order; the remaining text is joined as the prompt, and everything after `--` counts as prompt.
+- Arguments and prompt may come in any order; the prompt is exactly one argument - quote it when it contains spaces, or put it after `--` (verbatim, never re-split or re-joined).
 - `-w` and `-b` combine as `-wb`; when short flags are clustered, the value-taking `-d` goes last (`-wbd <workspace>`).
 - `--dir` takes one word only; quote paths with spaces, or use `--dir=path`.
 - Arguments are validated before the session is touched: a missing directory or file is rejected and the current session is unaffected.

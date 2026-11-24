@@ -11,6 +11,8 @@
  *   /sessions archive <目标[,目标…]>   归档会话（从列表与 Web 侧栏隐藏，日志保留）
  *   /sessions unarchive <目标[,目标…]> 取消归档，让它重新可用
  *
+ * 归档目标只收一段：多个会话用逗号写在同一个词里，或整段写到 `--` 之后。
+ *
  * **句柄规则（唯一要记住的一条）**：所有目标一律用 8 位短 id（行首 `#` 后那串），
  * 列表不编号——序号只适合单页列表，翻页、分组后容易和「第几条」对不上。
  *
@@ -35,9 +37,11 @@
 import { isAbsolute } from 'node:path';
 import type { CommandDeps, SlashCommand } from './types.ts';
 import { ownerOnlyAuth } from './auth.ts';
-import { parseArgs, quoteArg } from './args.ts';
+import { ArgError, parseArgs, quoteArg } from './args.ts';
+import type { CommandArgs } from './args.ts';
 import { getScopePeer, formatRelativeTime, sendMarkdownChunked, shortSessionId } from '../shared/index.ts';
 import { cleanInline, clip, commandLink, commandLinkRaw } from '../shared/inline.ts';
+import { sessionReplyLink } from '../transport/session-source.ts';
 import type { ArchiveSessionOutcome, WorkspaceGroup, WorkspaceSession } from '../session/index.ts';
 import { errorMessage } from '../shared/utils.ts';
 import { pageCount, pageLinks, pageOutOfRange, pageSlice } from '../shared/paging.ts';
@@ -83,7 +87,7 @@ function usageFor(archivable: boolean): string {
         ]
       : []),
     '',
-    '目标用 8 位短 id（行首 `#` 后那串）',
+    '目标用 8 位短 id（行首 `#` 后那串）；多个会话用逗号写在同一个词里，或整段写到 `--` 之后',
   ].join('\n');
 }
 
@@ -186,6 +190,21 @@ function resolveTargets(
   }
 
   return { picks, errors };
+}
+
+const TARGET_FORMAT = '⚠️ 目标只能一段：多个会话用逗号写在一个词里，或写到 -- 之后 · 用法: /help sessions';
+
+/**
+ * 目标只收一段：多个会话用逗号写在一个词里，或整段写到 `--` 之后。
+ *
+ * 返回 undefined 表示写法不对：`--` 之前还有词，或没包引号又写成多段。
+ */
+function targetTextOf(
+  rest: readonly string[],
+  afterTerminator: string | undefined,
+): string | undefined {
+  if (afterTerminator !== undefined) return rest.length === 0 ? afterTerminator : undefined;
+  return rest.length > 1 ? undefined : rest[0] ?? '';
 }
 
 /** 拆 token 并做数量校验；返回字符串表示要直接回给用户 */
@@ -319,7 +338,7 @@ function renderLine(entry: WorkspaceSession, label: string, extra = ''): string 
 /**
  * 会话行尾的快捷操作：不改当前指针的三个动作，只给工作中的会话。
  *
- * - `回复`：把 `/to #短id ` 填进输入框，给这个会话发消息。当前会话本来就在跟它
+ * - `回复`：把 `/to #短id -- ` 填进输入框，给这个会话发消息。当前会话本来就在跟它
  *   说话，不给；其余一律给——列表不区分会话是否已打开，不给入口等于把「冷会话」
  *   这个概念漏到界面上（会话还没打开时 `/to` 会请先恢复）。
  * - `停止`：`/stop #短id`，只给正在生成的会话；空闲时没有可停的东西。
@@ -333,7 +352,7 @@ function renderLine(entry: WorkspaceSession, label: string, extra = ''): string 
 function quickLinks(entry: WorkspaceSession, archivable: boolean): string {
   const links: string[] = [];
   if (!entry.current) {
-    links.push(commandLink(`/to ${displayId(entry.id)} `, '回复'));
+    links.push(sessionReplyLink(entry.id));
   }
   if (entry.running) links.push(commandLink(`/stop ${displayId(entry.id)}`, '停止'));
   if (archivable) links.push(commandLink(`/sessions archive ${displayId(entry.id)}`, '归档'));
@@ -369,7 +388,19 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Slash
     handler: async (cmdCtx) => {
       // 切词按约定俗成：空格分隔，带空格的目标或标题用引号包起来；认不出的参数
       // 由 parseArgs 直接回绝
-      const parsed = parseArgs((cmdCtx.command?.raw ?? '').trim(), { command: 'sessions' });
+      let parsed: CommandArgs;
+      try {
+        parsed = parseArgs((cmdCtx.command?.raw ?? '').trim(), {
+          command: 'sessions',
+          // 标题写到 `--` 之后时整段原样；其余子命令照旧
+          terminator: 'rest',
+        });
+      } catch (error) {
+        if (!(error instanceof ArgError)) throw error;
+        // 参数写错也要走 markdown 通道（与 render 的返回同一出口）
+        await sendMarkdownChunked(cmdCtx, error.message, config.textChunkLimit);
+        return { kind: 'noop' as const };
+      }
       const words = [...parsed.words];
       let sub = words[0] ?? '';
       const rest = words.slice(1);
@@ -391,9 +422,6 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Slash
         rest.shift();
       }
 
-      // 认不出的参数不当目标（旧写法会得到「没有匹配的会话」，等于静默丢弃）。
-      // 错误统一在 render 里回，走同一条 markdown 通道
-      const invalid = parsed.error;
       const loadHeld = async (): Promise<WorkspaceSession[] | string> => {
         try {
           const entries = await manager.listHeldSessions(scope, peerId);
@@ -447,8 +475,6 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Slash
       };
 
       const render = async (): Promise<string> => {
-        if (invalid !== undefined) return invalid;
-
         // 没有 registry 时归档子命令按未知子命令处理，与其它拼错的子命令同一句话
         if (!archivable && (sub === 'archive' || sub === 'a'
           || sub === 'archived' || sub === 'unarchive' || sub === 'u' || sub === 'restore')) {
@@ -523,10 +549,17 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Slash
           case 'rename':
           case 'rn': {
             const arg = rest[0] ?? '';
-            const title = rest.slice(1).join(' ').trim();
+            // 标题只收一段：引号包起来的一段，或 `--` 之后的整段，不把词拼回字符串
+            const rawTitle = parsed.rest !== undefined
+              ? (rest.length > 1 ? undefined : parsed.rest)
+              : (rest.length > 2 ? undefined : rest[1] ?? '');
             if (arg.trim() === '') {
               return '⚠️ 缺少目标 · 用法: /help sessions';
             }
+            if (rawTitle === undefined) {
+              return '⚠️ 标题只能一段：有空格就用引号包起来，或写到 -- 之后 · 用法: /help sessions';
+            }
+            const title = rawTitle.trim();
             if (title === '') {
               return '⚠️ 缺少新标题 · 用法: /help sessions';
             }
@@ -557,8 +590,8 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Slash
           case 'a': {
             // 只给页码 = 翻候选页：没有序号后，1–3 位数字只可能是页码
             let pickerPage = 1;
-            let listing = rest.length === 0;
-            if (rest.length === 1 && /^\d{1,3}$/.test(rest[0]!)) {
+            let listing = rest.length === 0 && parsed.rest === undefined;
+            if (parsed.rest === undefined && rest.length === 1 && /^\d{1,3}$/.test(rest[0]!)) {
               pickerPage = Number(rest[0]!);
               listing = true;
             }
@@ -585,8 +618,10 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Slash
               return renderArchivePicker(candidates, pickerPage);
             }
 
-            const parsed = parseTargetsOrError(rest.join(' '));
-            if ('message' in parsed) return parsed.message;
+            const rawTargets = targetTextOf(rest, parsed.rest);
+            if (rawTargets === undefined) return TARGET_FORMAT;
+            const targets = parseTargetsOrError(rawTargets);
+            if ('message' in targets) return targets.message;
 
             // 目标需要跨工作区全量清单（可能来自 /sessions all），
             // 再补上宿主列表暂时没返回的持有会话
@@ -599,7 +634,7 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Slash
               all = [...loadedHeld, ...all.filter((entry) => !heldIds.has(entry.id))];
             }
 
-            const batch = resolveTargets(all, parsed.tokens);
+            const batch = resolveTargets(all, targets.tokens);
             // 跳过项与结果行都写会话名，按命中目标补标题
             await manager.fillSessionTitles(batch.picks);
             const skipped = batch.picks
@@ -638,14 +673,16 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Slash
               return `⚠️ 没有已归档的会话 · ${commandLink('/sessions archive', '归档会话')}`;
             }
 
-            if (rest.length === 0) {
+            if (rest.length === 0 && parsed.rest === undefined) {
               return `⚠️ 缺少目标 · ${commandLink('/sessions archived', '查看已归档')}`;
             }
 
-            const parsed = parseTargetsOrError(rest.join(' '));
-            if ('message' in parsed) return parsed.message;
+            const rawTargets = targetTextOf(rest, parsed.rest);
+            if (rawTargets === undefined) return TARGET_FORMAT;
+            const targets = parseTargetsOrError(rawTargets);
+            if ('message' in targets) return targets.message;
 
-            const batch = resolveTargets(all, parsed.tokens);
+            const batch = resolveTargets(all, targets.tokens);
             // 跳过项与结果行都写会话名，按命中目标补标题
             await manager.fillSessionTitles(batch.picks);
             const skipped = batch.picks

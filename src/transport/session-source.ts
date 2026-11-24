@@ -6,7 +6,7 @@
  * 独占一行、与正文之间空一行——不能把标记直接拼在正文前面，否则会和
  * markdown 标题、列表、代码块粘成一段。
  *
- * `回复` 把 `/to #短id ` 填进输入框，`恢复` 直接切走当前指针，`停止` 中止这个
+ * `回复` 把 `/to #短id -- ` 填进输入框，`恢复` 直接切走当前指针，`停止` 中止这个
  * 后台会话正在生成的回合，`归档` 把这个后台会话从列表里收走。四者独占一行、
  * 正文之后空一行，位置固定好找；停止只在会话确实在生成时出现，归档只在部署有
  * workspaceRegistry 时出现（没有对应能力时不给点了没用的入口）。
@@ -57,12 +57,13 @@ export function sessionSourceHeader(sessionId: string, title?: string): string {
 }
 
 /**
- * 回复链接：把 `/to #短id ` 填进输入框（label 可按场景改，如提问用「回答」）。
+ * 回复链接：把 `/to #短id -- ` 填进输入框（label 可按场景改，如提问用「回答」）。
  *
+ * `--` 是分隔符：用户点开只需在它后面补正文，正文里有空格或 `-` 开头的词都不必再包引号。
  * `show` 只写动作，不再跟 `#短id`：id 已经在首行署名里，重复一遍只是噪音。
  */
 export function sessionReplyLink(sessionId: string, label = '回复'): string {
-  return commandLink(`/to #${shortSessionId(sessionId)} `, label);
+  return commandLink(`/to #${shortSessionId(sessionId)} -- `, label);
 }
 
 /** 恢复链接：把这个会话切回当前（后续消息发给它）；`show` 同样只写动作 */

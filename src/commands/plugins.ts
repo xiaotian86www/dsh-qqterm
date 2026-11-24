@@ -11,7 +11,7 @@ import { errorText, sendMarkdownChunked } from '../shared/index.ts';
 import { renderPluginCheck, renderPluginList } from '../plugins/format.ts';
 import type { PluginInstaller } from '../plugins/index.ts';
 import { ownerOnlyAuth } from './auth.ts';
-import { parseArgs } from './args.ts';
+import { ArgError, optionValue, parseArgs } from './args.ts';
 
 /** 用法页：没有 hmr 服务时 `reload` 整条不出现，免得用户看到一条注定回「不支持」的子命令 */
 function usageFor(reloadable: boolean): string {
@@ -48,11 +48,16 @@ export function pluginsCommand({ config, logger, installer, reloader }: CommandD
       const bot = extras.bot;
       const targetId = extras.replyTarget?.targetId;
       // 切词按约定俗成：空格分隔，带空格的值用引号包起来；认不出的参数直接回绝
-      const parsed = parseArgs((cmdCtx.command?.raw ?? '').trim(), {
-        command: 'plugins',
-        flags: [{ name: 'allow-builds', value: true, list: true, missing: ALLOW_BUILDS_MISSING }],
-      });
-      if (parsed.error !== undefined) return parsed.error;
+      let parsed;
+      try {
+        parsed = parseArgs((cmdCtx.command?.raw ?? '').trim(), {
+          command: 'plugins',
+          options: [{ name: 'allow-builds', kind: 'list', missing: ALLOW_BUILDS_MISSING }],
+        });
+      } catch (error) {
+        if (error instanceof ArgError) return error.message;
+        throw error;
+      }
       const { words } = parsed;
       const sub = words[0] ?? '';
       const notify = targetId === undefined || targetId === '' ? undefined : { targetId };
@@ -93,7 +98,7 @@ export function pluginsCommand({ config, logger, installer, reloader }: CommandD
           const version = sub === 'update' ? words[2] : undefined;
           const extra = sub === 'install' ? words[2] : words[3];
           if (extra !== undefined) return `⚠️ 未知参数: ${extra} · 用法: /help plugins`;
-          const approved = sub === 'install' ? parsed.lists.get('allow-builds') : undefined;
+          const approved = sub === 'install' ? optionValue<string[]>(parsed, 'allow-builds') : undefined;
 
           if (sub === 'update') {
             const info = await installer.find(target);

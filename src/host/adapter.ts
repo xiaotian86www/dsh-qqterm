@@ -267,9 +267,9 @@ export interface WorktreeServiceLike {
   ): Promise<{ path: string; branchRecreated: boolean }>;
 }
 
-/** sandboxPolicy 服务最小契约：只读部署默认模式 */
-export interface SandboxPolicyLike {
-  resolve(request?: { session?: unknown; mode?: string }): { mode?: string } | undefined;
+/** sandboxPolicy 服务最小契约：只读当前沙箱模式（`/status` 与只读判定用，不在这里发起执行） */
+interface SandboxPolicyLike {
+  resolve(): { mode?: string } | undefined;
 }
 
 /** subprocess 服务最小契约（只跑只读命令：解析可执行文件 + 收集 stdout） */
