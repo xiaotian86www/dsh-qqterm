@@ -8,11 +8,11 @@
  * 目标正在等 `ask_user_question` 时，文本必须走答案通道，不能当新 prompt
  * 排在问题后面——否则永远答不上。空文本进入「下一条消息作为回答」模式。
  *
- * 正文只认一种格式：`--` 之后整段是正文（`--` 前没有正文）。目标后直接跟文字的
- * 旧写法按参数错误回绝，不再兼容。
+ * 正文有两种写法：一段参数（有空格就用引号包起来），或 `--` 之后的整段原样。
+ * 没包引号又有多段、或以 `-` 开头的词，按参数错误回绝。
  */
 import type { CommandDeps, SlashCommand } from './types.ts';
-import { parseRest } from './args.ts';
+import { looksLikeParam, QUOTE_OPEN_TEXT, tokenize } from './args.ts';
 import { getScopePeer, shortSessionId } from '../shared/index.ts';
 import {
   queuedPromptReceipt,
@@ -30,15 +30,16 @@ import { errorMessage } from '../shared/utils.ts';
 const USAGE = [
   '### 📖 /to 用法',
   '',
-  '`/to <会话> -- <文本>` 向会话发消息',
-  '`--` 之后整段是正文，不必再包引号；目标后直接跟文字的写法不再接受',
+  '`/to <会话> <文本>` 向会话发消息；正文有空格就用引号包起来',
+  '`/to <会话> -- <文本>` 正文写在 `--` 之后：整段原样，空格与换行都不必再包引号',
+  '正文只能一段：没包引号又有多段、或以 `-` 开头的词，按参数错误回绝',
   '目标在等答案时，文本作为回答；没打开的会话会先接回来',
   '回复一条消息再发：被引用的内容会一起带上（目标在等答案时不带）',
   '没有正文时写 `/to <会话> --`：只带引用，或进入「下一条消息作为回答」模式',
 ].join('\n');
 
-/** 正文没写在 `--` 之后时回绝：/to 只认一种正文格式 */
-const BODY_FORMAT = '⚠️ 正文要写在 -- 之后 · 用法: /help to';
+/** 正文被切成多段时回绝：要么包引号，要么写在 `--` 之后 */
+const BODY_FORMAT = '⚠️ 正文只能一段：有空格就用引号包起来，或写到 -- 之后 · 用法: /help to';
 
 /** 把分组列表摊平成可解析的会话清单 */
 function flattenGroups(groups: readonly WorkspaceGroup[]): WorkspaceSession[] {
@@ -60,15 +61,25 @@ function displayId(id: string): string {
 }
 
 /**
- * 取会话之后的正文：只认 `--` 之后的整段。
+ * 取会话之后的正文：一段参数，或 `--` 之后的整段。
  *
  * `/to #id`（或 `/to #id --`）是空正文，留给「只带引用」与「下一条消息作为回答」；
- * `/to #id -- 文本` 是标准写法；`/to #id 文本`、`/to #id --foo` 都是旧写法，回绝。
+ * `/to #id 你好` 与 `/to #id "你好 世界"` 是同一段参数；`--` 之后整段原样（空格、
+ * 换行、引号都不动）。没包引号又有多段、或正文以 `-` 开头，都按参数错误回绝。
  */
-function parseToText(rest: string): { ok: true; text: string } | { ok: false } {
+function parseToText(rest: string): { ok: true; text: string } | { ok: false; error: string } {
   const trimmed = rest.trim();
   if (trimmed === '' || trimmed === '--') return { ok: true, text: '' };
-  return /^--\s/.test(trimmed) ? { ok: true, text: trimmed.slice(2).trimStart() } : { ok: false };
+  if (/^--\s/.test(trimmed)) return { ok: true, text: trimmed.slice(2).trimStart() };
+  const { tokens, error } = tokenize(trimmed);
+  if (error !== undefined) return { ok: false, error: `${QUOTE_OPEN_TEXT} · 用法: /help to` };
+  const [only, ...extra] = tokens;
+  if (only === undefined) return { ok: true, text: '' };
+  if (extra.length > 0) return { ok: false, error: BODY_FORMAT };
+  if (!only.quoted && looksLikeParam(only)) {
+    return { ok: false, error: `⚠️ 未知参数: ${only.value} · 用法: /help to` };
+  }
+  return { ok: true, text: only.value };
 }
 
 export function toCommand({ manager, config, logger }: CommandDeps): SlashCommand {
@@ -88,10 +99,10 @@ export function toCommand({ manager, config, logger }: CommandDeps): SlashComman
       if (targetArg === '') {
         return '⚠️ 缺少会话 · 用法: /help to';
       }
-      // 正文只写在 `--` 之后：回复链接已经带好，点开补正文即可
+      // 正文是一段参数或 `--` 之后的整段：回复链接已经带好 `--`，点开补正文即可
       const parsed = parseToText(match?.[2] ?? '');
-      if (!parsed.ok) return BODY_FORMAT;
-      const text = parseRest(parsed.text);
+      if (!parsed.ok) return parsed.error;
+      const text = parsed.text;
 
       // 带引用的命令：引用取不到就什么都不发
       const taken = await takeQuote(cmdCtx, config.media, logger);

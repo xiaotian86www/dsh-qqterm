@@ -13,7 +13,7 @@ User-visible changes to QQ SuperTerm (`dsh-qqterm`). The format follows [Keep a 
 ### Changed
 
 - `/ls` and `/get` now resolve relative paths against the host process's current directory (`process.cwd()`) instead of the run directory; absolute paths still work as before.
-- `/to` now takes its body only after `--` (`/to <session> -- <text>`): everything after `--` is sent verbatim, and the old form that put the body right after the target is rejected as a bad argument (a bare target means an empty body); the reply link at the bottom of messages from other sessions now reads `/to #short-id -- `, so the user only adds the text.
+- `/to` takes the body either as a single argument (`/to <session> <text>`, quoted when it contains spaces) or verbatim after `--` (`/to <session> -- <text>`); multiple unquoted words or a body starting with `-` are rejected as bad arguments (a bare target means an empty body); the reply link at the bottom of messages from other sessions now reads `/to #short-id -- `, so the user only adds the text.
 - `exec.shell` and `exec.shellArgs` now default to the platform's values in the config (the actual `cmd.exe` path and `["/d","/s","/c"]` on Windows, `/bin/sh` and `["-c"]` otherwise) instead of being derived only at runtime, so they are visible and editable; both are used literally at runtime, clearing one means empty (`/run` reports "no shell configured"), and nothing is re-defaulted or rewritten for the chosen shell.
 
 ## [0.0.2] - 2026-11-24

@@ -89,13 +89,53 @@ beforeEach(() => {
 });
 
 describe('/to', () => {
-  it('不带 -- 的旧写法按参数错误回绝，不发送', async () => {
+  it('没包引号又被切成多段时按参数错误回绝，不发送', async () => {
     const manager = makeManager();
 
-    const text = await run(manager, '#3f2a9b1c 旧写法正文');
+    const text = await run(manager, '#3f2a9b1c 旧 写法正文');
 
-    expect(text).toBe('⚠️ 正文要写在 -- 之后 · 用法: /help to');
+    expect(text).toBe('⚠️ 正文只能一段：有空格就用引号包起来，或写到 -- 之后 · 用法: /help to');
     expect(manager.sendTo).not.toHaveBeenCalled();
+  });
+
+  it('一段正文可以不带 --：没有空格的词原样发', async () => {
+    const manager = makeManager();
+
+    await run(manager, '#3f2a9b1c hi');
+
+    expect(manager.sendTo).toHaveBeenCalledWith(
+      expect.anything(), expect.anything(), expect.anything(), TARGET, 'hi',
+      expect.anything(),
+    );
+  });
+
+  it('引号包住的正文算一段：空格留在正文里', async () => {
+    const manager = makeManager();
+
+    await run(manager, '#3f2a9b1c "hello world"');
+
+    expect(manager.sendTo).toHaveBeenCalledWith(
+      expect.anything(), expect.anything(), expect.anything(), TARGET, 'hello world',
+      expect.anything(),
+    );
+  });
+
+  it('引号没闭合时回引号提示', async () => {
+    const manager = makeManager();
+
+    expect(await run(manager, '#3f2a9b1c "hello')).toBe('⚠️ 引号没有闭合 · 用法: /help to');
+    expect(manager.sendTo).not.toHaveBeenCalled();
+  });
+
+  it('-- 之后原样：引号也是正文的一部分', async () => {
+    const manager = makeManager();
+
+    await run(manager, '#3f2a9b1c -- "hello world"');
+
+    expect(manager.sendTo).toHaveBeenCalledWith(
+      expect.anything(), expect.anything(), expect.anything(), TARGET, '"hello world"',
+      expect.anything(),
+    );
   });
 
   it('按短 id 找到目标，-- 之后整段是正文，且不改 current', async () => {
@@ -135,11 +175,23 @@ describe('/to', () => {
     );
   });
 
-  it('--foo 不是分隔符，同样按旧写法回绝', async () => {
+  it('--foo 是认不出的参数，按未知参数回绝', async () => {
     const manager = makeManager();
 
-    expect(await run(manager, '#3f2a9b1c --foo')).toBe('⚠️ 正文要写在 -- 之后 · 用法: /help to');
+    expect(await run(manager, '#3f2a9b1c --foo')).toBe('⚠️ 未知参数: --foo · 用法: /help to');
     expect(manager.sendTo).not.toHaveBeenCalled();
+  });
+
+  it('以 - 开头的正文要包引号，包住后原样发', async () => {
+    const manager = makeManager();
+    expect(await run(manager, '#3f2a9b1c -x')).toBe('⚠️ 未知参数: -x · 用法: /help to');
+
+    await run(manager, '#3f2a9b1c "-x"');
+
+    expect(manager.sendTo).toHaveBeenCalledWith(
+      expect.anything(), expect.anything(), expect.anything(), TARGET, '-x',
+      expect.anything(),
+    );
   });
 
   it('没有正文时 -- 可省：只给目标就是空正文', async () => {
