@@ -69,7 +69,7 @@ const PROMPT_FORMAT = '⚠️ 提示词只能一段：有空格就用引号包�
  */
 const NEW_SPEC: CommandSpec = {
   command: 'new',
-  terminator: 'rest',
+  terminator: true,
   options: [
     { name: 'dir', alias: 'd', kind: 'value', missing: DIR_MISSING },
     { name: 'worktree', alias: 'w' },

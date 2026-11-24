@@ -62,7 +62,7 @@ function displayId(id: string): string {
 }
 
 /** /to 的参数：目标 + 一段正文，或 `--` 之后的整段正文 */
-const TO_SPEC: CommandSpec = { command: 'to', terminator: 'rest' };
+const TO_SPEC: CommandSpec = { command: 'to', terminator: true };
 
 /** 目标缺失 */
 const MISSING_TARGET = '⚠️ 缺少会话 · 用法: /help to';

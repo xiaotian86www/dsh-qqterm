@@ -9,9 +9,10 @@
  * 两类命令共用这一个模块：
  * - 带参数的命令（/new、/sessions、/plugins、/run、/to）走 parseArgs：按声明认
  *   `--dir` 这类选项，剩下的词是位置参数；认不出的参数、缺值、引号没闭合都抛
- *   ArgError，调用方把 message 原样回给用户，命令不执行。
- * - 整行就是一个值的命令（路径、标题）走 parseRest：两端成对的引号去掉，其余
- *   原样，写不写引号都对。
+ *   ArgError，调用方把 message 原样回给用户，命令不执行。`--` 之后的原文整段
+ *   进 `rest`，一个字符都不再切（命令、提示词、正文、标题都走这一条）。
+ * - 整行就是一个值的命令（路径、标题）走 parseRest：整段被一对引号完整包住时去掉
+ *   这对引号，其余原样，写不写引号都对。
  *
  * 切出来的词就是参数的最终形态，拆完不再拼回字符串：一条命令要几个位置参数、
  * 多给一个算什么错、带空格的一个值用引号还是写在 `--` 之后，都由各命令自己判
@@ -83,18 +84,20 @@ export function looksLikeParam(token: { value: string; quoted: boolean }): boole
 }
 
 /**
- * 整段当一个值：两端成对的引号去掉，其余原样（保留中间的空格与换行）。
+ * 整段当一个值：整段被一对引号完整包住时去掉这对引号，其余原样（保留中间的空格
+ * 与换行）。
  *
- * 给「整行都是值」的命令用（`/ls <路径>`、`/rename <标题>`）：没有第二个位置参数，
- * 切词只会白白吃掉空格，引号反而成了值的一部分。
+ * 给「整行都是值」的命令用（`/ls <路径>`、`/rename <标题>`、`/run -- 命令`）：没有
+ * 第二个位置参数，切词只会白白吃掉空格，引号反而成了值的一部分。只有第一个引号
+ * 恰好在末尾闭合才算「整段包住」——`"a" "b"` 是两个值，引号属于原文，不能只去首尾。
  */
 export function parseRest(raw: string): string {
   const text = raw.trim();
   const quote = text[0];
-  if ((quote === '"' || quote === "'") && text.length >= 2 && text.endsWith(quote)) {
-    return text.slice(1, -1);
-  }
-  return text;
+  if (text.length < 2 || (quote !== '"' && quote !== "'")) return text;
+  const close = text.indexOf(quote, 1);
+  if (close !== text.length - 1) return text;
+  return text.slice(1, -1);
 }
 
 /**
@@ -159,13 +162,12 @@ export interface CommandSpec {
   /** 认识的选项；其余 `-` 开头的词一律回未知参数 */
   options?: readonly OptionSpec[];
   /**
-   * 认 `--`，两种收尾：
-   * - `words`：之后的词仍按位置参数切（`/run` 用：一次只收一条命令，`--` 只隔开
-   *   `-` 开头的命令）
-   * - `rest`：之后的原文整段进 `rest`，不再切词（正文、提示词、标题里要保住空格与
-   *   引号时用）
+   * 认 `--`：之后的原文整段进 `rest`，不再切词（命令、提示词、正文、标题里要保住
+   * 空格、引号、管道与 `&&` 时都用这一条）。
+   *
+   * `--` 之前已切出的词仍留在 `words` 里；前后都给了值算不算写错，由命令自己判。
    */
-  terminator?: 'words' | 'rest';
+  terminator?: boolean;
 }
 
 /** 解析结果：选项按声明里的名字取，位置参数保持原顺序 */
@@ -174,7 +176,7 @@ export interface CommandArgs {
   options: Readonly<Record<string, OptionValue | undefined>>;
   /** 位置参数，按出现顺序，引号已去掉 */
   words: string[];
-  /** `terminator: 'rest'` 且写了 `--` 时：之后的原文（可能为空串） */
+  /** 声明了 `terminator` 且写了 `--` 时：之后的原文（可能为空串） */
   rest?: string;
 }
 
@@ -249,7 +251,7 @@ export function parseArgs(raw: string, spec: CommandSpec): CommandArgs {
   const { tokens, error } = tokenize(raw);
   if (error !== undefined) throw new ArgError(`${QUOTE_OPEN_TEXT}${usage}`);
   const known = spec.options ?? [];
-  const queue = expandShortFlags(tokens, known, spec.terminator !== undefined);
+  const queue = expandShortFlags(tokens, known, spec.terminator === true);
   let rest: string | undefined;
   for (let i = 0; i < queue.length; i += 1) {
     const token = queue[i] as RawToken;
@@ -259,15 +261,9 @@ export function parseArgs(raw: string, spec: CommandSpec): CommandArgs {
       words.push(token.value);
       continue;
     }
-    // `--` 终止参数识别：之后的词按声明收成位置参数，或整段原文进 rest
-    if (spec.terminator !== undefined && token.value === '--') {
-      if (spec.terminator === 'rest') {
-        rest = raw.slice(token.offset + 2).trimStart();
-        break;
-      }
-      for (const remaining of queue.slice(i + 1)) {
-        if (remaining.value !== '') words.push(remaining.value);
-      }
+    // `--` 终止参数识别：之后的原文整段进 rest，一个字符都不再动
+    if (spec.terminator === true && token.value === '--') {
+      rest = raw.slice(token.offset + 2).trimStart();
       break;
     }
     const eq = token.value.indexOf('=');

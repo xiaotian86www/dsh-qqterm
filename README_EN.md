@@ -247,7 +247,7 @@ The menu has six fixed entries: Session status, Session list, Reset session, Com
 
 All three share one base — **the directory the dsh process was started in** (`process.cwd()`), independent of the session workspace and the run directory, and unaffected by a runtime `cd`.
 
-`/run` takes exactly one command: spaces separate arguments, so wrap the whole command in quotes when it contains spaces, e.g. `/run "cd /d D:\source && dir"`. An extra word is rejected as a malformed argument; start the command with `--` when it begins with `-`; options such as `--timeout` go before the command. The command string goes to the shell verbatim, so pipes and `&&` are interpreted by the shell on its own command line.
+`/run` takes exactly one command: everything after `--` goes to the shell verbatim, e.g. `/run -- cd /d D:\source && dir`, so pipes, `&&`, and the command's own `-` options need no extra quoting; without `--` the whole command is a single positional argument, quoted when it contains spaces (`/run "cd /d D:\source && dir"`). An extra word is rejected as a malformed argument; options such as `--timeout` go before `--`. The command string goes to the shell verbatim, so pipes and `&&` are interpreted by the shell on its own command line.
 
 | Setting | Type | Default | Description |
 |---|---|---|---|
