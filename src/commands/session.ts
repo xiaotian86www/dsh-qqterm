@@ -7,7 +7,8 @@
  */
 import type { SlashCommandHandlerContext } from '@tencent-connect/qqbot-nodejs';
 import type { CommandDeps, SlashCommand } from './types.ts';
-import { parseArgs } from './args.ts';
+import { ArgError, optionValue, parseArgs } from './args.ts';
+import type { CommandArgs, CommandSpec } from './args.ts';
 import type { SessionConfirmAction } from '../features/session-confirm.ts';
 import { WorktreeError, worktreeErrorText, type ChangeWorkspaceOutcome } from '../session/index.ts';
 import { buildPromptBody } from '../transport/prompt-body.ts';
@@ -66,6 +67,16 @@ const PROMPT_FORMAT = '⚠️ 提示词只能一段：有空格就用引号包�
  * 位置参数只收一段，多写一段按参数错误回绝，不拼回字符串。不认识的参数不猜，只回
  * error，不动会话。
  */
+const NEW_SPEC: CommandSpec = {
+  command: 'new',
+  terminator: 'rest',
+  options: [
+    { name: 'dir', alias: 'd', kind: 'value', missing: DIR_MISSING },
+    { name: 'worktree', alias: 'w' },
+    { name: 'background', alias: 'b' },
+  ],
+};
+
 export function parseNewArgs(raw: string): {
   arg: string;
   worktree: boolean;
@@ -73,25 +84,25 @@ export function parseNewArgs(raw: string): {
   prompt: string | undefined;
   error: string | undefined;
 } {
-  const parsed = parseArgs(raw, {
-    command: 'new',
-    terminator: 'rest',
-    flags: [
-      { name: 'dir', alias: 'd', value: true, missing: DIR_MISSING },
-      { name: 'worktree', alias: 'w' },
-      { name: 'background', alias: 'b' },
-    ],
-  });
-  const worktree = parsed.flags.has('worktree');
-  const background = parsed.flags.has('background');
+  let parsed: CommandArgs;
+  try {
+    parsed = parseArgs(raw, NEW_SPEC);
+  } catch (error) {
+    if (error instanceof ArgError) {
+      return { arg: '', worktree: false, background: false, prompt: undefined, error: error.message };
+    }
+    throw error;
+  }
+  const worktree = optionValue<boolean>(parsed, 'worktree') ?? false;
+  const background = optionValue<boolean>(parsed, 'background') ?? false;
+  const arg = optionValue<string>(parsed, 'dir') ?? '';
   const failed = (error: string) => ({ arg: '', worktree, background, prompt: undefined, error });
-  if (parsed.error !== undefined) return failed(parsed.error);
 
   // 提示词只收一段：`--` 之后整段原样；没有 `--` 时只能是切出来的那一个词
   if (parsed.rest !== undefined) {
     if (parsed.words.length > 0) return failed(PROMPT_FORMAT);
     return {
-      arg: parsed.values.get('dir') ?? '',
+      arg,
       worktree,
       background,
       prompt: parsed.rest === '' ? undefined : parsed.rest,
@@ -100,7 +111,7 @@ export function parseNewArgs(raw: string): {
   }
   if (parsed.words.length > 1) return failed(PROMPT_FORMAT);
   return {
-    arg: parsed.values.get('dir') ?? '',
+    arg,
     worktree,
     background,
     prompt: parsed.words[0],

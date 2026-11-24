@@ -35,7 +35,8 @@
 import { isAbsolute } from 'node:path';
 import type { CommandDeps, SlashCommand } from './types.ts';
 import { ownerOnlyAuth } from './auth.ts';
-import { parseArgs, quoteArg } from './args.ts';
+import { ArgError, parseArgs, quoteArg } from './args.ts';
+import type { CommandArgs } from './args.ts';
 import { getScopePeer, formatRelativeTime, sendMarkdownChunked, shortSessionId } from '../shared/index.ts';
 import { cleanInline, clip, commandLink, commandLinkRaw } from '../shared/inline.ts';
 import { sessionReplyLink } from '../transport/session-source.ts';
@@ -370,11 +371,19 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Slash
     handler: async (cmdCtx) => {
       // 切词按约定俗成：空格分隔，带空格的目标或标题用引号包起来；认不出的参数
       // 由 parseArgs 直接回绝
-      const parsed = parseArgs((cmdCtx.command?.raw ?? '').trim(), {
-        command: 'sessions',
-        // 标题写到 `--` 之后时整段原样；其余子命令照旧
-        terminator: 'rest',
-      });
+      let parsed: CommandArgs;
+      try {
+        parsed = parseArgs((cmdCtx.command?.raw ?? '').trim(), {
+          command: 'sessions',
+          // 标题写到 `--` 之后时整段原样；其余子命令照旧
+          terminator: 'rest',
+        });
+      } catch (error) {
+        if (!(error instanceof ArgError)) throw error;
+        // 参数写错也要走 markdown 通道（与 render 的返回同一出口）
+        await sendMarkdownChunked(cmdCtx, error.message, config.textChunkLimit);
+        return { kind: 'noop' as const };
+      }
       const words = [...parsed.words];
       let sub = words[0] ?? '';
       const rest = words.slice(1);
@@ -396,9 +405,6 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Slash
         rest.shift();
       }
 
-      // 认不出的参数不当目标（旧写法会得到「没有匹配的会话」，等于静默丢弃）。
-      // 错误统一在 render 里回，走同一条 markdown 通道
-      const invalid = parsed.error;
       const loadHeld = async (): Promise<WorkspaceSession[] | string> => {
         try {
           const entries = await manager.listHeldSessions(scope, peerId);
@@ -452,8 +458,6 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Slash
       };
 
       const render = async (): Promise<string> => {
-        if (invalid !== undefined) return invalid;
-
         // 没有 registry 时归档子命令按未知子命令处理，与其它拼错的子命令同一句话
         if (!archivable && (sub === 'archive' || sub === 'a'
           || sub === 'archived' || sub === 'unarchive' || sub === 'u' || sub === 'restore')) {

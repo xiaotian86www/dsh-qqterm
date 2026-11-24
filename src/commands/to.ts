@@ -12,8 +12,8 @@
  * 没包引号又有多段、或以 `-` 开头的词，按参数错误回绝。
  */
 import type { CommandDeps, SlashCommand } from './types.ts';
-import { parseArgs } from './args.ts';
-import type { ParseSpec } from './args.ts';
+import { ArgError, parseArgs } from './args.ts';
+import type { CommandArgs, CommandSpec } from './args.ts';
 import { getScopePeer, shortSessionId } from '../shared/index.ts';
 import {
   queuedPromptReceipt,
@@ -62,7 +62,7 @@ function displayId(id: string): string {
 }
 
 /** /to 的参数：目标 + 一段正文，或 `--` 之后的整段正文 */
-const TO_SPEC: ParseSpec = { command: 'to', terminator: 'rest' };
+const TO_SPEC: CommandSpec = { command: 'to', terminator: 'rest' };
 
 /** 目标缺失 */
 const MISSING_TARGET = '⚠️ 缺少会话 · 用法: /help to';
@@ -78,8 +78,13 @@ type ToParse = { ok: true; target: string; text: string } | { ok: false; error: 
  * 目标、正文与 `--` 一律交给同一份 parseArgs，不在命令里另写切词规则。
  */
 function parseToArgs(raw: string): ToParse {
-  const parsed = parseArgs(raw, TO_SPEC);
-  if (parsed.error !== undefined) return { ok: false, error: parsed.error };
+  let parsed: CommandArgs;
+  try {
+    parsed = parseArgs(raw, TO_SPEC);
+  } catch (error) {
+    if (error instanceof ArgError) return { ok: false, error: error.message };
+    throw error;
+  }
   const [target, ...extra] = parsed.words;
   if (target === undefined) return { ok: false, error: MISSING_TARGET };
   if (parsed.rest !== undefined) {

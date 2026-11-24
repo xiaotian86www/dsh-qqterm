@@ -251,7 +251,8 @@ describe('parseNewArgs', () => {
 
   it('--dir 缺值时只回参数错', () => {
     expect(parseNewArgs('--dir')).toEqual({ arg: '', worktree: false, background: false, prompt: undefined, error: '⚠️ --dir 后要跟工作区 · 用法: /help new' });
-    expect(parseNewArgs('-w -d')).toEqual({ arg: '', worktree: true, background: false, prompt: undefined, error: '⚠️ --dir 后要跟工作区 · 用法: /help new' });
+    // 解析失败就不给部分结果：写错时开关一律按未写处理
+    expect(parseNewArgs('-w -d')).toEqual({ arg: '', worktree: false, background: false, prompt: undefined, error: '⚠️ --dir 后要跟工作区 · 用法: /help new' });
     expect(parseNewArgs('--dir -w')).toEqual({ arg: '', worktree: false, background: false, prompt: undefined, error: '⚠️ --dir 后要跟工作区 · 用法: /help new' });
     expect(parseNewArgs('--dir ""')).toEqual({ arg: '', worktree: false, background: false, prompt: undefined, error: '⚠️ --dir 后要跟工作区 · 用法: /help new' });
   });

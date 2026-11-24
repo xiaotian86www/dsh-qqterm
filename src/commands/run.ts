@@ -19,8 +19,8 @@
  */
 import type { CommandDeps, SlashCommand } from './types.ts';
 import type { Logger } from '../types.ts';
-import { parseArgs } from './args.ts';
-import type { ParseSpec } from './args.ts';
+import { ArgError, optionValue, parseArgs } from './args.ts';
+import type { CommandArgs, CommandSpec } from './args.ts';
 import { sendMarkdownChunked } from '../shared/index.ts';
 import { sessionAdminAuth } from './sessions.ts';
 import { errorMessage } from '../shared/utils.ts';
@@ -69,10 +69,23 @@ const EXTRA_WORDS = '⚠️ 只能给一条命令 · 整条命令用引号包起
 const TIMEOUT_RANGE = '⚠️ 超时秒数要在 1–600 之间 · 用法: /help run';
 
 /** 只认 `--timeout`（`-t`）；其余词都是位置参数，`--` 之后不再解析 */
-const RUN_SPEC: ParseSpec = {
+const RUN_SPEC: CommandSpec = {
   command: 'run',
   terminator: 'words',
-  flags: [{ name: 'timeout', alias: 't', value: true, missing: TIMEOUT_MISSING }],
+  options: [{
+    name: 'timeout',
+    alias: 't',
+    kind: 'value',
+    missing: TIMEOUT_MISSING,
+    // 秒数换算成毫秒放在解析层：越界直接回整句提示，命令里不再重复校验
+    convert: (raw) => {
+      const timeoutMs = /^\d+$/.test(raw) ? Number(raw) * 1_000 : Number.NaN;
+      if (!Number.isFinite(timeoutMs) || timeoutMs < 1_000 || timeoutMs > MAX_TIMEOUT_MS) {
+        throw new ArgError(TIMEOUT_RANGE);
+      }
+      return timeoutMs;
+    },
+  }],
 };
 
 /** /run — 在当前目录执行一条本地命令 */
@@ -98,21 +111,20 @@ export function runCommand({ config, logger }: CommandDeps): SlashCommand {
 
 /** 解析 `/run` 的参数（导出给单测） */
 export function parseRunArgs(raw: string): RunParse {
-  const parsed = parseArgs(raw, RUN_SPEC);
-  if (parsed.error !== undefined) return { ok: false, text: parsed.error };
+  let parsed: CommandArgs;
+  try {
+    parsed = parseArgs(raw, RUN_SPEC);
+  } catch (error) {
+    if (error instanceof ArgError) return { ok: false, text: error.message };
+    throw error;
+  }
 
   // 一条命令就是一个位置参数：多出来的词是写错，不猜着拼回字符串
   const [command] = parsed.words;
   if (command === undefined) return { ok: false, text: '⚠️ 缺少要执行的命令 · 用法: /help run' };
   if (parsed.words.length > 1) return { ok: false, text: EXTRA_WORDS };
 
-  const seconds = parsed.values.get('timeout');
-  if (seconds === undefined) return { ok: true, request: { command, timeoutMs: DEFAULT_TIMEOUT_MS } };
-
-  const timeoutMs = /^\d+$/.test(seconds) ? Number(seconds) * 1_000 : Number.NaN;
-  if (!Number.isFinite(timeoutMs) || timeoutMs < 1_000 || timeoutMs > MAX_TIMEOUT_MS) {
-    return { ok: false, text: TIMEOUT_RANGE };
-  }
+  const timeoutMs = optionValue<number>(parsed, 'timeout') ?? DEFAULT_TIMEOUT_MS;
   return { ok: true, request: { command, timeoutMs } };
 }
 
