@@ -246,10 +246,12 @@ The menu has six fixed entries: Session status, Session list, Reset session, Com
 
 All three share one base — **the directory the dsh process was started in** (`process.cwd()`), independent of the session workspace and the run directory, and unaffected by a runtime `cd`.
 
+A `/run` command is split on spaces and every word is passed to the shell as one argument: quote words containing spaces, and `&&` or pipes are just separate words that the shell interprets on its own command line. The plugin never re-joins the words; the command's own `-la` or `--json` after its first word is not parsed as a `/run` option, and options such as `--timeout` go before the command.
+
 | Setting | Type | Default | Description |
 |---|---|---|---|
 | `exec.shell` | string | The actual `cmd.exe` path on Windows; `/bin/sh` otherwise | Shell used to run `/run`; the platform default is written into the config (Windows prefers `ComSpec`); clearing it means empty (an error before execution), never re-defaulted at runtime |
-| `exec.shellArgs` | string[] | Windows `["/d","/s","/c"]`; otherwise `["-c"]` | Argument template for the shell, `{command}` replaced in place; the platform default is written into the config and used literally at runtime (empty = pass no arguments), switching shells never rewrites it |
+| `exec.shellArgs` | string[] | Windows `["/d","/s","/c"]`; otherwise `["-c","exec \"$@\"","sh"]` | Argument template for the shell, `{command}` expanded in place into the command words; the platform default is written into the config (`exec "$@"` makes a POSIX shell run the following words as argv) and used literally at runtime (empty = pass no arguments), switching shells never rewrites it |
 
 Absolute paths in `/get` and `/ls` ignore the base; a `/run` command is typed by the user, so its consequences are the user's, and it is not wrapped in the host sandbox.
 

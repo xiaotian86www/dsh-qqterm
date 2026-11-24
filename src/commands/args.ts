@@ -7,13 +7,14 @@
  * 开关可以合写：`-w -b` 与 `-wb`、`-bw` 等价；带值的短参数只能收尾（`-wd <值>`）。
  *
  * 两类命令共用这一个模块：
- * - 带参数的命令（/new、/sessions、/plugins）走 parseArgs：按声明认 `--dir` 这类
- *   参数，剩下的词是位置参数；认不出的参数只回 error，不猜。
- * - 整行就是一个值的命令（路径、标题、提示词）走 parseRest：两端成对的引号
- *   去掉，其余原样，写不写引号都对。
+ * - 带参数的命令（/new、/sessions、/plugins、/run）走 parseArgs：按声明认 `--dir`
+ *   这类参数，剩下的词是位置参数；认不出的参数只回 error，不猜。
+ * - 整行就是一个值的命令（路径、标题）走 parseRest：两端成对的引号去掉，其余
+ *   原样，写不写引号都对。
  *
- * 载荷是一条命令、必须原样交给 shell 的命令（/run）给 parseArgs 开 `rest`：开关
- * 只认命令前面那段，第一个位置参数起到行尾原样进 `rest`。
+ * 切词结果就是参数的最终形态：空格分隔，每个词原样作为一个参数，拆完不再拼回
+ * 字符串。要执行命令的 `/run` 因此把词数组直接交给 shell（Linux 的 argv 语义），
+ * 命令自己的 `-la`、`--json` 只要写在命令第一个词之后就不参与本命令的参数识别。
  */
 
 /** 引号没有闭合 */
@@ -26,8 +27,6 @@ export const QUOTE_OPEN_TEXT = '⚠️ 引号没有闭合';
 export interface RawToken {
   value: string;
   quoted: boolean;
-  /** 这个词在原文里的起点；`rest` 模式靠它切出载荷原文（合写拆出的词沿用原词起点） */
-  offset?: number;
 }
 
 /**
@@ -40,7 +39,6 @@ export function tokenize(raw: string): { tokens: RawToken[]; error?: TokenizeErr
   let quote: string | undefined;
   let quoted = false;
   let started = false;
-  let start = 0;
   for (let index = 0; index < raw.length; index += 1) {
     const ch = raw[index] as string;
     if (quote !== undefined) {
@@ -49,29 +47,25 @@ export function tokenize(raw: string): { tokens: RawToken[]; error?: TokenizeErr
       continue;
     }
     if (ch === '"' || ch === "'") {
-      if (!started) {
-        quoted = true;
-        start = index;
-      }
+      if (!started) quoted = true;
       quote = ch;
       started = true;
       continue;
     }
     if (/\s/.test(ch)) {
       if (started) {
-        tokens.push({ value: current, quoted, offset: start });
+        tokens.push({ value: current, quoted });
         current = '';
         quoted = false;
         started = false;
       }
       continue;
     }
-    if (!started) start = index;
     current += ch;
     started = true;
   }
   if (quote !== undefined) return { tokens, error: 'quote-open' };
-  if (started) tokens.push({ value: current, quoted, offset: start });
+  if (started) tokens.push({ value: current, quoted });
   return { tokens };
 }
 
@@ -133,11 +127,10 @@ export interface ParseSpec {
   /** 认 `--`：之后的词一律当位置参数（提示词里要写 `-w` 时用） */
   terminator?: boolean;
   /**
-   * 载荷模式：第一个位置参数起到行尾的**原文**进 `rest`，之后的词不再识别参数。
-   * 给载荷是一条命令、必须原样交给 shell 的命令用（/run）：把它们拼回 `words`
-   * 会丢掉引号，还会把管道与 `&&` 拆散。开关因此只写在载荷前面。
+   * 开关只写在位置参数之前：命令自己的参数（`/run ls -la` 里的 `-la`）从第一个
+   * 位置参数起原样进 `words`，不再按本命令的参数识别，也不报未知参数。
    */
-  rest?: boolean;
+  flagsFirst?: boolean;
 }
 
 /** 解析结果 */
@@ -150,8 +143,6 @@ export interface ParsedArgs {
   values: Map<string, string>;
   /** 列表参数的值，按出现顺序累积 */
   lists: Map<string, string[]>;
-  /** 载荷原文（只在 `spec.rest` 时给出）：第一个位置参数起、到行尾 */
-  rest?: string;
   /** 用户写错时的回执：有值就直接回它，别动状态 */
   error?: string;
 }
@@ -176,7 +167,7 @@ function expandShortFlags(tokens: readonly RawToken[], known: readonly FlagSpec[
       continue;
     }
     for (const letter of token.value.slice(1)) {
-      expanded.push({ value: `-${letter}`, quoted: false, offset: token.offset });
+      expanded.push({ value: `-${letter}`, quoted: false });
     }
   }
   return expanded;
@@ -223,27 +214,24 @@ export function parseArgs(raw: string, spec: ParseSpec): ParsedArgs {
   }
   const known = spec.flags ?? [];
   const queue = expandShortFlags(tokens, known, spec.terminator === true);
-  /** 载荷模式下的原文：第一个位置参数（或 `--` 之后）起，到行尾 */
-  let rest: string | undefined;
+  /** 已经进入位置参数区（`flagsFirst` 时，之后 `-` 开头的词也当参数） */
+  let wordsStarted = false;
   for (let i = 0; i < queue.length; i += 1) {
     const token = queue[i] as RawToken;
     // 引号包着的词、不带 `-` 的词都是位置参数
     if (token.quoted || !looksLikeParam(token)) {
       if (token.value === '') continue;
-      // 载荷模式：从这里到行尾原样交出去，后面的词不再当参数
-      if (spec.rest === true) {
-        rest = raw.slice(token.offset ?? 0).trimEnd();
-        break;
-      }
+      words.push(token.value);
+      wordsStarted = true;
+      continue;
+    }
+    // 位置参数之后全是命令自己的参数：`--` 也不再终止，原样当作一个词
+    if (spec.flagsFirst === true && wordsStarted) {
       words.push(token.value);
       continue;
     }
     // `--` 终止参数识别：提示词里要写字面量 `-w` 时这样写
     if (spec.terminator === true && token.value === '--') {
-      if (spec.rest === true) {
-        rest = raw.slice((token.offset ?? 0) + 2).trimStart();
-        break;
-      }
       for (const remaining of queue.slice(i + 1)) {
         if (remaining.value !== '') words.push(remaining.value);
       }
@@ -281,7 +269,5 @@ export function parseArgs(raw: string, spec: ParseSpec): ParsedArgs {
     if (collected === undefined) lists.set(flag.name, names);
     else collected.push(...names);
   }
-  return rest === undefined
-    ? { words, flags, values, lists }
-    : { words, flags, values, lists, rest };
+  return { words, flags, values, lists };
 }

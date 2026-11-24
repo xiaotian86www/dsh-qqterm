@@ -5,6 +5,10 @@
  * 不经过宿主的能力面：工作目录是宿主进程的当前目录，shell 默认操作系统自带的那个，
  * 可以在配置里换。执行环境与宿主无关，也不受宿主沙箱与权限策略影响：命令是用户亲手
  * 打出来的，后果由用户承担。
+ *
+ * 命令按命令行约定切成词（args.ts 的 tokenize），词数组原样交给 shell（Linux 的
+ * argv 语义）：插件不把词拼回一条字符串，也不预先解释管道与 `&&`——那是 shell 的
+ * 事，由它在自己的命令行里解释。
  */
 import { spawn } from 'node:child_process';
 import { resolve } from 'node:path';
@@ -30,13 +34,11 @@ export interface LocalExecResult {
   readonly stderr: LocalExecStream;
 }
 
-/** 这次执行用的 shell：可执行文件 + 参数模板 + 是否按原样拼参数 */
+/** 这次执行用的 shell：可执行文件 + 参数模板（命令词接在模板后面） */
 export interface ShellSpec {
   readonly file: string;
-  /** 参数模板；命令要么原位替换 `{command}`，要么追加在末尾 */
+  /** 参数模板；命令词要么原位展开到 `{command}`，要么追加在末尾 */
   readonly args: readonly string[];
-  /** cmd.exe 要自己带引号并按原样拼（与 node 的 `shell: true` 同一套做法） */
-  readonly verbatim: boolean;
 }
 
 /** 参数模板里的命令占位符 */
@@ -52,11 +54,6 @@ export function execRoot(): string {
   return resolve(process.cwd());
 }
 
-/** 是不是 Windows 的命令解释器（只有它需要 `/d /s /c` 与自带的引号） */
-function isCommandPrompt(file: string): boolean {
-  return /(^|[\\/])cmd(\.exe)?$/i.test(file);
-}
-
 /**
  * 这次执行用哪个 shell：完全按配置来，不在运行期补默认值。
  *
@@ -64,28 +61,27 @@ function isCommandPrompt(file: string): boolean {
  * 私自回落到平台默认，也不替用户推导参数。空 shell 在起进程前按配置错误报出来。
  */
 export function shellSpecOf(config: QQTermConfig): ShellSpec {
-  const file = config.exec?.shell ?? '';
-  return { file, args: config.exec?.shellArgs ?? [], verbatim: isCommandPrompt(file) };
+  return { file: config.exec?.shell ?? '', args: config.exec?.shellArgs ?? [] };
 }
 
 /**
- * 拼出真正交给 spawn 的参数。
+ * 拼出真正交给 spawn 的参数：模板在前，命令词原样接在后面（或原位展开 `{command}`）。
  *
- * Windows 的 cmd.exe 只认一条普通字符串：命令要整段带引号，参数按原样交给进程
- * （`windowsVerbatimArguments`）——与 node 自己 `shell: true` 的做法一致。
+ * 每个命令词始终是一个独立的参数，插件不做引号包装与转义——需要的话由 node 的
+ * spawn 在系统边界上按平台规则处理，比插件自己拼一条字符串更不容易出错。
  */
-export function buildShellArgv(shell: ShellSpec, command: string): string[] {
-  const payload = shell.verbatim ? `"${command}"` : command;
-  if (shell.args.some((arg) => arg.includes(COMMAND_PLACEHOLDER))) {
-    return shell.args.map((arg) => arg.split(COMMAND_PLACEHOLDER).join(payload));
-  }
-  return [...shell.args, payload];
+export function buildShellArgv(shell: ShellSpec, argv: readonly string[]): string[] {
+  const hasPlaceholder = shell.args.some((arg) => arg.includes(COMMAND_PLACEHOLDER));
+  const expanded = shell.args.flatMap((arg) =>
+    arg === COMMAND_PLACEHOLDER ? [...argv] : [arg.split(COMMAND_PLACEHOLDER).join(argv.join(' '))],
+  );
+  return hasPlaceholder ? expanded : [...expanded, ...argv];
 }
 
 /** 跑一条命令：不抛错的路只有「进程跑起来了」，起不来按异常交给调用方 */
 export function runLocalCommand(
   shell: ShellSpec,
-  request: { readonly command: string; readonly cwd: string; readonly timeoutMs: number },
+  request: { readonly argv: readonly string[]; readonly cwd: string; readonly timeoutMs: number },
 ): Promise<LocalExecResult> {
   // 配置清空就是清空：不回落默认值，也不猜一个 shell 出来
   if (shell.file === '') return Promise.reject(new Error('没有配置 shell'));
@@ -96,12 +92,11 @@ export function runLocalCommand(
     let timedOut = false;
     let settled = false;
 
-    const child = spawn(shell.file, buildShellArgv(shell, request.command), {
+    const child = spawn(shell.file, buildShellArgv(shell, request.argv), {
       cwd: request.cwd,
       env: process.env,
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
-      windowsVerbatimArguments: shell.verbatim,
       // POSIX 上单独成组：超时才能把整棵进程树一起杀掉
       detached: process.platform !== 'win32',
     });

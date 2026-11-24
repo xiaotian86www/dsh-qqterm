@@ -14,8 +14,8 @@ function cfg(exec: Record<string, unknown> = {}) {
   return ConfigSchema({ exec });
 }
 
-/** 拿 node 当 shell：命令就是一段 JS */
-const nodeShell = { file: process.execPath, args: ['-e', '{command}'], verbatim: false } as const;
+/** 拿 node 当 shell：命令是一段 JS，作为 `-e` 的值 */
+const nodeShell = { file: process.execPath, args: ['-e', '{command}'] } as const;
 
 const isWindows = process.platform === 'win32';
 
@@ -41,9 +41,8 @@ describe('shellSpecOf', () => {
     if (isWindows) {
       expect(shell.file.toLowerCase()).toContain('cmd');
       expect(shell.args).toEqual(['/d', '/s', '/c']);
-      expect(shell.verbatim).toBe(true);
     } else {
-      expect(shell).toEqual({ file: '/bin/sh', args: ['-c'], verbatim: false });
+      expect(shell).toEqual({ file: '/bin/sh', args: ['-c', 'exec "$@"', 'sh'] });
     }
   });
 
@@ -51,7 +50,6 @@ describe('shellSpecOf', () => {
     expect(shellSpecOf(cfg({ shell: '/bin/zsh', shellArgs: ['-c'] }))).toEqual({
       file: '/bin/zsh',
       args: ['-c'],
-      verbatim: false,
     });
   });
 
@@ -62,7 +60,7 @@ describe('shellSpecOf', () => {
   });
 
   it('换 shell 不改参数：配置里是哪组就用哪组', () => {
-    expect(shellSpecOf(cfg({ shell: '/bin/bash' })).args).toEqual(isWindows ? ['/d', '/s', '/c'] : ['-c']);
+    expect(shellSpecOf(cfg({ shell: '/bin/bash' })).args).toEqual(isWindows ? ['/d', '/s', '/c'] : ['-c', 'exec "$@"', 'sh']);
     expect(shellSpecOf(cfg({ shell: '/bin/bash', shellArgs: [] })).args).toEqual([]);
   });
 
@@ -70,7 +68,6 @@ describe('shellSpecOf', () => {
     expect(shellSpecOf(cfg({ shell: '/bin/zsh', shellArgs: ['-l', '-c', '{command}'] }))).toEqual({
       file: '/bin/zsh',
       args: ['-l', '-c', '{command}'],
-      verbatim: false,
     });
   });
 
@@ -78,51 +75,46 @@ describe('shellSpecOf', () => {
     expect(shellSpecOf(cfg({ shell: '/bin/zsh', shellArgs: ['', '-c'] })).args).toEqual(['', '-c']);
   });
 
-  it('换成 cmd 时按原样拼参数（参数照配置）', () => {
+  it('换成 cmd 时也只读配置：不再自动判它要不要加引号', () => {
     expect(shellSpecOf(cfg({ shell: 'cmd.exe', shellArgs: ['/d', '/s', '/c'] }))).toEqual({
       file: 'cmd.exe',
       args: ['/d', '/s', '/c'],
-      verbatim: true,
-    });
-    expect(shellSpecOf(cfg({ shell: 'C:\\Windows\\system32\\cmd.exe', shellArgs: ['/c'] }))).toEqual({
-      file: 'C:\\Windows\\system32\\cmd.exe',
-      args: ['/c'],
-      verbatim: true,
     });
   });
 });
 
 describe('buildShellArgv', () => {
-  it('没有模板占位符时命令追加在末尾', () => {
-    expect(buildShellArgv({ file: '/bin/sh', args: ['-c'], verbatim: false }, 'echo hi')).toEqual(['-c', 'echo hi']);
+  it('没有占位符时命令词追加在末尾，一个词一个参数', () => {
+    expect(buildShellArgv({ file: '/bin/sh', args: ['-c'] }, ['echo', 'hi'])).toEqual(['-c', 'echo', 'hi']);
   });
 
-  it('有 {command} 时原位替换', () => {
-    expect(buildShellArgv({ file: '/bin/zsh', args: ['-l', '-c', '{command}'], verbatim: false }, 'echo hi')).toEqual([
-      '-l',
-      '-c',
-      'echo hi',
-    ]);
+  it('{command} 独占一个参数时，原位展开成命令词', () => {
+    expect(buildShellArgv({ file: process.execPath, args: ['-e', '{command}'] }, ['x'])).toEqual(['-e', 'x']);
   });
 
-  it('cmd 的命令整段带引号并按原样拼', () => {
-    expect(buildShellArgv({ file: 'cmd.exe', args: ['/d', '/s', '/c'], verbatim: true }, 'echo hi')).toEqual([
+  it('{command} 嵌在参数里时，原位换成用空格连起来的命令词', () => {
+    expect(buildShellArgv({ file: 'zsh', args: ['--cmd={command}'] }, ['echo', 'hi'])).toEqual(['--cmd=echo hi']);
+  });
+
+  it('cmd 不额外加引号：每个词照旧是一个参数', () => {
+    expect(buildShellArgv({ file: 'cmd.exe', args: ['/d', '/s', '/c'] }, ['echo', 'hi'])).toEqual([
       '/d',
       '/s',
       '/c',
-      '"echo hi"',
+      'echo',
+      'hi',
     ]);
-    expect(buildShellArgv({ file: 'cmd.exe', args: ['/c', '{command}'], verbatim: true }, 'echo hi')).toEqual([
-      '/c',
-      '"echo hi"',
-    ]);
+  });
+
+  it('没有命令词时只剩模板', () => {
+    expect(buildShellArgv({ file: 'cmd.exe', args: ['/c'] }, [])).toEqual(['/c']);
   });
 });
 
 describe('runLocalCommand（真起进程）', () => {
   it('收集 stdout 与退出码', async () => {
     const result = await runLocalCommand(nodeShell, {
-      command: "process.stdout.write('hi')",
+      argv: ["process.stdout.write('hi')"],
       cwd: process.cwd(),
       timeoutMs: 10_000,
     });
@@ -134,7 +126,7 @@ describe('runLocalCommand（真起进程）', () => {
 
   it('退出码原样带回', async () => {
     const result = await runLocalCommand(nodeShell, {
-      command: 'process.exit(3)',
+      argv: ['process.exit(3)'],
       cwd: process.cwd(),
       timeoutMs: 10_000,
     });
@@ -143,7 +135,7 @@ describe('runLocalCommand（真起进程）', () => {
 
   it('stderr 单独收集', async () => {
     const result = await runLocalCommand(nodeShell, {
-      command: "process.stderr.write('bad')",
+      argv: ["process.stderr.write('bad')"],
       cwd: process.cwd(),
       timeoutMs: 10_000,
     });
@@ -152,7 +144,7 @@ describe('runLocalCommand（真起进程）', () => {
 
   it('超时中止进程并标注', async () => {
     const result = await runLocalCommand(nodeShell, {
-      command: 'setTimeout(() => {}, 60_000)',
+      argv: ['setTimeout(() => {}, 60_000)'],
       cwd: process.cwd(),
       timeoutMs: 300,
     });
@@ -162,7 +154,7 @@ describe('runLocalCommand（真起进程）', () => {
 
   it('超过上限只留末尾并标注截断', async () => {
     const result = await runLocalCommand(nodeShell, {
-      command: "process.stdout.write('x'.repeat(100_000))",
+      argv: ["process.stdout.write('x'.repeat(100_000))"],
       cwd: process.cwd(),
       timeoutMs: 20_000,
     });
@@ -173,15 +165,15 @@ describe('runLocalCommand（真起进程）', () => {
 
   it('shell 没配置时直接报错，不猜一个默认 shell 出来', async () => {
     await expect(
-      runLocalCommand({ file: '', args: [], verbatim: false }, { command: 'echo hi', cwd: process.cwd(), timeoutMs: 5_000 }),
+      runLocalCommand({ file: '', args: [] }, { argv: ['echo', 'hi'], cwd: process.cwd(), timeoutMs: 5_000 }),
     ).rejects.toThrow('没有配置 shell');
   });
 
   it('shell 起不来时抛错，交给调用方兜', async () => {
     await expect(
       runLocalCommand(
-        { file: 'qqterm-no-such-shell-xyz', args: [], verbatim: false },
-        { command: 'echo hi', cwd: process.cwd(), timeoutMs: 5_000 },
+        { file: 'qqterm-no-such-shell-xyz', args: [] },
+        { argv: ['echo', 'hi'], cwd: process.cwd(), timeoutMs: 5_000 },
       ),
     ).rejects.toBeTruthy();
   });

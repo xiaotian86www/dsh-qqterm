@@ -46,7 +46,7 @@ describe('ConfigSchema 本地命令执行', () => {
       expect(exec.shellArgs).toEqual(['/d', '/s', '/c']);
     } else {
       expect(exec.shell).toBe('/bin/sh');
-      expect(exec.shellArgs).toEqual(['-c']);
+      expect(exec.shellArgs).toEqual(['-c', 'exec "$@"', 'sh']);
     }
   });
 

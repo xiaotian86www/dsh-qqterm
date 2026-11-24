@@ -125,7 +125,7 @@ describe('/run 执行', () => {
     expect(text.startsWith('✅ 执行完成 · 退出码 0 · ')).toBe(true);
     // 命令与 shell 合成一条：这行就是最终真正执行的命令
     const shell = shellSpecOf(makeConfig());
-    const invoked = [shell.file, ...buildShellArgv(shell, 'echo hello')].join(' ');
+    const invoked = [shell.file, ...buildShellArgv(shell, ['echo', 'hello'])].join(' ');
     expect(text).toContain(`**命令**: \`${invoked}\``);
     expect(text).toContain('echo hello');
     expect(text).toContain(`**目录**: \`${root}\``);
@@ -133,7 +133,14 @@ describe('/run 执行', () => {
     expect(text).toContain('```text');
     expect(text).toContain('hello\nworld');
     expect(text).not.toContain('**stderr**');
-    expect(request).toMatchObject({ command: 'echo hello', cwd: root, timeoutMs: 120_000 });
+    expect(request).toMatchObject({ argv: ['echo', 'hello'], cwd: root, timeoutMs: 120_000 });
+  });
+
+  it('带空格的词只算一个参数，回执里用引号标出词边界', async () => {
+    const { text, request } = await run('echo "a b"');
+
+    expect(request).toMatchObject({ argv: ['echo', 'a b'] });
+    expect(text).toContain('echo "a b"');
   });
 
   it('失败：退出码非 0，stderr 单独标注', async () => {
@@ -184,19 +191,19 @@ describe('/run 执行', () => {
   it('--timeout 改超时并传给执行面', async () => {
     const { request } = await run('--timeout 30 npm test');
 
-    expect(request).toMatchObject({ command: 'npm test', timeoutMs: 30_000 });
+    expect(request).toMatchObject({ argv: ['npm', 'test'], timeoutMs: 30_000 });
   });
 
-  it('命令里的引号、管道与 && 原样交给执行面', async () => {
+  it('命令自己的参数与 shell 语法原样进 argv，一个词一个参数', async () => {
     const { request } = await run('echo "a b" && ls | wc -l');
 
-    expect(request).toMatchObject({ command: 'echo "a b" && ls | wc -l' });
+    expect(request).toMatchObject({ argv: ['echo', 'a b', '&&', 'ls', '|', 'wc', '-l'] });
   });
 
   it('命令以 - 开头时用 -- 隔开', async () => {
     const { request } = await run('-- -la');
 
-    expect(request).toMatchObject({ command: '-la' });
+    expect(request).toMatchObject({ argv: ['-la'] });
   });
 
   it('命令前写错参数时不执行，回未知参数', async () => {
@@ -213,7 +220,7 @@ describe('/run 执行', () => {
     await command.handler(makeCtx('true'));
     const text = state.sent.at(-1) ?? '';
     const shell = shellSpecOf(config);
-    const invoked = [shell.file, ...buildShellArgv(shell, 'true')].join(' ');
+    const invoked = [shell.file, ...buildShellArgv(shell, ['true'])].join(' ');
     expect(text).toContain(invoked);
     expect(text).not.toContain('**沙箱**');
   });
@@ -226,17 +233,17 @@ describe('parseRunArgs', () => {
     return (parsed as { text: string }).text;
   }
 
-  it('命令从第一个词起整行取，默认 120 秒', () => {
+  it('空格切词：每个词就是一个参数，默认 120 秒', () => {
     expect(parseRunArgs('ls -la')).toEqual({
       ok: true,
-      request: { command: 'ls -la', timeoutMs: 120_000 },
+      request: { argv: ['ls', '-la'], timeoutMs: 120_000 },
     });
   });
 
-  it('载荷原样保留引号、管道与 &&', () => {
+  it('引号只决定词边界，词里的空格原样保留', () => {
     expect(parseRunArgs('echo "a b" && ls | wc -l')).toEqual({
       ok: true,
-      request: { command: 'echo "a b" && ls | wc -l', timeoutMs: 120_000 },
+      request: { argv: ['echo', 'a b', '&&', 'ls', '|', 'wc', '-l'], timeoutMs: 120_000 },
     });
   });
 
@@ -244,7 +251,7 @@ describe('parseRunArgs', () => {
     for (const raw of ['--timeout=30 ls -la', '--timeout 30 ls -la', '-t 30 ls -la']) {
       expect(parseRunArgs(raw)).toEqual({
         ok: true,
-        request: { command: 'ls -la', timeoutMs: 30_000 },
+        request: { argv: ['ls', '-la'], timeoutMs: 30_000 },
       });
     }
   });
@@ -252,22 +259,22 @@ describe('parseRunArgs', () => {
   it('命令中间的 --timeout 属于命令自己', () => {
     expect(parseRunArgs('ls --timeout 30')).toEqual({
       ok: true,
-      request: { command: 'ls --timeout 30', timeoutMs: 120_000 },
+      request: { argv: ['ls', '--timeout', '30'], timeoutMs: 120_000 },
     });
   });
 
   it('-- 之后一律当命令', () => {
     expect(parseRunArgs('-- ls -la')).toEqual({
       ok: true,
-      request: { command: 'ls -la', timeoutMs: 120_000 },
+      request: { argv: ['ls', '-la'], timeoutMs: 120_000 },
     });
     expect(parseRunArgs('--timeout 30 -- npm test --watch')).toEqual({
       ok: true,
-      request: { command: 'npm test --watch', timeoutMs: 30_000 },
+      request: { argv: ['npm', 'test', '--watch'], timeoutMs: 30_000 },
     });
     expect(parseRunArgs('-- -la')).toEqual({
       ok: true,
-      request: { command: '-la', timeoutMs: 120_000 },
+      request: { argv: ['-la'], timeoutMs: 120_000 },
     });
   });
 
@@ -297,7 +304,7 @@ describe('parseRunArgs', () => {
   it('最长 600 秒可用', () => {
     expect(parseRunArgs('--timeout 600 ls')).toEqual({
       ok: true,
-      request: { command: 'ls', timeoutMs: 600_000 },
+      request: { argv: ['ls'], timeoutMs: 600_000 },
     });
   });
 });
