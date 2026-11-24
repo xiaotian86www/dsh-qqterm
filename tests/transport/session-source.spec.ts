@@ -123,9 +123,9 @@ describe('来源行与尾部动作', () => {
 });
 
 describe('排队 / 插话回执', () => {
-  it('当前会话排队：首行说清落点，第二行给可点的插话入口', () => {
+  it('当前会话排队：首行说清落点，空行后直接给可点的插话入口', () => {
     expect(queuedPromptReceipt('session-04de1556', undefined, 'm-1', true, true))
-      .toBe('✅ 已排队 · 本轮结束后发送\n> 💡 <qqbot-cmd-input text="/steer #04de1556 m-1" show="插话"/>');
+      .toBe('✅ 已排队 · 本轮结束后发送\n\n<qqbot-cmd-input text="/steer #04de1556 m-1" show="插话"/>');
   });
 
   it('别的会话排队：带上标题与短 id 署名', () => {
