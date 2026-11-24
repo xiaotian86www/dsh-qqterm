@@ -597,7 +597,7 @@ describe('有会话时的二次确认', () => {
     const channel = makeChannel(false);
     const manager = { ...makeResetManager(true), currentSessionId: vi.fn(() => 'sess-1'), sessionConfirmChannel: channel };
 
-    expect(await runResetCmd(manager)).toBe('⚠️ 确认卡片没能发出，稍后再试一次');
+    expect(await runResetCmd(manager)).toBe('⚠️ 确认卡片没能发出');
     expect(manager.resetCurrentSession).not.toHaveBeenCalled();
   });
 

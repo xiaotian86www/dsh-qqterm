@@ -174,7 +174,7 @@ export class SessionConfirmChannel {
     } catch (err) {
       const message = errorMessage(err);
       this.logger.error(`qqterm: session confirm action failed: ${message}`);
-      await this.reply(pending.target, `❌ 操作失败: ${message}\n稍等片刻再试一次。`);
+      await this.reply(pending.target, `❌ 操作失败: ${message}`);
     }
   }
 

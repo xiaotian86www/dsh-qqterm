@@ -49,7 +49,7 @@ export function getCommand({ config, bot, logger }: CommandDeps): SlashCommand {
       if (raw === '') return '⚠️ 缺少文件路径 · 用法: /help get';
 
       const sender = bot as unknown as MediaSenderLike | undefined;
-      if (sender === undefined) return '⚠️ 发送通道不可用，稍后重试。';
+      if (sender === undefined) return '⚠️ 发送通道不可用';
 
       const { peerId } = getScopePeer(cmdCtx);
       const target = resolveLsTarget(execRoot(), raw);
@@ -58,7 +58,7 @@ export function getCommand({ config, bot, logger }: CommandDeps): SlashCommand {
       try {
         isFile = statSync(target).isFile();
       } catch {
-        return `⚠️ 文件不存在: \`${target}\`\n用 \`/ls\` 看看目录里有什么。`;
+        return `⚠️ 文件不存在: \`${target}\``;
       }
       if (!isFile) return `⚠️ 不是文件: \`${target}\``;
 

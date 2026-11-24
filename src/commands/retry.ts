@@ -40,7 +40,7 @@ export function retryCommand({ manager, config }: CommandDeps): SlashCommand {
       }
       if (outcome.reason === 'no-session') return '⚠️ 当前没有会话';
       if (outcome.reason === 'no-prompt') {
-        return '⚠️ 没有可重发的消息\n先发一条消息，或等这一轮失败后再试。';
+        return '⚠️ 没有可重发的消息';
       }
       return `❌ 重发失败: ${outcome.message ?? '未知原因'}`;
     },

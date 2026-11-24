@@ -1160,7 +1160,7 @@ describe('/sessions archive', () => {
     });
     const text = await run(manager, 'archive #11111111');
     // 忙碌是自解释的：只给一句原因，不把宿主原文贴给用户
-    expect(text).toContain('⚠️ 归档失败: 该会话还有工作在运行，稍后再试');
+    expect(text).toContain('⚠️ 归档失败: 该会话还有工作在运行');
     expect(text).toContain('<qqbot-cmd-input text="/sessions" show="查看会话"/>');
   });
 

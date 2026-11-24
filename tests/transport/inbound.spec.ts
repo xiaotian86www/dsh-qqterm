@@ -246,7 +246,7 @@ describe('handleInbound：工作树', () => {
 
     await handleInbound(ctx, failingManager(new Error('EIO')), logger, sendTextOf(ctx));
 
-    expect(sent(ctx).at(-1)?.[1]).toBe('⚠️ 处理消息时出现异常，请稍后重试。');
+    expect(sent(ctx).at(-1)?.[1]).toBe('⚠️ 处理消息时出现异常');
   });
 
   it('新会话建了树：回执只发一次，之后不再重复', async () => {
