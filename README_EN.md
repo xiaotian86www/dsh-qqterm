@@ -240,9 +240,11 @@ Sync is a whole-table overwrite with the remark fixed to `qqterm:commands`; unch
 
 The menu has six fixed entries: Session status, Session list, Reset session, Compact session, Permission preset, Reasoning effort. Permission and reasoning open submenus; the rest point straight at their command. The menu is a bot-wide whole-table overwrite, not per user.
 
-### Local commands and directories
+### Local commands and directories (special feature)
 
-`/run`, `/ls`, and `/get` are the channel's own extensions: they operate this computer remotely from QQ and never go through the host's shell or sandbox. All three share one base — **the directory the dsh process was started in** (`process.cwd()`), independent of the session workspace and the run directory, and unaffected by a runtime `cd`.
+`/run`, `/ls`, and `/get` are not forwards of host capabilities but a special feature this channel adds on its own: they operate this computer directly from QQ. They bypass the host's shell and sandbox and are not constrained by permission presets, the session workspace, or the run directory — the effect matches sitting at a terminal on this machine.
+
+All three share one base — **the directory the dsh process was started in** (`process.cwd()`), independent of the session workspace and the run directory, and unaffected by a runtime `cd`.
 
 | Setting | Type | Default | Description |
 |---|---|---|---|
@@ -250,6 +252,17 @@ The menu has six fixed entries: Session status, Session list, Reset session, Com
 | `exec.shellArgs` | string[] | Windows `["/d","/s","/c"]`; otherwise `["-c"]` | Argument template for the shell, `{command}` replaced in place; the platform default is written into the config and used literally at runtime (empty = pass no arguments), switching shells never rewrites it |
 
 Absolute paths in `/get` and `/ls` ignore the base; a `/run` command is typed by the user, so its consequences are the user's, and it is not wrapped in the host sandbox.
+
+**Risks**
+
+This feature moves "run any command, read any file on this machine" onto QQ messages, and the risk is the same thing as the convenience:
+
+- Whoever can send a message can run commands. `access.owner` accepts exactly one user, but a stolen account, a hijacked login, or a misconfigured owner hands that person the same rights as the account running dsh: `/run` can modify files, install things, and reach the network; `/get` can send any readable file into the chat.
+- No sandbox, no second confirmation, no command allowlist. The plugin does not judge whether a command is dangerous and never asks "are you sure"; the host's sandbox and permission presets protect the host's own tools, not `/run`.
+- Commands run as the user running dsh, so they can touch everything that account can; the working directory and environment variables (credentials included) are visible to them.
+- Output and files travel through QQ: `/run` output comes back into the chat, `/get` sends files straight out.
+
+So this feature fits "one person, one own computer, a QQ account only they log into". If you do not accept the risks, do not use it: clearing `exec.shell` only makes `/run` fail (`/ls` and `/get` do not need a shell and keep working), and removing the whole group means not deploying a build that ships it. At minimum: set owner to yourself only, enable device lock and two-factor on the QQ account, and keep machine credentials out of session directories.
 
 ## Sessions, workspaces, and interaction
 
