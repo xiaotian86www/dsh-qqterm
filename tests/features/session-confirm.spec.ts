@@ -217,7 +217,7 @@ describe('SessionConfirmChannel.handleInteraction', () => {
     channel.handleInteraction(makeEvent(buttonDataOf(sent[0]!.opts?.keyboard, 'yes')));
     await sleep(0);
 
-    expect(sent[1]!.text).toBe('❌ 操作失败: db locked\n稍等片刻再试一次。');
+    expect(sent[1]!.text).toBe('❌ 操作失败: db locked');
   });
 
   it('不是 confirm 的按钮 / 没有 nonce 一律忽略', async () => {

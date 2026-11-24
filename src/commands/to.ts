@@ -29,7 +29,7 @@ const USAGE = [
   '',
   '`/to <会话> <文本>` 向会话发消息',
   '目标在等答案时，文本作为回答；没打开的会话会先接回来',
-  '回复一条消息再发：被引用的内容会一起带上（目标在等答案时不带）',
+  '回复一条消息再发：被引用的内容会一起带上（目标在等答案时整条不发）',
 ].join('\n');
 
 /** 把分组列表摊平成可解析的会话清单 */
@@ -107,12 +107,13 @@ export function toCommand({ manager, config, logger }: CommandDeps): SlashComman
       }
       const label = sessionTargetLabel(sessionId, title);
 
-      // 目标在等回答时，这条文本是答案不是新 prompt：引用不跟着走
-      const awaiting = manager.isAwaitingAnswer(sessionId);
-      const withQuote = awaiting ? undefined : quote;
-      const body = withQuote === undefined
+      // 目标在等回答时，这条文本是答案不是新 prompt：答案不接受引用，整条拒绝
+      if (manager.isAwaitingAnswer(sessionId) && quote !== undefined) {
+        return '⚠️ 不支持带引用的答案';
+      }
+      const body = quote === undefined
         ? text
-        : buildPromptBody({ quote: withQuote.quote, quoteFiles: withQuote.files, text });
+        : buildPromptBody({ quote: quote.quote, quoteFiles: quote.files, text });
 
       const outcome = await manager.sendTo(
         scope,
@@ -122,12 +123,6 @@ export function toCommand({ manager, config, logger }: CommandDeps): SlashComman
         body,
         { scope, targetId: peerId },
       );
-
-      /** 带引用的回执尾行：发送成功时才贴，失败文案只讲失败 */
-      const quoteNotes = [
-        ...(withQuote === undefined ? [] : ['📎 已带上引用']),
-        ...(awaiting && quote !== undefined ? ['💡 目标在等回答，引用这次没有一起发送'] : []),
-      ];
 
       if (outcome.ok) {
         let receipt: string;
@@ -151,22 +146,21 @@ export function toCommand({ manager, config, logger }: CommandDeps): SlashComman
                 manager.canSteer(),
               )
               : steeredPromptReceipt(sessionId, title, current);
-            const full = quoteNotes.length === 0 ? body : `${body}\n${quoteNotes.join('\n')}`;
-            await sendMarkdownChunked(cmdCtx, full, config.textChunkLimit);
+            await sendMarkdownChunked(cmdCtx, body, config.textChunkLimit);
             return { kind: 'noop' as const };
           }
           default:
             receipt = `✅ 已发送到${label}`;
             break;
         }
-        return quoteNotes.length === 0 ? receipt : `${receipt}\n${quoteNotes.join('\n')}`;
+        return receipt;
       }
 
       switch (outcome.reason) {
         case 'not-found':
           return `⚠️ 没有这个会话: ${label}`;
         case 'locked':
-          return `⚠️ 这个会话正在别处使用: ${label}\n等它释放后再发一次。`;
+          return `⚠️ 这个会话正在别处使用: ${label}`;
         case 'archived':
           return `⚠️ 该会话已归档: ${label}\n先 /sessions unarchive ${displayId(sessionId)}。`;
         case 'forbidden':

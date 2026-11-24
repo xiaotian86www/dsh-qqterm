@@ -151,7 +151,7 @@ export class RetryChannel {
   private resend(record: RetrySessionRecordLike, sessionId: string): void {
     const prompt = record.lastPrompt;
     if (prompt === undefined || prompt.trim() === '') {
-      void this.send(record, sessionId, '⚠️ 找不到上一条消息\n重新发一条即可。');
+      void this.send(record, sessionId, '⚠️ 找不到上一条消息');
       return;
     }
     try {
@@ -159,7 +159,7 @@ export class RetryChannel {
     } catch (err) {
       const message = errorMessage(err);
       this.logger.error(`qqterm: retry followup failed sessionId=${sessionId}: ${message}`);
-      void this.send(record, sessionId, `⚠️ 重发失败: ${message}\n稍等片刻再发一次。`);
+      void this.send(record, sessionId, `⚠️ 重发失败: ${message}`);
       return;
     }
     this.logger.info(`qqterm: prompt resent via retry button sessionId=${sessionId}`);

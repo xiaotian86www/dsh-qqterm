@@ -203,7 +203,7 @@ describe('/steer 宿主结果', () => {
     const current = record(CURRENT, { nextTurn: ['m-1'] });
     const manager = makeManager({ current, steer: { ok: false, reason: 'failed', message: 'boom' } });
 
-    expect(await run(manager)).toBe('❌ 插话失败 · 稍后再试');
+    expect(await run(manager)).toBe('❌ 插话失败');
   });
 });
 

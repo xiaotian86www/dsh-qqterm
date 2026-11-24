@@ -41,7 +41,7 @@ async function confirmOrRun(
     target: { scope, targetId: peerId },
     run,
   });
-  return offered ? { kind: 'noop' as const } : '⚠️ 确认卡片没能发出，稍后再试一次';
+  return offered ? { kind: 'noop' as const } : '⚠️ 确认卡片没能发出';
 }
 
 /** 只读沙箱下开不了工作树：建树前唯一要先解决的约束 */
@@ -191,7 +191,7 @@ export function newCommand({ manager, config, logger }: CommandDeps): SlashComma
         } catch (err) {
           if (err instanceof WorktreeError) return worktreeErrorText(err);
           const message = errorMessage(err);
-          return `❌ 没能开启会话: ${message}\n稍后再试一次。`;
+          return `❌ 没能开启会话: ${message}`;
         }
         const short = shortSessionId(started.sessionId);
         const lines = started.worktreeNotice === undefined
@@ -239,7 +239,7 @@ export function newCommand({ manager, config, logger }: CommandDeps): SlashComma
         } catch (err) {
           if (err instanceof WorktreeError) return worktreeErrorText(err);
           const message = errorMessage(err);
-          return `❌ 没能开启会话: ${message}\n稍后再试一次。`;
+          return `❌ 没能开启会话: ${message}`;
         }
         const lines = notice === undefined ? ['✅ 已开启新会话'] : [notice];
         if (label !== undefined) lines.push(label);
@@ -258,7 +258,7 @@ function describeChangeFailure(outcome: ChangeWorkspaceOutcome): string {
   if (outcome.ok) return '';
   switch (outcome.reason) {
     case 'missing':
-      return `⚠️ 目录不存在: \`${outcome.path}\`\n换一个存在的目录，或直接给绝对路径。`;
+      return `⚠️ 目录不存在: \`${outcome.path}\``;
     case 'ambiguous':
       return [
         `⚠️ 有 ${outcome.matches.length} 个工作区匹配: ${outcome.matches.join('、')}`,

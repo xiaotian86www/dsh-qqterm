@@ -1899,7 +1899,7 @@ export class SessionManager {
       };
   }
 
-  /** 目标会话是否在等一条回答（`/to` 据此决定引用是否一起发：等答案时不带引用） */
+  /** 目标会话是否在等一条回答（`/to` 据此拒绝带引用的整条消息：答案不接受引用） */
   isAwaitingAnswer(sessionId: string): boolean {
     return this.questionChannel?.hasPending(sessionId) ?? false;
   }
