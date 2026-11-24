@@ -24,7 +24,8 @@
     "prepublishOnly": "npm run build",
     "lint": "eslint src/",
     "test": "vitest run",
-    "dev:reload": "node scripts/dev-reload.mjs",
+    "dev:reload": "node scripts/deploy.mjs dev",
+    "deploy:web": "node scripts/deploy.mjs web --pull --test",
     "typecheck:client": "tsc -p tsconfig.client.json",
     "clean": "rm -rf dist lib",
     "ci:prepare-test-pkg": "node scripts/prepare-test-pkg.js"
