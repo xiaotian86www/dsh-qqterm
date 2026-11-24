@@ -76,6 +76,7 @@ Rows are **never numbered**: after paging and grouping, "the third row" is bound
 - There is no physical delete: the host exposes no delete API, deleting directories by storage layout is irreversible, and on Windows it collides with file locks.
 - `/sessions resume` on an archived session unarchives it first and says so in the receipt.
 - Archiving a session with a worktree makes the host remove a clean tree and keep the branch; the plugin only reports.
+- Multiple targets go in one word separated by commas (`#a,#b`), or as the whole text after `--`; multiple unquoted words are rejected as a bad argument.
 - If the current session is archived its pointer is cleared, and the next message lands in a new session.
 - In a deployment without `workspaceRegistry`, archive subcommands are treated as unknown.
 
@@ -95,9 +96,9 @@ Rows are **never numbered**: after paging and grouping, "the third row" is bound
 | `/sessions resume <id>` | Open a session (an archived one is unarchived first); failure never creates one |
 | `/sessions rename <id> <title>` | Rename an opened session; resume a cold one first; quote a title with spaces, or put it after `--` |
 | `/sessions archive` | List sessions that can be archived; `<page>` pages through |
-| `/sessions archive <id>[,<id>…]` | Archive one or more (at most 10) |
+| `/sessions archive <id>[,<id>…]` | Archive one or more (at most 10); targets are one word, or everything after `--` |
 | `/sessions archived` | List archived sessions |
-| `/sessions unarchive <id>[,<id>…]` | Unarchive |
+| `/sessions unarchive <id>[,<id>…]` | Unarchive; targets follow the same rule as archive |
 
 - Only a generating session carries `⚡` at the start of its row (the default list and `/sessions all` alike); idle rows have no state word, and the trailing `✅` (current) / `📌` (held) are markers that may share a row with `⚡`.
 - Sorting is by most recent human message, descending, with ties by id ascending; the current session is not pinned and is marked only by `✅`.

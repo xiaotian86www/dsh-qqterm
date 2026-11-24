@@ -1192,6 +1192,34 @@ describe('/sessions archive', () => {
     expect(manager.archiveSession).not.toHaveBeenCalledWith('session-cccc0003');
   });
 
+  it('目标写成多段又没包引号时按参数错误回绝', async () => {
+    const manager = makeManager({
+      listWorkspaceSessions: vi.fn(async () => [
+        entry({ id: 'session-aaaa0001' }),
+        entry({ id: 'session-bbbb0002' }),
+      ]),
+    });
+
+    const text = await run(manager, 'archive #aaaa0001 #bbbb0002');
+
+    expect(text).toContain('目标只能一段');
+    expect(manager.archiveSession).not.toHaveBeenCalled();
+  });
+
+  it('整段目标可以写到 -- 之后', async () => {
+    const manager = makeManager({
+      listWorkspaceSessions: vi.fn(async () => [
+        entry({ id: 'session-aaaa0001', title: '一' }),
+        entry({ id: 'session-bbbb0002', title: '二' }),
+      ]),
+    });
+
+    const text = await run(manager, 'archive -- #aaaa0001,#bbbb0002');
+
+    expect(manager.archiveSession).toHaveBeenCalledTimes(2);
+    expect(text).toContain('已归档 2 个会话');
+  });
+
   it('全角逗号与 id 混用也能识别，重复目标只执行一次', async () => {
     const manager = makeManager({
       listWorkspaceSessions: vi.fn(async () => [
@@ -1331,6 +1359,34 @@ describe('/sessions unarchive', () => {
     expect(manager.unarchiveSession).toHaveBeenNthCalledWith(2, 'session-bbbb0002');
     expect(text).toContain('已取消归档 2 个会话');
     expect(text).toContain('<qqbot-cmd-input text="/sessions" show="工作中会话"/>');
+  });
+
+  it('目标写成多段又没包引号时按参数错误回绝', async () => {
+    const manager = makeManager({
+      listWorkspaceSessions: vi.fn(async () => [
+        entry({ id: 'session-aaaa0001', archived: true }),
+        entry({ id: 'session-bbbb0002', archived: true }),
+      ]),
+    });
+
+    const text = await run(manager, 'unarchive #aaaa0001 #bbbb0002');
+
+    expect(text).toContain('目标只能一段');
+    expect(manager.unarchiveSession).not.toHaveBeenCalled();
+  });
+
+  it('整段目标可以写到 -- 之后', async () => {
+    const manager = makeManager({
+      listWorkspaceSessions: vi.fn(async () => [
+        entry({ id: 'session-aaaa0001', archived: true }),
+        entry({ id: 'session-bbbb0002', archived: true }),
+      ]),
+    });
+
+    const text = await run(manager, 'unarchive -- #aaaa0001,#bbbb0002');
+
+    expect(manager.unarchiveSession).toHaveBeenCalledTimes(2);
+    expect(text).toContain('已取消归档 2 个会话');
   });
 });
 

@@ -11,6 +11,8 @@
  *   /sessions archive <目标[,目标…]>   归档会话（从列表与 Web 侧栏隐藏，日志保留）
  *   /sessions unarchive <目标[,目标…]> 取消归档，让它重新可用
  *
+ * 归档目标只收一段：多个会话用逗号写在同一个词里，或整段写到 `--` 之后。
+ *
  * **句柄规则（唯一要记住的一条）**：所有目标一律用 8 位短 id（行首 `#` 后那串），
  * 列表不编号——序号只适合单页列表，翻页、分组后容易和「第几条」对不上。
  *
@@ -85,7 +87,7 @@ function usageFor(archivable: boolean): string {
         ]
       : []),
     '',
-    '目标用 8 位短 id（行首 `#` 后那串）',
+    '目标用 8 位短 id（行首 `#` 后那串）；多个会话用逗号写在同一个词里，或整段写到 `--` 之后',
   ].join('\n');
 }
 
@@ -188,6 +190,21 @@ function resolveTargets(
   }
 
   return { picks, errors };
+}
+
+const TARGET_FORMAT = '⚠️ 目标只能一段：多个会话用逗号写在一个词里，或写到 -- 之后 · 用法: /help sessions';
+
+/**
+ * 目标只收一段：多个会话用逗号写在一个词里，或整段写到 `--` 之后。
+ *
+ * 返回 undefined 表示写法不对：`--` 之前还有词，或没包引号又写成多段。
+ */
+function targetTextOf(
+  rest: readonly string[],
+  afterTerminator: string | undefined,
+): string | undefined {
+  if (afterTerminator !== undefined) return rest.length === 0 ? afterTerminator : undefined;
+  return rest.length > 1 ? undefined : rest[0] ?? '';
 }
 
 /** 拆 token 并做数量校验；返回字符串表示要直接回给用户 */
@@ -573,8 +590,8 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Slash
           case 'a': {
             // 只给页码 = 翻候选页：没有序号后，1–3 位数字只可能是页码
             let pickerPage = 1;
-            let listing = rest.length === 0;
-            if (rest.length === 1 && /^\d{1,3}$/.test(rest[0]!)) {
+            let listing = rest.length === 0 && parsed.rest === undefined;
+            if (parsed.rest === undefined && rest.length === 1 && /^\d{1,3}$/.test(rest[0]!)) {
               pickerPage = Number(rest[0]!);
               listing = true;
             }
@@ -601,8 +618,10 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Slash
               return renderArchivePicker(candidates, pickerPage);
             }
 
-            const parsed = parseTargetsOrError(rest.join(' '));
-            if ('message' in parsed) return parsed.message;
+            const rawTargets = targetTextOf(rest, parsed.rest);
+            if (rawTargets === undefined) return TARGET_FORMAT;
+            const targets = parseTargetsOrError(rawTargets);
+            if ('message' in targets) return targets.message;
 
             // 目标需要跨工作区全量清单（可能来自 /sessions all），
             // 再补上宿主列表暂时没返回的持有会话
@@ -615,7 +634,7 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Slash
               all = [...loadedHeld, ...all.filter((entry) => !heldIds.has(entry.id))];
             }
 
-            const batch = resolveTargets(all, parsed.tokens);
+            const batch = resolveTargets(all, targets.tokens);
             // 跳过项与结果行都写会话名，按命中目标补标题
             await manager.fillSessionTitles(batch.picks);
             const skipped = batch.picks
@@ -654,14 +673,16 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Slash
               return `⚠️ 没有已归档的会话 · ${commandLink('/sessions archive', '归档会话')}`;
             }
 
-            if (rest.length === 0) {
+            if (rest.length === 0 && parsed.rest === undefined) {
               return `⚠️ 缺少目标 · ${commandLink('/sessions archived', '查看已归档')}`;
             }
 
-            const parsed = parseTargetsOrError(rest.join(' '));
-            if ('message' in parsed) return parsed.message;
+            const rawTargets = targetTextOf(rest, parsed.rest);
+            if (rawTargets === undefined) return TARGET_FORMAT;
+            const targets = parseTargetsOrError(rawTargets);
+            if ('message' in targets) return targets.message;
 
-            const batch = resolveTargets(all, parsed.tokens);
+            const batch = resolveTargets(all, targets.tokens);
             // 跳过项与结果行都写会话名，按命中目标补标题
             await manager.fillSessionTitles(batch.picks);
             const skipped = batch.picks
