@@ -15,7 +15,7 @@ import type { SessionManager } from '../../src/session/index.ts';
 import type { Logger } from '../../src/types.ts';
 import type { CommandDeps } from '../../src/commands/types.ts';
 import { buildCommandList } from '../../src/commands/index.ts';
-import { parseRunArgs, runCommand } from '../../src/commands/run.ts';
+import { displayArg, parseRunArgs, runCommand } from '../../src/commands/run.ts';
 import {
   buildShellArgv,
   runLocalCommand,
@@ -86,7 +86,8 @@ async function run(raw = '"echo hi"'): Promise<{ text: string; request: Record<s
 /** 回执里「最终真正执行的命令」那一行 */
 function invokedOf(command: string): string {
   const shell = shellSpecOf(makeConfig());
-  return [shell.file, ...buildShellArgv(shell, command)].join(' ');
+  // 与回执同一个显示规则：POSIX shell 的 -c 载荷不带引号，展示时才括起来
+  return [shell.file, ...buildShellArgv(shell, command)].map(displayArg).join(' ');
 }
 
 beforeEach(() => {

@@ -223,7 +223,7 @@ function fence(text: string): string {
 }
 
 /** 回执里显示一个参数：含空白的用双引号包住（已经带引号的原样），执行不经过这里 */
-function displayArg(value: string): string {
+export function displayArg(value: string): string {
   if (!/\s/.test(value)) return value;
   return value.startsWith('"') && value.endsWith('"') ? value : `"${value}"`;
 }
