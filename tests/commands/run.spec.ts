@@ -16,7 +16,12 @@ import type { Logger } from '../../src/types.ts';
 import type { CommandDeps } from '../../src/commands/types.ts';
 import { buildCommandList } from '../../src/commands/index.ts';
 import { parseRunArgs, runCommand } from '../../src/commands/run.ts';
-import { runLocalCommand, type LocalExecResult } from '../../src/shell/local-exec.ts';
+import {
+  buildShellArgv,
+  runLocalCommand,
+  shellSpecOf,
+  type LocalExecResult,
+} from '../../src/shell/local-exec.ts';
 
 const state = vi.hoisted(() => ({ sent: [] as string[] }));
 
@@ -118,9 +123,13 @@ describe('/run 执行', () => {
     const { text, request } = await run('echo hello');
 
     expect(text.startsWith('✅ 执行完成 · 退出码 0 · ')).toBe(true);
-    expect(text).toContain('**命令**: `echo hello`');
+    // 命令与 shell 合成一条：这行就是最终真正执行的命令
+    const shell = shellSpecOf(makeConfig());
+    const invoked = [shell.file, ...buildShellArgv(shell, 'echo hello')].join(' ');
+    expect(text).toContain(`**命令**: \`${invoked}\``);
+    expect(text).toContain('echo hello');
     expect(text).toContain(`**目录**: \`${root}\``);
-    expect(text).toContain('**Shell**: ');
+    expect(text).not.toContain('**Shell**');
     expect(text).toContain('```text');
     expect(text).toContain('hello\nworld');
     expect(text).not.toContain('**stderr**');
@@ -197,13 +206,15 @@ describe('/run 执行', () => {
     expect(spawn).not.toHaveBeenCalled();
   });
 
-  it('渲染用的 shell 就是配置里那把', async () => {
+  it('渲染里的命令由配置那把 shell 拼出来，没有额外的沙箱行', async () => {
     const config = makeConfig();
     state.sent.length = 0;
     const command = runCommand({ config, logger });
     await command.handler(makeCtx('true'));
     const text = state.sent.at(-1) ?? '';
-    expect(text).toContain('**Shell**: ');
+    const shell = shellSpecOf(config);
+    const invoked = [shell.file, ...buildShellArgv(shell, 'true')].join(' ');
+    expect(text).toContain(invoked);
     expect(text).not.toContain('**沙箱**');
   });
 });

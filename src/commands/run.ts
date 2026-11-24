@@ -23,6 +23,7 @@ import { sendMarkdownChunked } from '../shared/index.ts';
 import { sessionAdminAuth } from './sessions.ts';
 import { errorMessage } from '../shared/utils.ts';
 import {
+  buildShellArgv,
   execRoot,
   runLocalCommand,
   shellSpecOf,
@@ -145,11 +146,12 @@ function renderRun(
   elapsedMs: number,
   result: LocalExecResult,
 ): string {
+  // 一条字段写清「最终真正跑的是什么」：shell、参数与命令都在这行里
+  const invoked = [shell.file, ...buildShellArgv(shell, command)].join(' ');
   const head = [
     headline(elapsedMs, result),
-    command.includes('\n') ? `**命令**:\n${fence(command)}` : `**命令**: ${inlineCode(command)}`,
+    invoked.includes('\n') ? `**命令**:\n${fence(invoked)}` : `**命令**: ${inlineCode(invoked)}`,
     `**目录**: ${inlineCode(directory)}`,
-    `**Shell**: ${inlineCode([shell.file, ...shell.args].join(' '))}`,
   ];
 
   return [head.join('\n'), ...outputBlocks(result)].join('\n\n');
