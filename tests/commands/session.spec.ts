@@ -406,7 +406,7 @@ describe('/new <提示词>', () => {
   it('立刻开会话并把提示词发出去，先清指针再发', async () => {
     const manager = makeManager();
 
-    expect(await run(manager, '修复登录页闪退')).toBe('✅ 已开启新会话，提示词已发出');
+    expect(await run(manager, '修复登录页闪退')).toBe('✅ 已开启新会话');
     expect(manager.promptNewSession).toHaveBeenCalledWith('c2c', 'user1', 'user1', '修复登录页闪退', { scope: 'c2c', targetId: 'user1' });
     const removeAt = manager.remove.mock.invocationCallOrder[0] ?? 0;
     const promptAt = manager.promptNewSession.mock.invocationCallOrder[0] ?? 0;
@@ -416,7 +416,7 @@ describe('/new <提示词>', () => {
   it('--worktree 写在提示词后面也生效', async () => {
     const manager = makeManager();
 
-    expect(await run(manager, '看下这个参数 -w')).toBe('✅ 已开启新会话，提示词已发出');
+    expect(await run(manager, '看下这个参数 -w')).toBe('✅ 已开启新会话');
     expect(manager.armWorktree).toHaveBeenCalledTimes(1);
     expect(manager.promptNewSession).toHaveBeenCalledWith('c2c', 'user1', 'user1', '看下这个参数', { scope: 'c2c', targetId: 'user1' });
   });
@@ -428,13 +428,13 @@ describe('/new <提示词>', () => {
 
     expect(manager.changeChatWorkspace).toHaveBeenCalledWith('c2c', 'user1', 'repo');
     expect(manager.promptNewSession).toHaveBeenCalledWith('c2c', 'user1', 'user1', '修一下', { scope: 'c2c', targetId: 'user1' });
-    expect(text).toBe('✅ 已开启新会话，提示词已发出\n工作区: repo · D:\\repo');
+    expect(text).toBe('✅ 已开启新会话\n工作区: repo · D:\\repo');
   });
 
   it('--worktree 与提示词同时给：建树回执代替「已开启」首行', async () => {
     const manager = {
       ...makeManager(),
-      promptNewSession: vi.fn(async () => ({ sessionId: 's2', worktreeNotice: '✅ 已在新工作树 `feat` 里开启会话\n🌿 从 `main` 拉出 · 路径: `D:\\wt\\feat`' })),
+      promptNewSession: vi.fn(async () => ({ sessionId: 's2', worktreeNotice: '✅ 已在新工作树 `feat` 里开启会话\n从 `main` 拉出 · 路径: `D:\\wt\\feat`' })),
     };
 
     const text = await run(manager, '--worktree 查一下为什么启动慢');
@@ -662,7 +662,7 @@ describe('/new --background', () => {
       ...makeManager(),
       startBackgroundSession: vi.fn(async () => ({
         sessionId: 'session-abcdef123',
-        worktreeNotice: '✅ 已在新工作树 `feat` 里开启会话\n🌿 从 `main` 拉出 · 路径: `D:/wt/feat`',
+        worktreeNotice: '✅ 已在新工作树 `feat` 里开启会话\n从 `main` 拉出 · 路径: `D:/wt/feat`',
       })),
     };
 
@@ -735,7 +735,7 @@ describe('/new 带引用', () => {
       '[Quoted message begins]\n被引用的原文\n[Quoted message ends]\n[Current message]\n修一下',
       { scope: 'c2c', targetId: 'user1' },
     );
-    expect(text).toBe('✅ 已开启新会话，提示词已发出\n📎 已带上引用');
+    expect(text).toBe('✅ 已开启新会话');
   });
 
   it('只有引用没有提示词时，照样立刻开会话，首条只有引用', async () => {
@@ -754,7 +754,7 @@ describe('/new 带引用', () => {
     expect(manager.remove).toHaveBeenCalledTimes(1);
     expect(manager.remove.mock.invocationCallOrder[0])
       .toBeLessThan(manager.promptNewSession.mock.invocationCallOrder[0]);
-    expect(text).toBe('✅ 已开启新会话，引用已作为首条消息发出\n📎 已带上引用');
+    expect(text).toBe('✅ 已开启新会话');
   });
 
   it('引用取不到时什么都不动', async () => {
@@ -776,7 +776,7 @@ describe('/new 带引用', () => {
       prompt: '[Quoted message begins]\n被引用的原文\n[Quoted message ends]',
     }));
     expect(text.split('\n')[0]).toBe('✅ 已在后台开启会话 `#abcdef12`');
-    expect(text).toContain('📎 已带上引用');
+    expect(text).not.toContain('已带上引用');
   });
 
   it('后台带提示词时引用拼在前面', async () => {
@@ -797,7 +797,7 @@ describe('/new 带引用', () => {
     expect(manager.promptNewSession).toHaveBeenCalledWith(
       'c2c', 'user1', 'user1', '修一下', { scope: 'c2c', targetId: 'user1' },
     );
-    expect(text).toBe('✅ 已开启新会话，提示词已发出');
+    expect(text).toBe('✅ 已开启新会话');
   });
 
   it('用法页说明引用会跟着走', () => {

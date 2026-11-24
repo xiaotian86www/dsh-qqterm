@@ -152,7 +152,7 @@ describe('回执文案', () => {
       path: 'D:\\repo\\.agents\\worktrees\\dsh-1a2b3c4d-9f0e',
     })).toBe(
       '✅ 已在新工作树 `dsh-1a2b3c4d-9f0e` 里开启会话\n'
-      + '🌿 基点 `6b1f02c` · 路径: `D:\\repo\\.agents\\worktrees\\dsh-1a2b3c4d-9f0e`',
+      + '基点 `6b1f02c` · 路径: `D:\\repo\\.agents\\worktrees\\dsh-1a2b3c4d-9f0e`',
     );
   });
 
@@ -163,7 +163,7 @@ describe('回执文案', () => {
       path: 'D:\\repo\\.agents\\worktrees\\dsh-x',
     }, 'main')).toBe(
       '✅ 已在新工作树 `dsh-x` 里开启会话\n'
-      + '🌿 从 `main` 拉出 · 路径: `D:\\repo\\.agents\\worktrees\\dsh-x`',
+      + '从 `main` 拉出 · 路径: `D:\\repo\\.agents\\worktrees\\dsh-x`',
     );
   });
 

@@ -197,7 +197,6 @@ export function newCommand({ manager, config, logger }: CommandDeps): SlashComma
         const lines = started.worktreeNotice === undefined
           ? [`✅ 已在后台开启会话 \`#${short}\``]
           : [started.worktreeNotice];
-        if (quote !== undefined) lines.push('📎 已带上引用');
         if (label !== undefined) lines.push(label);
         return lines.join('\n');
       }
@@ -242,11 +241,7 @@ export function newCommand({ manager, config, logger }: CommandDeps): SlashComma
           const message = errorMessage(err);
           return `❌ 没能开启会话: ${message}\n稍后再试一次。`;
         }
-        const head = prompt === undefined
-          ? '✅ 已开启新会话，引用已作为首条消息发出'
-          : '✅ 已开启新会话，提示词已发出';
-        const lines = notice === undefined ? [head] : [notice];
-        if (quote !== undefined) lines.push('📎 已带上引用');
+        const lines = notice === undefined ? ['✅ 已开启新会话'] : [notice];
         if (label !== undefined) lines.push(label);
         return lines.join('\n');
       }
