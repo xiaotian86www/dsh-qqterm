@@ -157,27 +157,6 @@ describe('parseArgs', () => {
   it('引号没闭合时回命令名对应的用法', () => {
     expect(parseArgs('--dir "D:\\My Repo', spec).error).toBe('⚠️ 引号没有闭合 · 用法: /help demo');
   });
-
-  it('flagsFirst：第一个位置参数之后，- 开头的词原样进 words', () => {
-    const parsed = parseArgs('--dir repo ls -la --json', { ...spec, flagsFirst: true });
-    expect(parsed.values.get('dir')).toBe('repo');
-    expect(parsed.words).toEqual(['ls', '-la', '--json']);
-    expect(parsed.error).toBeUndefined();
-  });
-
-  it('flagsFirst：还没进位置参数时照常判未知参数', () => {
-    expect(parseArgs('-la', { ...spec, flagsFirst: true }).error).toBe('⚠️ 未知参数: -la · 用法: /help demo');
-  });
-
-  it('flagsFirst：位置参数之后的 `--` 也是命令自己的一个词', () => {
-    expect(parseArgs('ls -- -la', { ...spec, flagsFirst: true }).words).toEqual(['ls', '--', '-la']);
-  });
-
-  it('flagsFirst：命令之前的 `--` 仍按终止符处理', () => {
-    expect(parseArgs('--dir repo -- ls -la', { ...spec, flagsFirst: true })).toMatchObject({
-      words: ['ls', '-la'],
-    });
-  });
 });
 
 describe('quoteArg', () => {

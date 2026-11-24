@@ -71,7 +71,7 @@ function makeCtx(raw: string, senderId = 'user1'): SlashCommandHandlerContext {
 }
 
 /** 跑一次命令，返回真正发出去的文本与交给执行面的入参 */
-async function run(raw = 'echo hi'): Promise<{ text: string; request: Record<string, unknown> | undefined }> {
+async function run(raw = '"echo hi"'): Promise<{ text: string; request: Record<string, unknown> | undefined }> {
   state.sent.length = 0;
   spawn.mockClear();
   const command = runCommand({ config: makeConfig(), logger });
@@ -81,6 +81,12 @@ async function run(raw = 'echo hi'): Promise<{ text: string; request: Record<str
     text: state.sent.at(-1) ?? '',
     request: spawn.mock.calls.at(-1)?.[1] as Record<string, unknown> | undefined,
   };
+}
+
+/** 回执里「最终真正执行的命令」那一行 */
+function invokedOf(command: string): string {
+  const shell = shellSpecOf(makeConfig());
+  return [shell.file, ...buildShellArgv(shell, command)].join(' ');
 }
 
 beforeEach(() => {
@@ -120,32 +126,43 @@ describe('/run 注册条件', () => {
 describe('/run 执行', () => {
   it('成功：首行给退出码与耗时，正文给命令、目录与输出', async () => {
     spawn.mockResolvedValue(resultOf({ stdout: { text: 'hello\nworld\n', truncated: false } }));
-    const { text, request } = await run('echo hello');
+    const { text, request } = await run('"echo hello"');
 
     expect(text.startsWith('✅ 执行完成 · 退出码 0 · ')).toBe(true);
     // 命令与 shell 合成一条：这行就是最终真正执行的命令
-    const shell = shellSpecOf(makeConfig());
-    const invoked = [shell.file, ...buildShellArgv(shell, ['echo', 'hello'])].join(' ');
-    expect(text).toContain(`**命令**: \`${invoked}\``);
-    expect(text).toContain('echo hello');
+    expect(text).toContain('**命令**: `' + invokedOf('echo hello') + '`');
     expect(text).toContain(`**目录**: \`${root}\``);
     expect(text).not.toContain('**Shell**');
     expect(text).toContain('```text');
     expect(text).toContain('hello\nworld');
     expect(text).not.toContain('**stderr**');
-    expect(request).toMatchObject({ argv: ['echo', 'hello'], cwd: root, timeoutMs: 120_000 });
+    expect(request).toMatchObject({ command: 'echo hello', cwd: root, timeoutMs: 120_000 });
   });
 
-  it('带空格的词只算一个参数，回执里用引号标出词边界', async () => {
-    const { text, request } = await run('echo "a b"');
+  it('引号里的整条命令原样交给 shell：管道与 && 不被拆开', async () => {
+    const { text, request } = await run('"echo a b && ls | wc -l"');
 
-    expect(request).toMatchObject({ argv: ['echo', 'a b'] });
-    expect(text).toContain('echo "a b"');
+    expect(request).toMatchObject({ command: 'echo a b && ls | wc -l' });
+    expect(text).toContain(invokedOf('echo a b && ls | wc -l'));
+  });
+
+  it('单引号包住的命令可带双引号，整段仍是命令的一部分', async () => {
+    const { request } = await run("'echo \"a b\"'");
+
+    expect(request).toMatchObject({ command: 'echo "a b"' });
+  });
+
+  it('多给一个词按参数格式错误回绝，不执行也不拼回字符串', async () => {
+    const { text } = await run('echo hello');
+
+    expect(text).toContain('只能给一条命令');
+    expect(text).toContain('用法: /help run');
+    expect(spawn).not.toHaveBeenCalled();
   });
 
   it('失败：退出码非 0，stderr 单独标注', async () => {
     spawn.mockResolvedValue(resultOf({ exitCode: 2, stderr: { text: 'boom\n', truncated: false } }));
-    const { text } = await run('false');
+    const { text } = await run('"false"');
 
     expect(text.startsWith('❌ 执行失败 · 退出码 2 · ')).toBe(true);
     expect(text).toContain('**stderr**:');
@@ -154,19 +171,19 @@ describe('/run 执行', () => {
 
   it('超时：按执行面给的超时时间标注已中止', async () => {
     spawn.mockResolvedValue(resultOf({ timedOut: true, exitCode: null, timeoutMs: 5_000 }));
-    const { text } = await run('sleep 100');
+    const { text } = await run('"sleep 100"');
 
     expect(text.startsWith('❌ 执行超时 · 已中止 · 5.0s')).toBe(true);
   });
 
   it('没有输出时写明', async () => {
-    const { text } = await run('true');
+    const { text } = await run('"true"');
     expect(text).toContain('（没有输出）');
   });
 
   it('超长输出只显示末尾 3000 字符并标明截断', async () => {
     spawn.mockResolvedValue(resultOf({ stdout: { text: 'a'.repeat(4_000), truncated: false } }));
-    const { text } = await run('true');
+    const { text } = await run('"true"');
 
     expect(text).toContain('…（已截断 · 只显示末尾）');
     expect(text).not.toContain('a'.repeat(4_001));
@@ -175,41 +192,42 @@ describe('/run 执行', () => {
 
   it('执行面先截断时说明只留了末尾', async () => {
     spawn.mockResolvedValue(resultOf({ stdout: { text: 'tail', truncated: true } }));
-    const { text } = await run('true');
+    const { text } = await run('"true"');
 
     expect(text).toContain('> 💡 只保留了输出末尾');
   });
 
   it('起不了进程时如实说失败并 warn', async () => {
     spawn.mockRejectedValue(new Error('spawn EPERM'));
-    const { text } = await run('ls');
+    const { text } = await run('"ls"');
 
     expect(text).toContain('❌ 执行失败: spawn EPERM');
     expect(logger.warn).toHaveBeenCalled();
   });
 
   it('--timeout 改超时并传给执行面', async () => {
-    const { request } = await run('--timeout 30 npm test');
+    const { request } = await run('--timeout 30 "npm test"');
 
-    expect(request).toMatchObject({ argv: ['npm', 'test'], timeoutMs: 30_000 });
-  });
-
-  it('命令自己的参数与 shell 语法原样进 argv，一个词一个参数', async () => {
-    const { request } = await run('echo "a b" && ls | wc -l');
-
-    expect(request).toMatchObject({ argv: ['echo', 'a b', '&&', 'ls', '|', 'wc', '-l'] });
+    expect(request).toMatchObject({ command: 'npm test', timeoutMs: 30_000 });
   });
 
   it('命令以 - 开头时用 -- 隔开', async () => {
     const { request } = await run('-- -la');
 
-    expect(request).toMatchObject({ argv: ['-la'] });
+    expect(request).toMatchObject({ command: '-la' });
   });
 
   it('命令前写错参数时不执行，回未知参数', async () => {
-    const { text } = await run('--nope ls');
+    const { text } = await run('--nope "ls"');
 
     expect(text).toContain('未知参数: --nope');
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('没加引号的 - 开头命令按参数识别，报未知参数', async () => {
+    const { text } = await run('-la');
+
+    expect(text).toContain('未知参数: -la');
     expect(spawn).not.toHaveBeenCalled();
   });
 
@@ -217,11 +235,9 @@ describe('/run 执行', () => {
     const config = makeConfig();
     state.sent.length = 0;
     const command = runCommand({ config, logger });
-    await command.handler(makeCtx('true'));
+    await command.handler(makeCtx('"true"'));
     const text = state.sent.at(-1) ?? '';
-    const shell = shellSpecOf(config);
-    const invoked = [shell.file, ...buildShellArgv(shell, ['true'])].join(' ');
-    expect(text).toContain(invoked);
+    expect(text).toContain(invokedOf('true'));
     expect(text).not.toContain('**沙箱**');
   });
 });
@@ -233,53 +249,48 @@ describe('parseRunArgs', () => {
     return (parsed as { text: string }).text;
   }
 
-  it('空格切词：每个词就是一个参数，默认 120 秒', () => {
-    expect(parseRunArgs('ls -la')).toEqual({
+  it('整条命令是一个位置参数，默认 120 秒', () => {
+    expect(parseRunArgs('"ls -la"')).toEqual({
       ok: true,
-      request: { argv: ['ls', '-la'], timeoutMs: 120_000 },
+      request: { command: 'ls -la', timeoutMs: 120_000 },
     });
   });
 
-  it('引号只决定词边界，词里的空格原样保留', () => {
-    expect(parseRunArgs('echo "a b" && ls | wc -l')).toEqual({
-      ok: true,
-      request: { argv: ['echo', 'a b', '&&', 'ls', '|', 'wc', '-l'], timeoutMs: 120_000 },
-    });
+  it('一个词不加引号也行', () => {
+    expect(parseRunArgs('dir')).toEqual({ ok: true, request: { command: 'dir', timeoutMs: 120_000 } });
+  });
+
+  it('多出来的词按参数格式错误回绝，不重拼', () => {
+    expect(rejectText('ls foo')).toContain('只能给一条命令');
+    expect(rejectText('echo "a b"')).toContain('只能给一条命令');
   });
 
   it('--timeout 的几种写法都认，且不留在命令里', () => {
-    for (const raw of ['--timeout=30 ls -la', '--timeout 30 ls -la', '-t 30 ls -la']) {
+    for (const raw of ['--timeout=30 "npm test"', '--timeout 30 "npm test"', '-t 30 "npm test"']) {
       expect(parseRunArgs(raw)).toEqual({
         ok: true,
-        request: { argv: ['ls', '-la'], timeoutMs: 30_000 },
+        request: { command: 'npm test', timeoutMs: 30_000 },
       });
     }
   });
 
-  it('命令中间的 --timeout 属于命令自己', () => {
-    expect(parseRunArgs('ls --timeout 30')).toEqual({
+  it('命令里的 --timeout 属于命令本身：整段用引号包住即可', () => {
+    expect(parseRunArgs('"ls --timeout 30"')).toEqual({
       ok: true,
-      request: { argv: ['ls', '--timeout', '30'], timeoutMs: 120_000 },
+      request: { command: 'ls --timeout 30', timeoutMs: 120_000 },
     });
   });
 
-  it('-- 之后一律当命令', () => {
-    expect(parseRunArgs('-- ls -la')).toEqual({
+  it('-- 之后不再解析参数，- 开头的命令这样写', () => {
+    expect(parseRunArgs('-- -la')).toEqual({ ok: true, request: { command: '-la', timeoutMs: 120_000 } });
+    expect(parseRunArgs('--timeout 30 -- "npm test"')).toEqual({
       ok: true,
-      request: { argv: ['ls', '-la'], timeoutMs: 120_000 },
-    });
-    expect(parseRunArgs('--timeout 30 -- npm test --watch')).toEqual({
-      ok: true,
-      request: { argv: ['npm', 'test', '--watch'], timeoutMs: 30_000 },
-    });
-    expect(parseRunArgs('-- -la')).toEqual({
-      ok: true,
-      request: { argv: ['-la'], timeoutMs: 120_000 },
+      request: { command: 'npm test', timeoutMs: 30_000 },
     });
   });
 
   it('命令前认不出的参数回未知参数', () => {
-    expect(rejectText('--nope ls')).toContain('未知参数: --nope');
+    expect(rejectText('--nope "ls"')).toContain('未知参数: --nope');
     expect(rejectText('-la')).toContain('未知参数: -la');
   });
 
@@ -290,9 +301,9 @@ describe('parseRunArgs', () => {
   });
 
   it('秒数不对时回取值范围', () => {
-    expect(rejectText('--timeout abc ls')).toContain('1–600');
-    expect(rejectText('--timeout 0 ls')).toContain('1–600');
-    expect(rejectText('--timeout 601 ls')).toContain('1–600');
+    expect(rejectText('--timeout abc "ls"')).toContain('1–600');
+    expect(rejectText('--timeout 0 "ls"')).toContain('1–600');
+    expect(rejectText('--timeout 601 "ls"')).toContain('1–600');
   });
 
   it('缺秒数回用法，只有开关没命令另说', () => {
@@ -302,9 +313,9 @@ describe('parseRunArgs', () => {
   });
 
   it('最长 600 秒可用', () => {
-    expect(parseRunArgs('--timeout 600 ls')).toEqual({
+    expect(parseRunArgs('--timeout 600 dir')).toEqual({
       ok: true,
-      request: { argv: ['ls'], timeoutMs: 600_000 },
+      request: { command: 'dir', timeoutMs: 600_000 },
     });
   });
 });

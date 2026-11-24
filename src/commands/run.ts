@@ -9,9 +9,10 @@
  * 无关；shell 用操作系统自带的那个，可在 `exec.shell` 里换。命令是用户亲手发起的，
  * 后果由用户承担，不套宿主的沙箱（见 shell/local-exec.ts）。
  *
- * 参数走共用解析器（args.ts 的 parseArgs）：空格分隔，每个词就是命令的一个参数，
- * 插件不把它们拼回字符串；`--timeout` 这类开关只写在命令前面，命令自己的 `-la`
- * 从第一个词起原样保留，管道与 `&&` 由 shell 在自己的命令行里解释。
+ * 参数走共用解析器（args.ts 的 parseArgs）：空格是分隔符，所以整条命令算一个位置
+ * 参数——有空格就用引号包起来（`/run "cd /d D:\\source && dir"`）。多出来的词按参数
+ * 错误回绝，`-` 开头的词按参数识别，插件不把词拼回字符串：管道与 `&&` 由 shell 在
+ * 自己的命令行里解释。
  *
  * 与 `/ls`、`/get` 同一权限面：能在目标机上执行命令，等于能碰 agent 手里的一切，
  * 只允许唯一绑定用户（`access.owner`）。
@@ -45,15 +46,15 @@ const USAGE = [
   '',
   '`/run <命令>` 在当前目录执行，默认 120 秒超时',
   '`/run --timeout <秒> <命令>` 改超时（1–600 秒，`-t` 同义）',
-  '空格分隔参数，每个词就是一个参数；带空格的词用引号包起来',
-  '开关只写在命令前，命令自己的 `-la`、`--json` 不用转义',
-  '`--` 之后不再解析参数，命令以 `-` 开头时用它隔开',
+  '空格是分隔符，整条命令算一个参数：有空格就整条用引号包起来',
+  '例如 `/run "cd /d D:\\source && dir"`；多出来的词按参数错误回绝',
+  '`-` 开头的词按参数识别，`--` 之后不再解析参数',
   '当前目录 = dsh 进程启动时所在的位置；shell 用操作系统自带的，可在 `exec` 配置里换',
 ].join('\n');
 
-/** 一次执行的入参：命令已按空格切成词，原样交给 shell */
+/** 一次执行的入参：整条命令原样交给 shell */
 export interface RunRequest {
-  readonly argv: readonly string[];
+  readonly command: string;
   readonly timeoutMs: number;
 }
 
@@ -62,18 +63,15 @@ export type RunParse =
   | { ok: true; request: RunRequest }
   | { ok: false; text: string };
 
-/** 缺秒数 / 秒数越界的回执 */
+/** 缺秒数 / 秒数越界 / 多给词的签发回执 */
 const TIMEOUT_MISSING = '⚠️ --timeout 后要跟秒数 · 用法: /help run';
+const EXTRA_WORDS = '⚠️ 只能给一条命令 · 整条命令用引号包起来 · 用法: /help run';
 const TIMEOUT_RANGE = '⚠️ 超时秒数要在 1–600 之间 · 用法: /help run';
 
-/**
- * 只认命令前面的开关：`--timeout`（`-t`）取值，其余词按空格切开就是命令。
- * `--` 之后不再解析参数，命令本身以 `-` 开头时用它隔开。
- */
+/** 只认 `--timeout`（`-t`）；其余词都是位置参数，`--` 之后不再解析 */
 const RUN_SPEC: ParseSpec = {
   command: 'run',
   terminator: true,
-  flagsFirst: true,
   flags: [{ name: 'timeout', alias: 't', value: true, missing: TIMEOUT_MISSING }],
 };
 
@@ -103,18 +101,19 @@ export function parseRunArgs(raw: string): RunParse {
   const parsed = parseArgs(raw, RUN_SPEC);
   if (parsed.error !== undefined) return { ok: false, text: parsed.error };
 
-  // 空格切出来的词就是参数：不重拼、不再做二次解析
-  const argv = parsed.words;
-  if (argv.length === 0) return { ok: false, text: '⚠️ 缺少要执行的命令 · 用法: /help run' };
+  // 一条命令就是一个位置参数：多出来的词是写错，不猜着拼回字符串
+  const [command] = parsed.words;
+  if (command === undefined) return { ok: false, text: '⚠️ 缺少要执行的命令 · 用法: /help run' };
+  if (parsed.words.length > 1) return { ok: false, text: EXTRA_WORDS };
 
   const seconds = parsed.values.get('timeout');
-  if (seconds === undefined) return { ok: true, request: { argv, timeoutMs: DEFAULT_TIMEOUT_MS } };
+  if (seconds === undefined) return { ok: true, request: { command, timeoutMs: DEFAULT_TIMEOUT_MS } };
 
   const timeoutMs = /^\d+$/.test(seconds) ? Number(seconds) * 1_000 : Number.NaN;
   if (!Number.isFinite(timeoutMs) || timeoutMs < 1_000 || timeoutMs > MAX_TIMEOUT_MS) {
     return { ok: false, text: TIMEOUT_RANGE };
   }
-  return { ok: true, request: { argv, timeoutMs } };
+  return { ok: true, request: { command, timeoutMs } };
 }
 
 /** 取根目录 → 执行 → 渲染 */
@@ -125,7 +124,7 @@ async function execute(config: CommandDeps['config'], request: RunRequest, logge
   let result: LocalExecResult;
   try {
     result = await runLocalCommand(shell, {
-      argv: request.argv,
+      command: request.command,
       cwd: directory,
       timeoutMs: request.timeoutMs,
     });
@@ -136,19 +135,19 @@ async function execute(config: CommandDeps['config'], request: RunRequest, logge
   }
   const elapsed = Date.now() - started;
 
-  return renderRun(request.argv, directory, shell, elapsed, result);
+  return renderRun(request.command, directory, shell, elapsed, result);
 }
 
 /** 渲染成「首行结论 + 字段行 + 输出块」 */
 function renderRun(
-  argv: readonly string[],
+  command: string,
   directory: string,
   shell: ShellSpec,
   elapsedMs: number,
   result: LocalExecResult,
 ): string {
-  // 一条字段写清「最终真正跑的是什么」：shell、参数与命令词都在这行里
-  const invoked = [shell.file, ...buildShellArgv(shell, argv)].map(displayArg).join(' ');
+  // 一条字段写清「最终真正跑的是什么」：shell、参数与命令都在这行里
+  const invoked = [shell.file, ...buildShellArgv(shell, command)].map(displayArg).join(' ');
   const head = [
     headline(elapsedMs, result),
     invoked.includes('\n') ? `**命令**:\n${fence(invoked)}` : `**命令**: ${inlineCode(invoked)}`,
@@ -211,9 +210,10 @@ function fence(text: string): string {
   return `${ticks}text\n${text}\n${ticks}`;
 }
 
-/** 回执里显示一个参数：含空白的用双引号包住，人读得出词边界（执行不经过这里） */
+/** 回执里显示一个参数：含空白的用双引号包住（已经带引号的原样），执行不经过这里 */
 function displayArg(value: string): string {
-  return /\s/.test(value) ? `"${value}"` : value;
+  if (!/\s/.test(value)) return value;
+  return value.startsWith('"') && value.endsWith('"') ? value : `"${value}"`;
 }
 
 /** 行内代码：内容里有反引号时用双反引号包住 */

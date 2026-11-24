@@ -246,12 +246,12 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqterm/cordis.dev.yml
 
 三个命令共用同一个基准——**dsh 进程启动时所在的目录**（`process.cwd()`），与会话工作区、运行目录都无关，运行期 `cd` 也不改它。
 
-`/run` 的命令按空格切成词，每个词就是一个参数原样交给 shell：带空格的词用引号包起来，`&&`、管道也是独立的词，由 shell 在自己的命令行里解释。插件不把词拼回字符串；命令自己的 `-la`、`--json` 写在命令第一个词之后就不参与 `/run` 的参数识别，`--timeout` 这类开关只写在命令前面。
+`/run` 只接受一条命令：空格是参数分隔符，命令里有空格就用引号整条包起来，例如 `/run "cd /d D:\source && dir"`。多给一个词按参数格式错误回绝；命令以 `-` 开头时用 `--` 隔开；`--timeout` 这类开关只写在命令前面。命令字符串原样交给 shell，管道与 `&&` 都由 shell 在自己的命令行里解释。
 
 | 配置 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
 | `exec.shell` | string | Windows `cmd.exe` 的实际路径；其它 `/bin/sh` | 执行 `/run` 的 shell；默认值按平台写进配置（Windows 优先环境里的 `ComSpec`），清空就是空（执行前报错），运行期不回落默认值 |
-| `exec.shellArgs` | string[] | Windows `["/d","/s","/c"]`；其它 `["-c","exec \"$@\"","sh"]` | 传给 shell 的参数模板，`{command}` 原位展开成命令词；默认值按平台写进配置（`exec "$@"` 让 POSIX shell 把后面的词当 argv 执行），运行时按字面用（空就是不传参数），换 shell 不会自动改参数 |
+| `exec.shellArgs` | string[] | Windows `["/d","/s","/c"]`；其它 `["-c"]` | 传给 shell 的参数模板，`{command}` 原位展开成整条命令；默认值按平台写进配置，运行时按字面用（空就是不传参数），换 shell 不会自动改参数 |
 
 `/get` 与 `/ls` 的绝对路径不受基准限制；`/run` 的命令是用户亲手打出来的，后果由用户承担，不套宿主沙箱。
 

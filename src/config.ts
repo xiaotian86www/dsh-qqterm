@@ -56,26 +56,25 @@ export const DEFAULT_SHELL: string =
     : '/bin/sh';
 
 /**
- * `exec.shellArgs` 的平台默认值：与默认 shell 配套，并把命令词当 argv 执行。
+ * `exec.shellArgs` 的平台默认值：与默认 shell 配套，用来执行一条命令字符串。
  *
- * Windows 的 cmd 自己就能从命令行取词（`/d /s /c` + 命令词）；POSIX shell 只吃
- * 一条脚本字符串，因此用 `-c 'exec "$@"' sh` 把后面的词原样当 argv 交出去，
- * 免得插件自己把词拼回字符串。
+ * Windows 的 cmd 用 `/d /s /c`；POSIX shell 用 `-c` 收一条脚本字符串。两者都只吃
+ * 一条命令，插件不拆解命令内容。
  *
  * 同样只写进 Schema 默认值；运行时按配置字面用，空就是空，不按 shell 另推一套。
  */
 export const DEFAULT_SHELL_ARGS: string[] =
-  process.platform === 'win32' ? ['/d', '/s', '/c'] : ['-c', 'exec "$@"', 'sh'];
+  process.platform === 'win32' ? ['/d', '/s', '/c'] : ['-c'];
 
 /** 本地命令执行配置：`/run` 用的 shell（根目录固定为宿主进程当前目录，不配置） */
 export interface ExecConfig {
   /** 执行 `/run` 用的 shell；默认按平台写进配置（Windows 的 cmd.exe，其它 /bin/sh），空 = 空（执行前报错） */
   shell: string;
   /**
-   * 传给 shell 的参数模板，`{command}` 原位展开成命令词（不是拼成一条字符串）。
+   * 传给 shell 的参数模板，`{command}` 原位展开成整条命令。
    *
-   * 默认值按平台写进配置（cmd 是 `/d /s /c`，其它是 `-c` + `exec "$@"` + `sh`），
-   * 运行时按字面用：换 shell 或清空都不再另算，要改就改这里。
+   * 默认值按平台写进配置（cmd 是 `/d /s /c`，其它是 `-c`），运行时按字面用：换
+   * shell 或清空都不再另算，要改就改这里。
    */
   shellArgs: string[];
 }
@@ -150,6 +149,6 @@ export const ConfigSchema: Schema<QQTermConfig> = Schema.object({
       .description('执行 /run 的 shell，默认按平台（Windows: cmd.exe 的实际路径，其它: /bin/sh）；清空就是空，执行前报错'),
     shellArgs: Schema.array(Schema.string())
       .default(DEFAULT_SHELL_ARGS)
-      .description('shell 参数模板，{command} 原位展开成命令词；默认按平台（cmd: /d /s /c，其它: -c exec "$@" sh），改成别的才按字面用'),
+      .description('shell 参数模板，{command} 原位展开成整条命令；默认按平台（cmd: /d /s /c，其它: -c），改成别的才按字面用'),
   }).description('本地命令执行配置'),
 });

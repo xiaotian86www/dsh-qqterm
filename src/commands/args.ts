@@ -12,9 +12,9 @@
  * - 整行就是一个值的命令（路径、标题）走 parseRest：两端成对的引号去掉，其余
  *   原样，写不写引号都对。
  *
- * 切词结果就是参数的最终形态：空格分隔，每个词原样作为一个参数，拆完不再拼回
- * 字符串。要执行命令的 `/run` 因此把词数组直接交给 shell（Linux 的 argv 语义），
- * 命令自己的 `-la`、`--json` 只要写在命令第一个词之后就不参与本命令的参数识别。
+ * 切出来的词就是参数的最终形态，拆完不再拼回字符串：一条命令要几个位置参数、
+ * 多给一个算什么错，都由各命令自己判（`/run` 只收一条命令——整条命令用引号包住，
+ * 多出来的词按参数错误回绝）。
  */
 
 /** 引号没有闭合 */
@@ -126,11 +126,6 @@ export interface ParseSpec {
   flags?: readonly FlagSpec[];
   /** 认 `--`：之后的词一律当位置参数（提示词里要写 `-w` 时用） */
   terminator?: boolean;
-  /**
-   * 开关只写在位置参数之前：命令自己的参数（`/run ls -la` 里的 `-la`）从第一个
-   * 位置参数起原样进 `words`，不再按本命令的参数识别，也不报未知参数。
-   */
-  flagsFirst?: boolean;
 }
 
 /** 解析结果 */
@@ -214,19 +209,11 @@ export function parseArgs(raw: string, spec: ParseSpec): ParsedArgs {
   }
   const known = spec.flags ?? [];
   const queue = expandShortFlags(tokens, known, spec.terminator === true);
-  /** 已经进入位置参数区（`flagsFirst` 时，之后 `-` 开头的词也当参数） */
-  let wordsStarted = false;
   for (let i = 0; i < queue.length; i += 1) {
     const token = queue[i] as RawToken;
     // 引号包着的词、不带 `-` 的词都是位置参数
     if (token.quoted || !looksLikeParam(token)) {
       if (token.value === '') continue;
-      words.push(token.value);
-      wordsStarted = true;
-      continue;
-    }
-    // 位置参数之后全是命令自己的参数：`--` 也不再终止，原样当作一个词
-    if (spec.flagsFirst === true && wordsStarted) {
       words.push(token.value);
       continue;
     }

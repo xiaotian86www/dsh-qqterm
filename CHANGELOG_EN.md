@@ -8,12 +8,12 @@ User-visible changes to QQ SuperTerm (`dsh-qqterm`). The format follows [Keep a 
 
 ### Added
 
-- `/run`: run a local command in the current directory, with `--timeout <seconds>` (120 s by default, 600 s max); oversized output is trimmed to its tail. The plugin spawns the process itself and does not go through the host's shell capability: the working directory is the host process's current directory (independent of the session workspace or the run directory), the shell is the OS one (`exec.shell` / `exec.shellArgs`), The command is user-initiated, so its consequences are the user's; the command is split on spaces and every word is passed to the shell as one argument (the Linux argv convention), never re-joined by the plugin, with `&&` and pipes handed over as separate words for the shell to interpret.
+- `/run`: run a local command in the current directory, with `--timeout <seconds>` (120 s by default, 600 s max); oversized output is trimmed to its tail. The plugin spawns the process itself and does not go through the host's shell capability: the working directory is the host process's current directory (independent of the session workspace or the run directory), the shell is the OS one (`exec.shell` / `exec.shellArgs`), The command is user-initiated, so its consequences are the user's; `/run` takes exactly one command, whole-command quoted when it contains spaces; an extra word is rejected as a malformed argument, and the command string goes to the shell verbatim, with `&&` and pipes interpreted by the shell.
 
 ### Changed
 
 - `/ls` and `/get` now resolve relative paths against the host process's current directory (`process.cwd()`) instead of the run directory; absolute paths still work as before.
-- `exec.shell` and `exec.shellArgs` now default to the platform's values in the config (the actual `cmd.exe` path and `["/d","/s","/c"]` on Windows, `/bin/sh` and `["-c","exec \"$@\"","sh"]` otherwise) instead of being derived only at runtime, so they are visible and editable; both are used literally at runtime, clearing one means empty (`/run` reports "no shell configured"), and nothing is re-defaulted or rewritten for the chosen shell.
+- `exec.shell` and `exec.shellArgs` now default to the platform's values in the config (the actual `cmd.exe` path and `["/d","/s","/c"]` on Windows, `/bin/sh` and `["-c"]` otherwise) instead of being derived only at runtime, so they are visible and editable; both are used literally at runtime, clearing one means empty (`/run` reports "no shell configured"), and nothing is re-defaulted or rewritten for the chosen shell.
 
 ## [0.0.2] - 2026-11-24
 
