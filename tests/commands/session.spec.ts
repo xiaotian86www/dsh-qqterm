@@ -196,9 +196,10 @@ describe('/new（不带参数）', () => {
 });
 
 describe('parseNewArgs', () => {
-  it('裸文字是提示词，不再当工作区', () => {
+  it('一段裸文字是提示词，多段要引号或 --', () => {
     expect(parseNewArgs('修一下')).toEqual({ arg: '', worktree: false, background: false, prompt: '修一下', error: undefined });
-    expect(parseNewArgs('看下这个 bug')).toEqual({ arg: '', worktree: false, background: false, prompt: '看下这个 bug', error: undefined });
+    expect(parseNewArgs('"看下 这个 bug"')).toEqual({ arg: '', worktree: false, background: false, prompt: '看下 这个 bug', error: undefined });
+    expect(parseNewArgs('看下这个 bug')).toEqual({ arg: '', worktree: false, background: false, prompt: undefined, error: '⚠️ 提示词只能一段：有空格就用引号包起来，或写到 -- 之后 · 用法: /help new' });
     expect(parseNewArgs('')).toEqual({ arg: '', worktree: false, background: false, prompt: undefined, error: undefined });
   });
 
@@ -214,13 +215,15 @@ describe('parseNewArgs', () => {
     expect(parseNewArgs("-d 'D:\\My Repo' -w")).toEqual({ arg: 'D:\\My Repo', worktree: true, background: false, prompt: undefined, error: undefined });
   });
 
-  it('参数写在提示词前后都生效，其余词按顺序连成提示词', () => {
-    expect(parseNewArgs('修一下 --dir repo 再跑测试')).toEqual({ arg: 'repo', worktree: false, background: false, prompt: '修一下 再跑测试', error: undefined });
+  it('参数写在提示词前后都生效，但提示词只收一段', () => {
+    expect(parseNewArgs('--dir repo -w 修一下')).toEqual({ arg: 'repo', worktree: true, background: false, prompt: '修一下', error: undefined });
     expect(parseNewArgs('修一下 -w')).toEqual({ arg: '', worktree: true, background: false, prompt: '修一下', error: undefined });
+    expect(parseNewArgs('修一下 --dir repo 再跑测试')).toEqual({ arg: '', worktree: false, background: false, prompt: undefined, error: '⚠️ 提示词只能一段：有空格就用引号包起来，或写到 -- 之后 · 用法: /help new' });
   });
 
-  it('引号包着的词是提示词或值，不当参数', () => {
-    expect(parseNewArgs('看下 "-w" 这个参数')).toEqual({ arg: '', worktree: false, background: false, prompt: '看下 -w 这个参数', error: undefined });
+  it('提示词带空格时用引号包住，或写到 -- 之后', () => {
+    expect(parseNewArgs('"看下 -w 这个参数"')).toEqual({ arg: '', worktree: false, background: false, prompt: '看下 -w 这个参数', error: undefined });
+    expect(parseNewArgs('-- 看下 -w 这个参数')).toEqual({ arg: '', worktree: false, background: false, prompt: '看下 -w 这个参数', error: undefined });
     expect(parseNewArgs('-d "-w"')).toEqual({ arg: '-w', worktree: false, background: false, prompt: undefined, error: undefined });
   });
 
@@ -232,6 +235,8 @@ describe('parseNewArgs', () => {
 
   it('-- 之后一律当提示词', () => {
     expect(parseNewArgs('--dir repo -- 看下 --prompt 这个参数')).toEqual({ arg: 'repo', worktree: false, background: false, prompt: '看下 --prompt 这个参数', error: undefined });
+    expect(parseNewArgs('修一下 -- 再跑测试')).toEqual({ arg: '', worktree: false, background: false, prompt: undefined, error: '⚠️ 提示词只能一段：有空格就用引号包起来，或写到 -- 之后 · 用法: /help new' });
+    expect(parseNewArgs('--')).toEqual({ arg: '', worktree: false, background: false, prompt: undefined, error: undefined });
   });
 
   it('不认识的参数与已删除的 --prompt 都回未知参数', () => {
@@ -480,7 +485,8 @@ describe('/new <提示词>', () => {
   it('用法页说明 -- 之后全部当提示词', () => {
     const command = newCommand({ manager: makeManager() as unknown as SessionManager, config, logger });
     expect(command.usage).toContain('`/new <提示词>`');
-    expect(command.usage).toContain('`--` 之后的内容全部当提示词');
+    expect(command.usage).toContain('`/new -- <提示词>`');
+    expect(command.usage).toContain('`--` 之后不再解析参数');
     expect(command.usage).not.toContain('参数位置');
   });
 });

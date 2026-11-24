@@ -898,10 +898,19 @@ describe('/sessions rename', () => {
       listHeldSessions: vi.fn(async () => [entry({ id: 'session-held01', held: true })]),
     });
 
-    const text = await run(manager, 'rename #held01 新的 会话名');
+    const text = await run(manager, 'rename #held01 -- 新的 会话名');
 
     expect(manager.renameSession).toHaveBeenCalledWith('session-held01', '新的 会话名');
     expect(text).toBe('✅ 会话名已改为「改好的名字」 · `#held01`');
+  });
+
+  it('没包引号又写成多段时按参数错误回绝', async () => {
+    const manager = makeManager({
+      listHeldSessions: vi.fn(async () => [entry({ id: 'session-held01', held: true })]),
+    });
+
+    expect(await run(manager, 'rename #held01 新的 会话名')).toBe('⚠️ 标题只能一段：有空格就用引号包起来，或写到 -- 之后 · 用法: /help sessions');
+    expect(manager.renameSession).not.toHaveBeenCalled();
   });
 
   it('标题带空格时加引号也照收，引号不进标题', async () => {

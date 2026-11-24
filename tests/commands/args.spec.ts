@@ -7,18 +7,18 @@ import { looksLikeParam, parseArgs, parseRest, quoteArg, tokenize } from '../../
 describe('tokenize', () => {
   it('按空格切词，连续空白不产生空词', () => {
     expect(tokenize('  a   b\tc ').tokens).toEqual([
-      { value: 'a', quoted: false },
-      { value: 'b', quoted: false },
-      { value: 'c', quoted: false },
+      { value: 'a', quoted: false, offset: 2 },
+      { value: 'b', quoted: false, offset: 6 },
+      { value: 'c', quoted: false, offset: 8 },
     ]);
   });
 
   it('引号包住的空白留在同一个词里，引号本身去掉', () => {
     const { tokens } = tokenize('install "dsh  x" --allow-builds=a');
     expect(tokens).toEqual([
-      { value: 'install', quoted: false },
-      { value: 'dsh  x', quoted: true },
-      { value: '--allow-builds=a', quoted: false },
+      { value: 'install', quoted: false, offset: 0 },
+      { value: 'dsh  x', quoted: true, offset: 8 },
+      { value: '--allow-builds=a', quoted: false, offset: 17 },
     ]);
   });
 
@@ -27,7 +27,7 @@ describe('tokenize', () => {
   });
 
   it('引号没闭合只报错，尽量保留已切出来的词', () => {
-    expect(tokenize('a "b c')).toEqual({ tokens: [{ value: 'a', quoted: false }], error: 'quote-open' });
+    expect(tokenize('a "b c')).toEqual({ tokens: [{ value: 'a', quoted: false, offset: 0 }], error: 'quote-open' });
   });
 
   it('空串与纯空白没有词', () => {
@@ -74,7 +74,7 @@ describe('parseArgs', () => {
       { name: 'background', alias: 'b' },
       { name: 'allow-builds', value: true, list: true },
     ],
-    terminator: true,
+    terminator: 'words',
   };
 
   it('开关进 flags，其余是位置参数', () => {
@@ -152,6 +152,24 @@ describe('parseArgs', () => {
     const parsed = parseArgs('--dir repo -- -w --dir', spec);
     expect(parsed.values.get('dir')).toBe('repo');
     expect(parsed.words).toEqual(['-w', '--dir']);
+  });
+
+  it('rest 模式：`--` 之后整段原样进 rest，不再切词', () => {
+    const parsed = parseArgs('--dir repo -- 提 示 "x"', { ...spec, terminator: 'rest' });
+    expect(parsed.values.get('dir')).toBe('repo');
+    expect(parsed.words).toEqual([]);
+    expect(parsed.rest).toBe('提 示 "x"');
+  });
+
+  it('rest 模式：`--` 之前的位置参数照旧切出来', () => {
+    const parsed = parseArgs('目标 -- 正 文', { ...spec, terminator: 'rest' });
+    expect(parsed.words).toEqual(['目标']);
+    expect(parsed.rest).toBe('正 文');
+  });
+
+  it('rest 模式：没写 `--` 时没有 rest，`--` 后为空时 rest 是空串', () => {
+    expect(parseArgs('--dir repo 提示', { ...spec, terminator: 'rest' }).rest).toBeUndefined();
+    expect(parseArgs('--dir repo --', { ...spec, terminator: 'rest' }).rest).toBe('');
   });
 
   it('引号没闭合时回命令名对应的用法', () => {

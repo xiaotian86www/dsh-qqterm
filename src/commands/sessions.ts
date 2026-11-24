@@ -370,7 +370,11 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Slash
     handler: async (cmdCtx) => {
       // 切词按约定俗成：空格分隔，带空格的目标或标题用引号包起来；认不出的参数
       // 由 parseArgs 直接回绝
-      const parsed = parseArgs((cmdCtx.command?.raw ?? '').trim(), { command: 'sessions' });
+      const parsed = parseArgs((cmdCtx.command?.raw ?? '').trim(), {
+        command: 'sessions',
+        // 标题写到 `--` 之后时整段原样；其余子命令照旧
+        terminator: 'rest',
+      });
       const words = [...parsed.words];
       let sub = words[0] ?? '';
       const rest = words.slice(1);
@@ -524,10 +528,17 @@ export function sessionsCommand({ manager, config, logger }: CommandDeps): Slash
           case 'rename':
           case 'rn': {
             const arg = rest[0] ?? '';
-            const title = rest.slice(1).join(' ').trim();
+            // 标题只收一段：引号包起来的一段，或 `--` 之后的整段，不把词拼回字符串
+            const rawTitle = parsed.rest !== undefined
+              ? (rest.length > 1 ? undefined : parsed.rest)
+              : (rest.length > 2 ? undefined : rest[1] ?? '');
             if (arg.trim() === '') {
               return '⚠️ 缺少目标 · 用法: /help sessions';
             }
+            if (rawTitle === undefined) {
+              return '⚠️ 标题只能一段：有空格就用引号包起来，或写到 -- 之后 · 用法: /help sessions';
+            }
+            const title = rawTitle.trim();
             if (title === '') {
               return '⚠️ 缺少新标题 · 用法: /help sessions';
             }

@@ -71,7 +71,7 @@ const TIMEOUT_RANGE = '⚠️ 超时秒数要在 1–600 之间 · 用法: /help
 /** 只认 `--timeout`（`-t`）；其余词都是位置参数，`--` 之后不再解析 */
 const RUN_SPEC: ParseSpec = {
   command: 'run',
-  terminator: true,
+  terminator: 'words',
   flags: [{ name: 'timeout', alias: 't', value: true, missing: TIMEOUT_MISSING }],
 };
 

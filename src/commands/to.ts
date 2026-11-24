@@ -12,7 +12,8 @@
  * 没包引号又有多段、或以 `-` 开头的词，按参数错误回绝。
  */
 import type { CommandDeps, SlashCommand } from './types.ts';
-import { looksLikeParam, QUOTE_OPEN_TEXT, tokenize } from './args.ts';
+import { parseArgs } from './args.ts';
+import type { ParseSpec } from './args.ts';
 import { getScopePeer, shortSessionId } from '../shared/index.ts';
 import {
   queuedPromptReceipt,
@@ -60,26 +61,33 @@ function displayId(id: string): string {
   return `#${shortSessionId(id)}`;
 }
 
+/** /to 的参数：目标 + 一段正文，或 `--` 之后的整段正文 */
+const TO_SPEC: ParseSpec = { command: 'to', terminator: 'rest' };
+
+/** 目标缺失 */
+const MISSING_TARGET = '⚠️ 缺少会话 · 用法: /help to';
+
+type ToParse = { ok: true; target: string; text: string } | { ok: false; error: string };
+
 /**
- * 取会话之后的正文：一段参数，或 `--` 之后的整段。
+ * 取会话与正文：一段参数，或 `--` 之后的整段。
  *
  * `/to #id`（或 `/to #id --`）是空正文，留给「只带引用」与「下一条消息作为回答」；
  * `/to #id 你好` 与 `/to #id "你好 世界"` 是同一段参数；`--` 之后整段原样（空格、
  * 换行、引号都不动）。没包引号又有多段、或正文以 `-` 开头，都按参数错误回绝。
+ * 目标、正文与 `--` 一律交给同一份 parseArgs，不在命令里另写切词规则。
  */
-function parseToText(rest: string): { ok: true; text: string } | { ok: false; error: string } {
-  const trimmed = rest.trim();
-  if (trimmed === '' || trimmed === '--') return { ok: true, text: '' };
-  if (/^--\s/.test(trimmed)) return { ok: true, text: trimmed.slice(2).trimStart() };
-  const { tokens, error } = tokenize(trimmed);
-  if (error !== undefined) return { ok: false, error: `${QUOTE_OPEN_TEXT} · 用法: /help to` };
-  const [only, ...extra] = tokens;
-  if (only === undefined) return { ok: true, text: '' };
-  if (extra.length > 0) return { ok: false, error: BODY_FORMAT };
-  if (!only.quoted && looksLikeParam(only)) {
-    return { ok: false, error: `⚠️ 未知参数: ${only.value} · 用法: /help to` };
+function parseToArgs(raw: string): ToParse {
+  const parsed = parseArgs(raw, TO_SPEC);
+  if (parsed.error !== undefined) return { ok: false, error: parsed.error };
+  const [target, ...extra] = parsed.words;
+  if (target === undefined) return { ok: false, error: MISSING_TARGET };
+  if (parsed.rest !== undefined) {
+    if (extra.length > 0) return { ok: false, error: BODY_FORMAT };
+    return { ok: true, target, text: parsed.rest };
   }
-  return { ok: true, text: only.value };
+  if (extra.length > 1) return { ok: false, error: BODY_FORMAT };
+  return { ok: true, target, text: extra[0] ?? '' };
 }
 
 export function toCommand({ manager, config, logger }: CommandDeps): SlashCommand {
@@ -90,18 +98,13 @@ export function toCommand({ manager, config, logger }: CommandDeps): SlashComman
     acceptsQuote: true,
     usage: USAGE,
     handler: async (cmdCtx) => {
-      const raw = (cmdCtx.command?.raw ?? '').trim();
       const { scope, peerId } = getScopePeer(cmdCtx);
 
-      // 第一个 token 是会话，其余整体是文本（允许空格、换行）
-      const match = /^(\S+)(?:\s+([\s\S]*))?$/.exec(raw);
-      const targetArg = match?.[1] ?? '';
-      if (targetArg === '') {
-        return '⚠️ 缺少会话 · 用法: /help to';
-      }
-      // 正文是一段参数或 `--` 之后的整段：回复链接已经带好 `--`，点开补正文即可
-      const parsed = parseToText(match?.[2] ?? '');
+      // 目标是一个位置参数，正文是一段参数或 `--` 之后的整段：回复链接已经带好
+      // `--`，点开补正文即可
+      const parsed = parseToArgs(cmdCtx.command?.raw ?? '');
       if (!parsed.ok) return parsed.error;
+      const targetArg = parsed.target;
       const text = parsed.text;
 
       // 带引用的命令：引用取不到就什么都不发

@@ -53,13 +53,17 @@ const DIR_MISSING = '⚠️ --dir 后要跟工作区 · 用法: /help new';
 /** `--background` 没给提示词：后台会话没有要跑的东西 */
 const BACKGROUND_MISSING = '⚠️ --background 需要提示词 · 用法: /help new';
 
+/** 提示词多段却没包引号：只收一段，不把词拼回字符串 */
+const PROMPT_FORMAT = '⚠️ 提示词只能一段：有空格就用引号包起来，或写到 -- 之后 · 用法: /help new';
+
 
 /**
  * `/new` 的参数：`--dir`（`-d`）指定工作区，`--worktree`（`-w`）要求下一条
- * 消息先建树，剩下的文字整体是提示词（直接写；`--prompt` 已删除，写了按未知参数处理）。
+ * 消息先建树，提示词是一段：有空格就用引号包起来，或写在 `--` 之后（整段原样）；
+ * `--prompt` 已删除，写了按未知参数处理。
  *
- * 规则与其它命令同一份（args.ts 的 parseArgs）：空格分隔，带空格的路径或提示词用
- * 引号包起来；`--` 之后一律当提示词，参数位置随意。不认识的参数不猜，只回
+ * 规则与其它命令同一份（args.ts 的 parseArgs）：空格分隔，带空格的路径用引号包起来；
+ * 位置参数只收一段，多写一段按参数错误回绝，不拼回字符串。不认识的参数不猜，只回
  * error，不动会话。
  */
 export function parseNewArgs(raw: string): {
@@ -71,7 +75,7 @@ export function parseNewArgs(raw: string): {
 } {
   const parsed = parseArgs(raw, {
     command: 'new',
-    terminator: true,
+    terminator: 'rest',
     flags: [
       { name: 'dir', alias: 'd', value: true, missing: DIR_MISSING },
       { name: 'worktree', alias: 'w' },
@@ -80,11 +84,28 @@ export function parseNewArgs(raw: string): {
   });
   const worktree = parsed.flags.has('worktree');
   const background = parsed.flags.has('background');
-  if (parsed.error !== undefined) {
-    return { arg: '', worktree, background, prompt: undefined, error: parsed.error };
+  const failed = (error: string) => ({ arg: '', worktree, background, prompt: undefined, error });
+  if (parsed.error !== undefined) return failed(parsed.error);
+
+  // 提示词只收一段：`--` 之后整段原样；没有 `--` 时只能是切出来的那一个词
+  if (parsed.rest !== undefined) {
+    if (parsed.words.length > 0) return failed(PROMPT_FORMAT);
+    return {
+      arg: parsed.values.get('dir') ?? '',
+      worktree,
+      background,
+      prompt: parsed.rest === '' ? undefined : parsed.rest,
+      error: undefined,
+    };
   }
-  const prompt = parsed.words.length === 0 ? undefined : parsed.words.join(' ');
-  return { arg: parsed.values.get('dir') ?? '', worktree, background, prompt, error: undefined };
+  if (parsed.words.length > 1) return failed(PROMPT_FORMAT);
+  return {
+    arg: parsed.values.get('dir') ?? '',
+    worktree,
+    background,
+    prompt: parsed.words[0],
+    error: undefined,
+  };
 }
 
 /**
@@ -92,9 +113,9 @@ export function parseNewArgs(raw: string): {
  *
  * 不带参数：在当前工作区开新会话（旧会话继续在后台跑，与 `/reset` 不同）。
  * 带 `--dir`（`-d`）在指定工作区开新会话。带 `--worktree`（`-w`）：下一个
- * 会话开在工作树里，基线是第一条消息到达时工作区的 HEAD；默认就地。其余文字
- * （位置随意）整体是提示词：立刻作为新会话的第一条消息发出，`--worktree` 的树
- * 也在这条上建；不给提示词就只清指针，等下一条消息再建会话。
+ * 会话开在工作树里，基线是第一条消息到达时工作区的 HEAD；默认就地。提示词是
+ * 一段（有空格就用引号包起来，或写在 `--` 之后）：立刻作为新会话的第一条消息
+ * 发出，`--worktree` 的树也在这条上建；不给提示词就只清指针，等下一条消息再建会话。
  *
  * 参数先解析再动会话：路径写错不该把当前会话弄丢。换工作区等于换 agent 能读写
  * 的目录，所以带参数时只允许唯一绑定用户；不带参数的 `/new` 不受限制。
@@ -115,14 +136,15 @@ export function newCommand({ manager, config, logger }: CommandDeps): SlashComma
         '### 📖 /new 用法',
         '',
         '`/new` 在当前工作区新建会话，旧会话继续跑',
-        '`/new <提示词>` 新建会话并把提示词发出去',
+        '`/new <提示词>` 新建会话并把提示词发出去；有空格就用引号包起来',
+        '`/new -- <提示词>` 提示词写在 -- 之后，整段原样',
         '回复一条消息再发：被引用的内容会一起作为新会话首条消息',
         named ? '`/new --dir <工作区>` 在指定工作区新建（`-d`）' : '`/new --dir <路径>` 在指定目录新建（`-d`）',
         ...(manager.worktreesAvailable() ? ['`/new --worktree` 新会话开在独立工作树（`-w`）'] : []),
         '`/new --background <提示词>` 后台另开一条，不切走当前会话（`-b`）',
         ...(named ? ['工作区认标题、目录名或绝对路径'] : []),
         '`-w` 与 `-b` 可合写为 `-wb`，带值的 `-d` 只能收尾（`-wbd <工作区>`）',
-        '`--` 之后的内容全部当提示词，不再解析参数',
+        '`--` 之后不再解析参数：提示词里的 `-w` 这样原样带过去',
       ].join('\n');
     },
     handler: async (cmdCtx) => {

@@ -93,7 +93,7 @@ Rows are **never numbered**: after paging and grouping, "the third row" is bound
 | `/sessions all` | List every session, including other projects |
 | `/sessions <page>` | Page through |
 | `/sessions resume <id>` | Open a session (an archived one is unarchived first); failure never creates one |
-| `/sessions rename <id> <title>` | Rename an opened session; resume a cold one first |
+| `/sessions rename <id> <title>` | Rename an opened session; resume a cold one first; quote a title with spaces, or put it after `--` |
 | `/sessions archive` | List sessions that can be archived; `<page>` pages through |
 | `/sessions archive <id>[,<id>…]` | Archive one or more (at most 10) |
 | `/sessions archived` | List archived sessions |
@@ -314,7 +314,7 @@ Workspaces are the host's `workspaceRegistry` concept; dsh-qqterm keeps no direc
 | `/compact` | Compact session history (summaries replace older records); the reply includes the host command's result |
 | `/goal` | Set or view the current session's long-term goal; `/goal <goal>` sets it, `edit` / `pause` / `resume` / `clear` manage it |
 | `/sessions` (alias `/session`) | Session management: by default lists sessions held by QQ (including cold sessions not yet opened after a restart), `all` shows everything, `archived` shows archived sessions; addressing, quick actions, and archive semantics live in "Multi-session management" |
-| `/rename` | Rename the current session; `/sessions rename <id> <title>` renames an opened session |
+| `/rename` | Rename the current session; `/sessions rename <id> <title>` renames an opened session (quote a title with spaces, or put it after `--`) |
 | `/to` | Send a message to a given session (`/to <id> <text>` passes the body as one argument, quoted when it contains spaces; `/to <id> -- <text>` also works and sends everything after `--` verbatim; multiple unquoted words or a body starting with `-` are rejected as bad arguments, and a bare target means an empty body; reply links already carry `--`, so you only add the body); submits an answer when that session is waiting for one; a not-yet-open session is resumed first; replying to a message places its quote ahead of the body (except while the target awaits an answer) |
 | `/ls` | List subdirectories and files in the current directory (where the dsh process was started); click a directory to enter, a file to send; paths may be absolute or start with `~` |
 | `/get` | Send a file to the current chat (images / videos / voice by type); any path, relative ones resolved against the same base |
@@ -342,12 +342,12 @@ Notes:
 | Form | Effect |
 |---|---|
 | `/new` | Clear the current pointer; the next message creates a new session in the original workspace; the old session keeps running |
-| `/new <prompt>` | Send this prompt immediately in the new session |
+| `/new <prompt>` | Send this prompt immediately in the new session (quote it when it contains spaces, or put it after `--`) |
 | `/new --dir <workspace>` | Open the new session in the given workspace (`-d`, one word only) |
 | `/new --background <prompt>` | Open another session in the background without touching the current session or workspace (`-b`, prompt required) |
 | `/new --worktree [prompt]` | Create a worktree before the next message (`-w`, see "Workspaces") |
 
-- Arguments and prompt may come in any order; the remaining text is joined as the prompt, and everything after `--` counts as prompt.
+- Arguments and prompt may come in any order; the prompt is exactly one argument - quote it when it contains spaces, or put it after `--` (verbatim, never re-split or re-joined).
 - `-w` and `-b` combine as `-wb`; when short flags are clustered, the value-taking `-d` goes last (`-wbd <workspace>`).
 - `--dir` takes one word only; quote paths with spaces, or use `--dir=path`.
 - Arguments are validated before the session is touched: a missing directory or file is rejected and the current session is unaffected.
