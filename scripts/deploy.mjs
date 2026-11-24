@@ -8,7 +8,7 @@
  *   --pull    先快进到 origin/main（要求当前在 main、工作树干净）
  *   --test    打包前跑 pnpm test
  *
- * 应用变更：有 HMR 的 profile 在 QQ 里发 /plugins reload；没有 HMR 的重启宿主，
+ * 应用变更：QQ 里发 /plugins reload 按磁盘身份换模块；没有 HMR 时重启宿主，
  * 客户端改动另需刷新页面。
  */
 import { spawnSync } from 'node:child_process';
@@ -126,4 +126,4 @@ log(`产物 ${target}`);
 run('dsh', ['plugin', '--profile', options.profile, 'add', `file:${target.split('\\').join('/')}`]);
 
 console.log(`\n[deploy] 已装进 ${options.profile}。`);
-console.log('[deploy] 应用变更：QQ 里发 /plugins reload（profile 需启用 HMR）；没有 HMR 的 profile 重启宿主，客户端改动另需刷新页面。');
+console.log('[deploy] 应用变更：QQ 里发 /plugins reload 按磁盘身份换模块；没有 HMR 时重启宿主，客户端改动另需刷新页面。');
