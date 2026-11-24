@@ -437,6 +437,7 @@ pnpm dev
 | `pnpm test` | 跑测试（vitest） |
 | `pnpm typecheck:client` | 客户端类型检查 |
 | `pnpm dev:reload` | 打本地 tgz 快照并装进开发 profile |
+| `pnpm deploy:web` | 拉取 main、构建、测试，打 tgz 快照并装进 web profile |
 | `pnpm run lint` | 没有 eslint 配置，不是门禁 |
 
 测试放顶层 `tests/`，按模块镜像 `src/`，不访问真实 `~/.dsh`、真实凭据或外网。
