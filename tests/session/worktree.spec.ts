@@ -129,9 +129,18 @@ describe('worktreeFailureText', () => {
     expect(worktreeFailureText(new Error('fatal: a\n\nfatal: b'))).toBe('fatal: a fatal: b');
   });
 
-  it('超长原因截到 60 字并补省略号', () => {
-    const text = worktreeFailureText(new Error('x'.repeat(80)));
-    expect(text).toBe(`${'x'.repeat(60)}…`);
+  it('剥掉宿主命令壳与 git 进度行，留下末尾的 fatal 原因', () => {
+    const err = new Error(
+      'Could not finish worktree dsh-x at /repo/.agents/worktrees/dsh-x. '
+      + 'Any created checkout and branch are retained. '
+      + "worktree command failed (255): Preparing worktree (new branch 'dsh-x') fatal: a branch named 'dsh-x' already exists",
+    );
+    expect(worktreeFailureText(err)).toBe("fatal: a branch named 'dsh-x' already exists");
+  });
+
+  it('超长原因截到 120 字并补省略号', () => {
+    const text = worktreeFailureText(new Error('x'.repeat(140)));
+    expect(text).toBe(`${'x'.repeat(120)}…`);
   });
 
   it('超时按 120s 说，不把 AbortError 原文抛给用户', () => {
