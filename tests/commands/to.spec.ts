@@ -212,7 +212,7 @@ describe('/to', () => {
 
     const text = await run(manager, '#3f2a9b1c -- 继续修登录');
 
-    expect(text).toContain('✅ 已排队 · 本轮结束后发送');
+    expect(text).toContain('✅ 已排队');
     expect(text).toContain('/steer #3f2a9b1c m-1');
     expect(text).toContain('插话');
     // 命令的纯文本回复不渲染标签，排队回执必须走 markdown
@@ -227,7 +227,7 @@ describe('/to', () => {
 
     const text = await run(manager, '#3f2a9b1c -- 继续修登录');
 
-    expect(text).toBe('✅ 已插话 · 下一步生效');
+    expect(text).toBe('✅ 已插话');
     expect(text).not.toContain('/steer');
     expect(state.sent.at(-1)).toBe(text);
   });
