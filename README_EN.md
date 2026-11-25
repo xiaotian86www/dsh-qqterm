@@ -47,9 +47,9 @@ Rows are **never numbered**: after paging and grouping, "the third row" is bound
 
 ### Quick actions: tapping fills in the command
 
-- Every `/sessions` row ends with its actions: Reply / Stop (only while generating) / Archive; every archived row offers Unarchive; a workspace group header taps into `/new --dir <path>`.
+- Every `/sessions` row ends with its actions: Reply / Stop (only while generating) / Archive; every archived row offers Unarchive; a workspace group header taps into `/new --dir <path> -- `, with the prompt added after `--`.
 - Every reply, question, approval, and failure card from a non-current session ends with Reply and Resume; Stop is added while it generates, Archive when the deployment can archive.
-- A tap fills the smallest command (`/to #a1b2c3d4 -- `, `/stop #a1b2c3d4`, `/sessions archive #a1b2c3d4`) into the input box and **never executes it for you**: a stray tap changes nothing, and `/to` ends with `--` and a space so the cursor lands at the start of the message body: whatever follows `--` is the text, and words with spaces or a leading `-` need no quoting.
+- A tap fills the smallest command (`/to #a1b2c3d4 -- `, `/stop #a1b2c3d4`, `/sessions archive #a1b2c3d4`) into the input box and **never executes it for you**: a stray tap changes nothing, and `/to` and the workspace header end with `--` and a space so the cursor lands at the start of the message body or prompt: whatever follows `--` is used verbatim, and words with spaces or a leading `-` need no quoting.
 - Tapping and typing take the same command path, so authorization, copy, and logs exist once; the equivalent command is always visible next to the action.
 
 ### Background sessions report back
