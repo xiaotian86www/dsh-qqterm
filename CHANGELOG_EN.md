@@ -19,6 +19,10 @@ User-visible changes to QQ SuperTerm (`dsh-qqterm`). The format follows [Keep a 
 - `/to` takes the body either as a single argument (`/to <session> <text>`, quoted when it contains spaces) or verbatim after `--` (`/to <session> -- <text>`); multiple unquoted words or a body starting with `-` are rejected as bad arguments (a bare target means an empty body); the reply link at the bottom of messages from other sessions now reads `/to #short-id -- `, so the user only adds the text.
 - `exec.shell` and `exec.shellArgs` now default to the platform's values in the config (the actual `cmd.exe` path and `["/d","/s","/c"]` on Windows, `/bin/sh` and `["-c"]` otherwise) instead of being derived only at runtime, so they are visible and editable; both are used literally at runtime, clearing one means empty (`/run` reports "no shell configured"), and nothing is re-defaulted or rewritten for the chosen shell.
 
+### Fixed
+
+- The `/sessions` workspace group header link now reads `/new --dir <path> -- `: everything after `--` is the prompt verbatim, so tapping it only needs the prompt text; prompts with spaces or a leading `-` need no extra quoting or separator.
+
 ## [0.0.2] - 2026-11-24
 
 ### Fixed
