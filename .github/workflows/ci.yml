@@ -103,7 +103,6 @@ jobs:
           if [ -n "$(git status --porcelain -- lib)" ]; then
             echo "::error::lib/ 与 src/ 不一致，本地执行 pnpm build 并提交 lib/ 的 js"
             git status --porcelain -- lib
-            git diff -- lib
             git diff --stat -- lib
             exit 1
           fi
