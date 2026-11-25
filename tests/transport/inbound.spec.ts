@@ -123,7 +123,7 @@ describe('handleInbound：派发不等待本轮 turn', () => {
     expect(record.agent.followup).toHaveBeenCalledTimes(1);
     expect(sendText).toHaveBeenCalledTimes(1);
     const body = String(sendText.mock.calls[0]?.[1]);
-    expect(body).toContain('✅ 已排队 · 本轮结束后发送');
+    expect(body).toContain('✅ 已排队');
     expect(body).toContain('/steer #');
     expect(body).toContain('插话');
     release();
@@ -139,7 +139,7 @@ describe('handleInbound：派发不等待本轮 turn', () => {
 
     expect(record.agent.followup).toHaveBeenCalledTimes(1);
     const body = String(sendText.mock.calls[0]?.[1]);
-    expect(body).toBe('✅ 已插话 · 下一步生效');
+    expect(body).toBe('✅ 已插话');
   });
 
   it('空闲会话的消息马上进 followup，不被另一个生成中的会话挡住', async () => {
