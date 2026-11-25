@@ -13,6 +13,7 @@ import {
   shortCommit,
   worktreeFailureText,
   worktreeNotice,
+  worktreeNoticeWithWorkspace,
   worktreeSourceRoot,
 } from '../../src/session/worktree.ts';
 
@@ -167,6 +168,18 @@ describe('回执文案', () => {
     );
   });
 
+
+  it('带工作区：名字并进首行语句，工作区路径不重复', () => {
+    const notice = worktreeNotice({
+      branch: 'dsh-x',
+      baseCommit: '6b1f02c0ffee',
+      path: 'D:\\repo\\.agents\\worktrees\\dsh-x',
+    }, 'main');
+    expect(worktreeNoticeWithWorkspace(notice, 'repo')).toBe(
+      '✅ 已在工作区 repo 的新工作树 `dsh-x` 里开启会话\n'
+      + '从 `main` 拉出 · 路径: `D:\\repo\\.agents\\worktrees\\dsh-x`',
+    );
+  });
 
   it('短号固定 7 位；不足时原样', () => {
     expect(shortCommit('abcdef0123456789')).toBe('abcdef0');

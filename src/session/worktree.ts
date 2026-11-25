@@ -50,7 +50,8 @@ export function worktreeFailureText(err: unknown): string {
 }
 
 /**
- * 建树回执（只发一次）：首行只说会话与分支，次行说基点 / 父分支与路径。
+ * 建树回执（只发一次）：首行只说会话与分支，次行说基点 / 父分支与路径。带
+ * `--dir` 时命令层用 worktreeNoticeWithWorkspace 把工作区并进首行语句。
  *
  * `parent` 是创建那一刻 chatDir 的分支名；detached HEAD 没有分支名，退回基点短号。
  * 读不到基点提交时走不到这里——那种情况会话根本不创建。
@@ -63,6 +64,15 @@ export function worktreeNotice(
     ? `基点 \`${shortCommit(tree.baseCommit)}\``
     : `从 \`${parent}\` 拉出`;
   return `✅ 已在新工作树 \`${tree.branch}\` 里开启会话\n${origin} · 路径: \`${tree.path}\``;
+}
+
+/**
+ * `--dir` 指定工作区时把工作区并进回执首行语句：工作区路径与树路径重复，只留名字。
+ */
+export function worktreeNoticeWithWorkspace(notice: string, workspace: string): string {
+  const [first = '', ...rest] = notice.split('\n');
+  const head = first.replace('已在新工作树', `已在工作区 ${workspace} 的新工作树`);
+  return [head, ...rest].join('\n');
 }
 
 /** 明确要求开树却没能开成时的就地提示（会话照常开了，不是失败） */
