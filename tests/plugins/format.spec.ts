@@ -48,7 +48,9 @@ describe('renderPluginList', () => {
     expect(text).toContain(
       '**dsh-reg** · `2.0.0` → `2.1.0` · <qqbot-cmd-input text="/plugins update dsh-reg" show="更新"/>',
     );
-    expect(text).toContain('**dsh-local** · `1.0.0` · 已停用');
+    expect(text).not.toContain('已停用');
+    expect(text).toContain('<qqbot-cmd-input text="/plugins disable dsh-reg" show="停用"/>');
+    expect(text).toContain('<qqbot-cmd-input text="/plugins enable dsh-local" show="启用"/>');
     expect(text).not.toContain('/plugins update dsh-local');
     expect(text).not.toContain('/plugins update dsh-git');
   });
@@ -57,6 +59,18 @@ describe('renderPluginList', () => {
     const text = renderPluginList([bundle({ name: 'dsh-reg', version: '2.0.0' })], 1);
     expect(text).toContain('**dsh-reg** · `2.0.0`');
     expect(text).not.toContain('/plugins update dsh-reg');
+  });
+
+  it('每行恰好一个切换按钮，方向由当前启用状态决定', () => {
+    const text = renderPluginList([
+      bundle({ name: 'dsh-on', version: '1.0.0', enabled: true }),
+      bundle({ name: 'dsh-off', version: '1.0.0', enabled: false }),
+    ], 1);
+
+    expect(text).toContain('<qqbot-cmd-input text="/plugins disable dsh-on" show="停用"/>');
+    expect(text).toContain('<qqbot-cmd-input text="/plugins enable dsh-off" show="启用"/>');
+    expect(text).not.toContain('/plugins enable dsh-on');
+    expect(text).not.toContain('/plugins disable dsh-off');
   });
 
   it('没有插件时给出安装入口', () => {
@@ -202,6 +216,28 @@ describe('renderPluginResult', () => {
       upToDate: true,
       version: '1.0.0',
     })).toBe('✅ 已是最新版本: dsh-x@1.0.0');
+  });
+
+  it('启用 / 停用成功回执只带名字与方向', () => {
+    const enable = {
+      startedAt: 1, action: 'enable' as const, target: 'dsh-x', phase: 'done' as const,
+    };
+    expect(renderPluginResult(enable)).toBe('✅ 已启用 dsh-x');
+    expect(renderPluginResult({ ...enable, action: 'disable' as const })).toBe('✅ 已停用 dsh-x');
+  });
+
+  it('启停需要重启时补警告行，被 profile 覆盖时说明覆盖', () => {
+    const base = { startedAt: 1, action: 'enable' as const, target: 'dsh-x', phase: 'done' as const };
+    expect(renderPluginResult({ ...base, application: 'restart-required' as const }))
+      .toBe('✅ 已启用 dsh-x\n⚠️ 重启 dsh 后生效');
+    expect(renderPluginResult({ ...base, application: 'overridden' as const }))
+      .toBe('⚠️ 已启用 dsh-x，profile 里的配置会覆盖它');
+  });
+
+  it('启停失败按方向翻译，不裸露 code', () => {
+    expect(renderPluginResult({
+      startedAt: 1, action: 'disable' as const, target: 'dsh-x', phase: 'failed' as const, code: 'not-bundle',
+    })).toBe('❌ 停用失败: 这个包不是 dsh 插件');
   });
 
   it('更新失败且已回滚时说明回到了哪个版本', () => {

@@ -95,5 +95,7 @@ export interface PluginManagerLike {
   listBundles(): Promise<BundleInfoLike[]>;
   installBundle(spec: string, options?: InstallOptionsLike): Promise<ChangeResultLike>;
   updateBundle(name: string, version: string): Promise<PluginUpdateResultLike>;
+  /** 选中 / 取消选中 bundle 层并应用变更 */
+  setBundleEnabled(name: string, enabled: boolean): Promise<ChangeResultLike>;
   listVersions(name: string): Promise<PluginVersionListLike>;
 }

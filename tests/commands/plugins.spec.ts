@@ -244,6 +244,68 @@ describe('/plugins update', () => {
   });
 });
 
+describe('/plugins enable / disable', () => {
+  it('启用时先补发上一轮，再回执，最后调度，方向写进 action', async () => {
+    const h = harness({ info: bundle({ name: 'dsh-x', enabled: false }) });
+    const result = await h.command.handler(makeCtx('enable dsh-x', h.bot));
+
+    expect(h.order).toEqual(['announce', 'ack', 'run']);
+    expect(h.bot.sendMarkdown.mock.calls[0]?.[1]).toBe('🔄 正在启用 dsh-x…');
+    expect(h.run).toHaveBeenCalledWith({
+      action: 'enable',
+      target: 'dsh-x',
+      notify: { targetId: 'u1' },
+    }, h.bot);
+    expect(result).toEqual({ kind: 'noop' });
+  });
+
+  it('停用时方向相反', async () => {
+    const h = harness({ info: bundle({ name: 'dsh-x', enabled: true }) });
+    await h.command.handler(makeCtx('disable dsh-x', h.bot));
+
+    expect(h.bot.sendMarkdown.mock.calls[0]?.[1]).toBe('🔄 正在停用 dsh-x…');
+    expect(h.run).toHaveBeenCalledWith({
+      action: 'disable',
+      target: 'dsh-x',
+      notify: { targetId: 'u1' },
+    }, h.bot);
+  });
+
+  it('已经处于目标态时幂等返回，不占用操作位', async () => {
+    const h1 = harness({ info: bundle({ name: 'dsh-x', enabled: true }) });
+    expect(await h1.command.handler(makeCtx('enable dsh-x', h1.bot))).toBe('✅ 已启用 dsh-x');
+    expect(h1.run).not.toHaveBeenCalled();
+    expect(h1.announce).not.toHaveBeenCalled();
+
+    const h2 = harness({ info: bundle({ name: 'dsh-x', enabled: false }) });
+    expect(await h2.command.handler(makeCtx('disable dsh-x', h2.bot))).toBe('✅ 已停用 dsh-x');
+    expect(h2.run).not.toHaveBeenCalled();
+  });
+
+  it('缺包、多包、未安装都按现有文案回绝', async () => {
+    const h = harness({ info: bundle({ name: 'dsh-x', installed: false }) });
+    expect(String(await h.command.handler(makeCtx('enable', h.bot)))).toContain('缺少包名');
+    expect(String(await h.command.handler(makeCtx('enable dsh-x extra', h.bot)))).toContain('未知参数');
+    expect(await h.command.handler(makeCtx('disable dsh-nope', h.bot))).toBe('⚠️ 没有这个插件: dsh-nope');
+    expect(h.run).not.toHaveBeenCalled();
+  });
+
+  it('上一个操作还没结束时拒绝新请求', async () => {
+    const h = harness({
+      info: bundle({ name: 'dsh-x', enabled: false }),
+      running: { startedAt: Date.now(), action: 'install', target: 'dsh-old' },
+    });
+    expect(await h.command.handler(makeCtx('enable dsh-x', h.bot))).toBe('⚠️ 上一个插件操作还没结束: dsh-old');
+    expect(h.run).not.toHaveBeenCalled();
+    expect(h.bot.sendMarkdown).not.toHaveBeenCalled();
+  });
+
+  it('没有 pluginManager 时明确提示', async () => {
+    const h = harness({ noInstaller: true });
+    expect(await h.command.handler(makeCtx('enable dsh-x'))).toBe('⚠️ 当前 profile 没有插件管理能力');
+  });
+});
+
 describe('/plugins check', () => {
   it('查完直接回可更新数量与列表入口', async () => {
     const h = harness({ check: async () => ({ checked: 2, versions: { 'dsh-a': '1.1.0' }, failed: [] }) });

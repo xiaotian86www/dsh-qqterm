@@ -9,7 +9,12 @@ import type { Context } from '@deepseek-ai/cordis';
 import type { QQBot } from '@tencent-connect/qqbot-nodejs';
 import type { Logger } from '../../src/types.ts';
 import { createPluginInstaller } from '../../src/plugins/index.ts';
-import { readPluginOpState, writePluginOpState } from '../../src/plugins/state.ts';
+import {
+  readPluginOpState,
+  readPluginUpdateCache,
+  writePluginOpState,
+  writePluginUpdateCache,
+} from '../../src/plugins/state.ts';
 import type { ChangeResultLike, PluginManagerLike } from '../../src/plugins/types.ts';
 
 const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
@@ -65,17 +70,22 @@ describe('createPluginInstaller', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  function setup(result: ChangeResultLike) {
+  function setup(result: ChangeResultLike, options?: { updatesPath?: string }) {
     const installBundle = vi.fn(async () => result);
+    const setBundleEnabled = vi.fn(async () => result);
     const manager = {
       listBundles: vi.fn(async () => []),
       installBundle,
       updateBundle: vi.fn(),
+      setBundleEnabled,
       listVersions: vi.fn(),
     } as unknown as PluginManagerLike;
     const { loader, uid } = fakeLoader();
-    const installer = createPluginInstaller(fakeCtx(manager, loader), logger, { statePath });
-    return { manager, installBundle, installer, uid };
+    const installer = createPluginInstaller(fakeCtx(manager, loader), logger, {
+      statePath,
+      ...(options?.updatesPath === undefined ? {} : { updatesPath: options.updatesPath }),
+    });
+    return { manager, installBundle, setBundleEnabled, installer, uid };
   }
 
   it('先落 running 状态，回执之后再执行，成功后立即回结果', async () => {
@@ -193,6 +203,61 @@ describe('createPluginInstaller', () => {
 
     writePluginOpState(statePath, { startedAt: Date.now() - 700_000, action: 'install', target: 'dsh-x' });
     expect(installer.pending()).toBeUndefined();
+  });
+
+  it('启用 / 停用直接调宿主 setBundleEnabled，文案按方向', async () => {
+    const { installer, setBundleEnabled } = setup(change({ application: 'applied' }));
+    const { bot, sent } = fakeBot();
+
+    installer.run({ action: 'enable', target: 'dsh-x', notify: { targetId: 'u1' } }, bot);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(setBundleEnabled).toHaveBeenCalledWith('dsh-x', true);
+    expect(sent[0]?.text).toBe('✅ 已启用 dsh-x');
+
+    installer.run({ action: 'disable', target: 'dsh-x', notify: { targetId: 'u1' } }, bot);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(setBundleEnabled).toHaveBeenLastCalledWith('dsh-x', false);
+    expect(sent[1]?.text).toBe('✅ 已停用 dsh-x');
+  });
+
+  it('重启生效与 profile 覆盖都如实回执', async () => {
+    const a = setup(change({ application: 'restart-required' }));
+    const { bot: botA, sent: sentA } = fakeBot();
+    a.installer.run({ action: 'enable', target: 'dsh-x', notify: { targetId: 'u1' } }, botA);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(sentA[0]?.text).toBe('✅ 已启用 dsh-x\n⚠️ 重启 dsh 后生效');
+
+    const b = setup(change({ application: 'overridden' }));
+    const { bot: botB, sent: sentB } = fakeBot();
+    b.installer.run({ action: 'disable', target: 'dsh-x', notify: { targetId: 'u1' } }, botB);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(sentB[0]?.text).toBe('⚠️ 已停用 dsh-x，profile 里的配置会覆盖它');
+  });
+
+  it('宿主拒绝启停时写原因码，不冒充成功', async () => {
+    const { installer } = setup(change({
+      application: 'failed',
+      error: { code: 'not-bundle', diagnostic: 'no dsh.bundle' },
+    }));
+    const { bot, sent } = fakeBot();
+
+    installer.run({ action: 'enable', target: 'dsh-x', notify: { targetId: 'u1' } }, bot);
+    await vi.advanceTimersByTimeAsync(200);
+
+    expect(sent[0]?.text).toBe('❌ 启用失败: 这个包不是 dsh 插件');
+    expect(readPluginOpState(statePath)?.code).toBe('not-bundle');
+  });
+
+  it('启停不清掉更新缓存，列表还能显示新版本箭头', async () => {
+    const updatesPath = join(dir, 'updates.json');
+    const { installer } = setup(change({}), { updatesPath });
+    writePluginUpdateCache(updatesPath, { checkedAt: 1, versions: { 'dsh-x': '2.0.0' } });
+    const { bot } = fakeBot();
+
+    installer.run({ action: 'enable', target: 'dsh-x', notify: { targetId: 'u1' } }, bot);
+    await vi.advanceTimersByTimeAsync(200);
+
+    expect(readPluginUpdateCache(updatesPath)?.versions).toEqual({ 'dsh-x': '2.0.0' });
   });
 
   it('宿主拒绝时把原因码与诊断写进状态', async () => {

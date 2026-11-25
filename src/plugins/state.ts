@@ -15,7 +15,7 @@ import { readJsonFile, writeJsonFile } from '../shared/json-file.ts';
 import { formatRelativeTime } from '../shared/utils.ts';
 import type { Logger } from '../types.ts';
 
-export type PluginAction = 'install' | 'update';
+export type PluginAction = 'install' | 'update' | 'enable' | 'disable';
 
 /** 这一轮的结论；undefined 表示还在跑（只有 startedAt 与 notify） */
 export type PluginOpPhase = 'done' | 'failed';
@@ -106,11 +106,12 @@ export function writePluginUpdateCache(path: string, cache: PluginUpdateCache, l
 export function readPluginOpState(path: string, logger?: Logger): PluginOpState | undefined {
   const parsed = readJsonFile(path, '插件操作状态', logger) as Partial<PluginOpState> | null | undefined;
   if (parsed === null || typeof parsed !== 'object') return undefined;
-  if (parsed.action !== 'install' && parsed.action !== 'update') return undefined;
+  const action = parsed.action;
+  if (action !== 'install' && action !== 'update' && action !== 'enable' && action !== 'disable') return undefined;
   if (parsed.phase !== undefined && parsed.phase !== 'done' && parsed.phase !== 'failed') return undefined;
   return {
     ...parsed,
-    action: parsed.action,
+    action,
     target: typeof parsed.target === 'string' ? parsed.target : '',
     phase: parsed.phase,
     startedAt: typeof parsed.startedAt === 'number' ? parsed.startedAt : 0,
@@ -126,7 +127,9 @@ export function writePluginOpState(path: string, state: PluginOpState, logger?: 
 export function describePluginOpState(state: PluginOpState | undefined): string | undefined {
   if (state === undefined) return undefined;
   const when = formatRelativeTime(state.startedAt);
-  const label = state.action === 'install' ? '安装' : '更新';
+  const label = state.action === 'install' ? '安装'
+    : state.action === 'update' ? '更新'
+    : state.action === 'enable' ? '启用' : '停用';
   if (state.phase === undefined) return `🔄 ${label}中 · ${when}`;
   if (state.phase === 'failed') return `❌ ${label}失败 · ${when}`;
   return `✅ 已${label} · ${when}`;

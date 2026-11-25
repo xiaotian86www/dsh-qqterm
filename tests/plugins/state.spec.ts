@@ -55,6 +55,15 @@ describe('readPluginOpState / writePluginOpState', () => {
     expect(readPluginOpState(path)).toEqual(state);
   });
 
+  it('启用 / 停用的 action 能原样读写', () => {
+    const path = join(tempDir(), 'state.json');
+    for (const action of ['enable', 'disable'] as const) {
+      const state = { startedAt: 1, phase: 'done' as const, action, target: 'dsh-x' };
+      writePluginOpState(path, state);
+      expect(readPluginOpState(path)).toEqual(state);
+    }
+  });
+
   it('文件不存在时返回 undefined，不抛错', () => {
     expect(readPluginOpState(join(tempDir(), 'missing.json'))).toBeUndefined();
   });
@@ -122,6 +131,13 @@ describe('describePluginOpState', () => {
     const text = describePluginOpState({ startedAt, phase: 'done', action: 'install', target: 'x' });
     expect(text).toContain('✅');
     expect(text).toContain('已安装');
+  });
+
+  it('启用 / 停用的状态描述带方向', () => {
+    expect(describePluginOpState({ startedAt, action: 'enable', target: 'x' })).toContain('启用中');
+    expect(describePluginOpState({ startedAt, action: 'disable', target: 'x' })).toContain('停用中');
+    expect(describePluginOpState({ startedAt, phase: 'done', action: 'enable', target: 'x' })).toContain('已启用');
+    expect(describePluginOpState({ startedAt, phase: 'done', action: 'disable', target: 'x' })).toContain('已停用');
   });
 
   it('更新失败', () => {
