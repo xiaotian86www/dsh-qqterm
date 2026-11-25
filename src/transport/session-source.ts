@@ -102,7 +102,7 @@ export function sessionSteerLink(sessionId: string, messageId: string, label = '
 }
 
 /**
- * 排队回执：首行说清落点，空行后给一条可点的插话入口（部署有该能力时）。
+ * 排队回执：首行只说已排队，空行后给一条可点的插话入口（部署有该能力时）。
  *
  * 插话入口只对这条消息有效：点下去走 sessionController.updateQueue，不 cancel，
  * 本轮继续跑，消息改在下一步消费。入口平铺、不进引用：动作本身已经说清，
@@ -116,19 +116,19 @@ export function queuedPromptReceipt(
   canSteer: boolean,
 ): string {
   const first = current
-    ? '✅ 已排队 · 本轮结束后发送'
+    ? '✅ 已排队'
     : `✅ 已排队 · ${sessionTargetLabel(sessionId, title)}`;
   return canSteer ? `${first}\n\n${sessionSteerLink(sessionId, messageId)}` : first;
 }
 
-/** 插话回执：当前会话只说效果，别的会话带标题与短 id */
+/** 插话回执：当前会话只说已插话，别的会话带标题与短 id */
 export function steeredPromptReceipt(
   sessionId: string,
   title: string | undefined,
   current: boolean,
 ): string {
   return current
-    ? '✅ 已插话 · 下一步生效'
+    ? '✅ 已插话'
     : `✅ 已插话 · ${sessionTargetLabel(sessionId, title)}`;
 }
 

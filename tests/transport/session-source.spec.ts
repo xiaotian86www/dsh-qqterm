@@ -123,9 +123,9 @@ describe('来源行与尾部动作', () => {
 });
 
 describe('排队 / 插话回执', () => {
-  it('当前会话排队：首行说清落点，空行后直接给可点的插话入口', () => {
+  it('当前会话排队：首行只说已排队，空行后直接给可点的插话入口', () => {
     expect(queuedPromptReceipt('session-04de1556', undefined, 'm-1', true, true))
-      .toBe('✅ 已排队 · 本轮结束后发送\n\n<qqbot-cmd-input text="/steer #04de1556 m-1" show="插话"/>');
+      .toBe('✅ 已排队\n\n<qqbot-cmd-input text="/steer #04de1556 m-1" show="插话"/>');
   });
 
   it('别的会话排队：带上标题与短 id 署名', () => {
@@ -135,11 +135,11 @@ describe('排队 / 插话回执', () => {
 
   it('没有插话能力时不带链接，也不解释部署差异', () => {
     expect(queuedPromptReceipt('session-04de1556', undefined, 'm-1', true, false))
-      .toBe('✅ 已排队 · 本轮结束后发送');
+      .toBe('✅ 已排队');
   });
 
   it('插话回执：当前只说效果，别的会话带署名', () => {
-    expect(steeredPromptReceipt('session-04de1556', undefined, true)).toBe('✅ 已插话 · 下一步生效');
+    expect(steeredPromptReceipt('session-04de1556', undefined, true)).toBe('✅ 已插话');
     expect(steeredPromptReceipt('session-04de1556', '修登录', false))
       .toBe('✅ 已插话 · 「修登录」 · `#04de1556`');
   });
