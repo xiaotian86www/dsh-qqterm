@@ -10,7 +10,7 @@ import type { CommandDeps, SlashCommand } from './types.ts';
 import { ArgError, optionValue, parseArgs } from './args.ts';
 import type { CommandArgs, CommandSpec } from './args.ts';
 import type { SessionConfirmAction } from '../features/session-confirm.ts';
-import { WorktreeError, worktreeErrorText, type ChangeWorkspaceOutcome } from '../session/index.ts';
+import { WorktreeError, worktreeErrorText, worktreeNoticeWithWorkspace, type ChangeWorkspaceOutcome } from '../session/index.ts';
 import { buildPromptBody } from '../transport/prompt-body.ts';
 import { takeQuote } from './quote.ts';
 import { getScopePeer, shortSessionId } from '../shared/index.ts';
@@ -56,6 +56,20 @@ const BACKGROUND_MISSING = '⚠️ --background 需要提示词 · 用法: /help
 
 /** 提示词多段却没包引号：只收一段，不把词拼回字符串 */
 const PROMPT_FORMAT = '⚠️ 提示词只能一段：有空格就用引号包起来，或写到 -- 之后 · 用法: /help new';
+
+/**
+ * `/new` 的开启回执：带工作区时并进首行，不再另起一行；后台保留短 id。
+ */
+function newSessionHead(workspace: string | undefined, backgroundShort?: string): string {
+  if (backgroundShort !== undefined) {
+    return workspace === undefined
+      ? `✅ 已在后台开启会话 \`#${backgroundShort}\``
+      : `✅ 已在工作区 ${workspace} 开启后台会话 \`#${backgroundShort}\``;
+  }
+  return workspace === undefined
+    ? '✅ 已开启新会话'
+    : `✅ 已在工作区 ${workspace} 开启新会话`;
+}
 
 
 /**
@@ -193,16 +207,18 @@ export function newCommand({ manager, config, logger }: CommandDeps): SlashComma
         // 后台会话没有提示词也没有引用就没有要跑的东西（普通 /new 不给提示词是合法的）
         if (prompt === undefined && quote === undefined) return BACKGROUND_MISSING;
         let directory: string;
-        let label: string | undefined;
+        let workspaceLabel: string | undefined;
+        let workspaceName: string | undefined;
         if (arg === '') {
           directory = (await manager.chatWorkspaceInfo(scope, peerId))?.path ?? '';
         } else {
           const resolved = manager.resolveWorkspace(arg);
           if (!resolved.ok) return describeChangeFailure(resolved);
           directory = resolved.path;
-          label = manager.workspaceRegistryAvailable()
-            ? `工作区: ${resolved.title} · ${resolved.path}`
-            : `工作区: ${resolved.path}`;
+          workspaceName = resolved.title;
+          workspaceLabel = manager.workspaceRegistryAvailable()
+            ? resolved.title
+            : `\`${resolved.path}\``;
         }
         if (directory === '') return '⚠️ 拿不到当前工作区 · 用 `--dir` 指定一个';
 
@@ -227,11 +243,12 @@ export function newCommand({ manager, config, logger }: CommandDeps): SlashComma
           return `❌ 没能开启会话: ${message}`;
         }
         const short = shortSessionId(started.sessionId);
-        const lines = started.worktreeNotice === undefined
-          ? [`✅ 已在后台开启会话 \`#${short}\``]
-          : [started.worktreeNotice];
-        if (label !== undefined) lines.push(label);
-        return lines.join('\n');
+        if (started.worktreeNotice !== undefined) {
+          return workspaceName === undefined
+            ? started.worktreeNotice
+            : worktreeNoticeWithWorkspace(started.worktreeNotice, workspaceName);
+        }
+        return newSessionHead(workspaceLabel, short);
       }
 
       // 先解析目标再动会话：路径写错不该把当前会话弄丢
@@ -242,14 +259,16 @@ export function newCommand({ manager, config, logger }: CommandDeps): SlashComma
 
       // 先清指针：带提示词时紧接着建会话，不带时等下一条消息再建
       await manager.remove();
-      let label: string | undefined;
+      let workspaceLabel: string | undefined;
+      let workspaceName: string | undefined;
       if (arg !== '') {
         const changed = await manager.changeChatWorkspace(scope, peerId, arg);
         if (!changed.ok) return describeChangeFailure(changed);
-        // 没有 registry 时 title 只是路径末段，贴出来就是重复；只显示路径
-        label = manager.workspaceRegistryAvailable()
-          ? `工作区: ${changed.title} · ${changed.path}`
-          : `工作区: ${changed.path}`;
+        // 没有 registry 时 title 只是路径末段，首行贴完整路径
+        workspaceName = changed.title;
+        workspaceLabel = manager.workspaceRegistryAvailable()
+          ? changed.title
+          : `\`${changed.path}\``;
       }
       if (worktree) manager.armWorktree();
 
@@ -274,19 +293,21 @@ export function newCommand({ manager, config, logger }: CommandDeps): SlashComma
           const message = errorMessage(err);
           return `❌ 没能开启会话: ${message}`;
         }
-        const lines = notice === undefined ? ['✅ 已开启新会话'] : [notice];
-        if (label !== undefined) lines.push(label);
-        return lines.join('\n');
+        if (notice !== undefined) {
+          return workspaceName === undefined
+            ? notice
+            : worktreeNoticeWithWorkspace(notice, workspaceName);
+        }
+        return newSessionHead(workspaceLabel);
       }
 
       // 树要到下一条消息才建，这里不预告：建好那一刻由建树回执交代
-      const head = '✅ 已开启新会话';
-      return label === undefined ? head : `${head}\n${label}`;
+      return newSessionHead(workspaceLabel);
     },
   };
 }
 
-/** 换工作区失败文案（`/new --dir <工作区>` 用，措辞与成功结果的第二行对应） */
+/** 换工作区失败文案（`/new --dir <工作区>` 用，措辞与成功回执首行的工作区对应） */
 function describeChangeFailure(outcome: ChangeWorkspaceOutcome): string {
   if (outcome.ok) return '';
   switch (outcome.reason) {

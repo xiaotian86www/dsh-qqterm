@@ -277,7 +277,7 @@ describe('parseNewArgs', () => {
 });
 
 describe('/new --dir', () => {
-  it('先开新会话再换工作区，回复里带上工作区', async () => {
+  it('先开新会话再换工作区，工作区并进首行', async () => {
     const manager = makeManager();
     const text = await run(manager, '--dir repo');
 
@@ -287,8 +287,7 @@ describe('/new --dir', () => {
     const removeAt = manager.remove.mock.invocationCallOrder[0] ?? 0;
     const changeAt = manager.changeChatWorkspace.mock.invocationCallOrder[0] ?? 0;
     expect(removeAt).toBeLessThan(changeAt);
-    expect(text).toContain('✅ 已开启新会话');
-    expect(text).toContain('工作区: repo · D:\\repo');
+    expect(text).toBe('✅ 已在工作区 repo 开启新会话');
   });
 
   it('目标解析失败时不动当前会话', async () => {
@@ -362,7 +361,7 @@ describe('/new --dir', () => {
 
     const text = await run(manager, '--dir D:\\repo');
 
-    expect(text).toBe('✅ 已开启新会话\n工作区: D:\\repo');
+    expect(text).toBe('✅ 已在工作区 `D:\\repo` 开启新会话');
   });
 
   it('非绑定用户不能改工作区，且不动会话', async () => {
@@ -374,7 +373,7 @@ describe('/new --dir', () => {
     expect(text).toContain('仅限绑定用户可用');
   });
 
-  it('--worktree 与路径同时给：换完工作区再交出意图，回执两行', async () => {
+  it('--worktree 与路径同时给：换完工作区再交出意图，工作区并进首行', async () => {
     const manager = makeManager();
 
     const text = await run(manager, '-w --dir "D:\\My Repo"');
@@ -382,7 +381,7 @@ describe('/new --dir', () => {
     expect(manager.resolveWorkspace).toHaveBeenCalledWith('D:\\My Repo');
     expect(manager.changeChatWorkspace).toHaveBeenCalledWith('c2c', 'user1', 'D:\\My Repo');
     expect(manager.armWorktree).toHaveBeenCalledTimes(1);
-    expect(text).toBe('✅ 已开启新会话\n工作区: repo · D:\\repo');
+    expect(text).toBe('✅ 已在工作区 repo 开启新会话');
   });
 
   it('只读沙箱带路径也拒绝，不动会话', async () => {
@@ -427,14 +426,14 @@ describe('/new <提示词>', () => {
     expect(manager.promptNewSession).toHaveBeenCalledWith('c2c', 'user1', 'user1', '看下这个参数', { scope: 'c2c', targetId: 'user1' });
   });
 
-  it('带 --dir 时先换目录再发提示词，回执带上工作区', async () => {
+  it('带 --dir 时先换目录再发提示词，工作区并进首行', async () => {
     const manager = makeManager();
 
     const text = await run(manager, '--dir repo 修一下');
 
     expect(manager.changeChatWorkspace).toHaveBeenCalledWith('c2c', 'user1', 'repo');
     expect(manager.promptNewSession).toHaveBeenCalledWith('c2c', 'user1', 'user1', '修一下', { scope: 'c2c', targetId: 'user1' });
-    expect(text).toBe('✅ 已开启新会话\n工作区: repo · D:\\repo');
+    expect(text).toBe('✅ 已在工作区 repo 开启新会话');
   });
 
   it('--worktree 与提示词同时给：建树回执代替「已开启」首行', async () => {
@@ -449,6 +448,23 @@ describe('/new <提示词>', () => {
     expect(text.startsWith('✅ 已在新工作树')).toBe(true);
     expect(text).toContain('路径:');
     expect(text).not.toContain('已开启新会话');
+  });
+
+  it('--dir 与 --worktree 同给：工作区融进首行语句，路径不另起一行', async () => {
+    const manager = {
+      ...makeManager(),
+      promptNewSession: vi.fn(async () => ({
+        sessionId: 's2',
+        worktreeNotice: '✅ 已在新工作树 `feat` 里开启会话\n从 `main` 拉出 · 路径: `D:\\wt\\feat`',
+      })),
+    };
+
+    const text = await run(manager, '--dir repo --worktree 查一下');
+
+    expect(text).toBe(
+      '✅ 已在工作区 repo 的新工作树 `feat` 里开启会话\n'
+      + '从 `main` 拉出 · 路径: `D:\\wt\\feat`',
+    );
   });
 
   it('--prompt 按未知参数回绝，不动会话', async () => {
@@ -493,15 +509,14 @@ describe('/new <提示词>', () => {
 });
 
 describe('/new --dir 参数', () => {
-  it('-d 指定工作区，回执照旧', async () => {
+  it('-d 指定工作区，工作区并进首行', async () => {
     const manager = makeManager();
 
     const text = await run(manager, '-d repo');
 
     expect(manager.changeChatWorkspace).toHaveBeenCalledWith('c2c', 'user1', 'repo');
     expect(manager.promptNewSession).not.toHaveBeenCalled();
-    expect(text).toContain('✅ 已开启新会话');
-    expect(text).toContain('工作区: repo · D:\\repo');
+    expect(text).toBe('✅ 已在工作区 repo 开启新会话');
   });
 
   it('--dir 缺值：报参数错，不动会话', async () => {
@@ -556,7 +571,7 @@ describe('有会话时的二次确认', () => {
     const channel = makeChannel();
     const manager = { ...makeManager(), currentSessionId: vi.fn(() => 'sess-1'), sessionConfirmChannel: channel };
 
-    expect(await runNew(manager, '--dir D:\\repo')).toBe('✅ 已开启新会话\n工作区: repo · D:\\repo');
+    expect(await runNew(manager, '--dir D:\\repo')).toBe('✅ 已在工作区 repo 开启新会话');
     expect(manager.remove).toHaveBeenCalledWith();
     expect(manager.changeChatWorkspace).toHaveBeenCalledWith('c2c', 'user1', 'D:\\repo');
     expect(channel.offer).not.toHaveBeenCalled();
@@ -655,13 +670,13 @@ describe('/new --background', () => {
     expect(text).not.toContain('/sessions resume');
   });
 
-  it('--dir 指定目录时在那一处开会话，回执带工作区', async () => {
+  it('--dir 指定目录时在那一处开会话，工作区并进首行', async () => {
     const manager = makeManager();
 
     const text = await run(manager, '-b --dir repo 修一下');
 
     expect(manager.startBackgroundSession).toHaveBeenCalledWith(expect.objectContaining({ directory: 'D:\\repo', prompt: '修一下' }));
-    expect(text).toBe('✅ 已在后台开启会话 `#abcdef12`\n工作区: repo · D:\\repo');
+    expect(text).toBe('✅ 已在工作区 repo 开启后台会话 `#abcdef12`');
   });
 
   it('--worktree 的建树回执代替首行', async () => {
@@ -679,6 +694,23 @@ describe('/new --background', () => {
     expect(text.startsWith('✅ 已在新工作树')).toBe(true);
     expect(text).not.toContain('已在后台开启会话');
     expect(text).not.toContain('/sessions resume');
+  });
+
+  it('--dir 与 --worktree 在后台也把工作区融进首行语句', async () => {
+    const manager = {
+      ...makeManager(),
+      startBackgroundSession: vi.fn(async () => ({
+        sessionId: 'session-abcdef123',
+        worktreeNotice: '✅ 已在新工作树 `feat` 里开启会话\n从 `main` 拉出 · 路径: `D:/wt/feat`',
+      })),
+    };
+
+    const text = await run(manager, '--background --dir repo --worktree 查一下');
+
+    expect(text).toBe(
+      '✅ 已在工作区 repo 的新工作树 `feat` 里开启会话\n'
+      + '从 `main` 拉出 · 路径: `D:/wt/feat`',
+    );
   });
 
   it('没给提示词就回绝，不动会话', async () => {
