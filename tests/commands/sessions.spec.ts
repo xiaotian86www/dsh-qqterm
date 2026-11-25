@@ -194,7 +194,7 @@ describe('/sessions 持有视图', () => {
     const text = await run(manager, '');
 
     expect(text).toContain('### 🗂 工作中会话（1 个工作区 · 2 个会话）');
-    expect(text).toContain('**repo** · <qqbot-cmd-input text="/new --dir /repo" show="/repo"/>');
+    expect(text).toContain('**repo** · <qqbot-cmd-input text="/new --dir /repo -- " show="/repo"/>');
     expect(text).not.toContain('未分组');
     // 状态图标放行首：只有生成中的行以 ⚡ 开头
     expect(text).toContain('show="⚡ #cccc1111 · 当前会话 · ');
@@ -346,8 +346,8 @@ describe('/sessions 持有视图', () => {
     const text = await run(manager, '');
 
     // 组标题与 /sessions all 同一写法，组之间空行；行内不再重复工作区后缀
-    expect(text).toContain('**repo** · <qqbot-cmd-input text="/new --dir /repo" show="/repo"/>');
-    expect(text).toContain('**docs** · <qqbot-cmd-input text="/new --dir /docs" show="/docs"/>');
+    expect(text).toContain('**repo** · <qqbot-cmd-input text="/new --dir /repo -- " show="/repo"/>');
+    expect(text).toContain('**docs** · <qqbot-cmd-input text="/new --dir /docs -- " show="/docs"/>');
     expect(text).toContain('show="#aaaa1111 · 本区会话 · ');
     expect(text).toContain('show="#bbbb2222 · 别的项目 · ');
     expect(text).not.toContain('⚡');
@@ -382,7 +382,7 @@ describe('/sessions 持有视图', () => {
     // 名字不参与链接；路径原样保留 `_`，属性里的 `&` 转义；带空格的值加引号，
     // 否则点下去 `--dir` 只剩前半截
     expect(text).toContain(
-      '**repo** · <qqbot-cmd-input text="/new --dir &quot;D:\\my_ws &amp; co&quot;" show="D:\\my_ws &amp; co"/>',
+      '**repo** · <qqbot-cmd-input text="/new --dir &quot;D:\\my_ws &amp; co&quot; -- " show="D:\\my_ws &amp; co"/>',
     );
   });
 
@@ -673,7 +673,7 @@ describe('/sessions all', () => {
     expect(text).toContain('**dsh-qqterm**');
     expect(text).toContain('**default-workspace**');
     expect(text).toContain(
-      '**dsh-qqterm** · <qqbot-cmd-input text="/new --dir D:\\thirdparty\\dsh-qqterm" show="D:\\thirdparty\\dsh-qqterm"/>',
+      '**dsh-qqterm** · <qqbot-cmd-input text="/new --dir D:\\thirdparty\\dsh-qqterm -- " show="D:\\thirdparty\\dsh-qqterm"/>',
     );
     // 目录不存在时不给「新会话」入口
     expect(text).not.toContain('text="/new --dir C:');
