@@ -111,7 +111,7 @@ describe('/steer 当前会话', () => {
     const current = record(CURRENT, { nextTurn: ['m-1', 'm-2'] });
     const manager = makeManager({ current });
 
-    expect(await run(manager)).toBe('✅ 已插话 · 下一步生效');
+    expect(await run(manager)).toBe('✅ 已插话');
     expect(manager.steerQueued).toHaveBeenCalledWith(CURRENT, 'm-2');
     expect(current.agent.cancel).not.toHaveBeenCalled();
   });
