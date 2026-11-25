@@ -1,5 +1,5 @@
 /**
- * 插件安装 / 更新 — 把宿主的 `pluginManager` 包装成一条 QQ 命令能用的能力。
+ * 插件安装 / 更新 / 启停 — 把宿主的 `pluginManager` 包装成一条 QQ 命令能用的能力。
  *
  * 三条硬约束决定了这里的形状：
  *   1. `installBundle` / `updateBundle` 内部会 reconcile profile，可能把 qqterm
@@ -128,6 +128,15 @@ function installOutcome(result: ChangeResultLike): Partial<PluginOpState> {
   };
 }
 
+/** 启用 / 停用结果 → 状态字段（没有版本、也没有构建批准，只看 application） */
+function enablementOutcome(result: ChangeResultLike): Partial<PluginOpState> {
+  if (result.application === 'failed') {
+    return { phase: 'failed', code: result.error?.code, error: result.error?.diagnostic };
+  }
+  if (result.application === 'cancelled') return { phase: 'failed', code: 'cancelled' };
+  return { phase: 'done', application: result.application };
+}
+
 /** 更新结果 → 状态字段 */
 function updateOutcome(outcome: UpdateOutcome): Partial<PluginOpState> {
   if (outcome.kind === 'up-to-date') {
@@ -250,7 +259,10 @@ export function createPluginInstaller(
               ? {}
               : { approvedBuilds: request.approvedBuilds }),
           })))
-        : updateOutcome(await outsideHmrTransaction(ctx, () => resolveUpdate(request)));
+        : request.action === 'update'
+          ? updateOutcome(await outsideHmrTransaction(ctx, () => resolveUpdate(request)))
+          : enablementOutcome(await outsideHmrTransaction(ctx, () =>
+            manager.setBundleEnabled(request.target, request.action === 'enable')));
     } catch (err) {
       extra = err instanceof PluginRefusal
         ? { phase: 'failed', code: err.code, error: err.message }
@@ -265,7 +277,10 @@ export function createPluginInstaller(
       ...extra,
     };
     writePluginOpState(statePath, state, logger);
-    if (state.phase === 'done') forgetUpdate(state.name ?? request.target);
+    // 启 / 停用不改变装了哪个版本：更新缓存要留着，列表还得显示新版本箭头
+    if (state.phase === 'done' && request.action !== 'enable' && request.action !== 'disable') {
+      forgetUpdate(state.name ?? request.target);
+    }
 
     const after = entryUids(loader);
     if (bot !== undefined && entryReplaced(before, after, ENTRY_ID) !== true) {

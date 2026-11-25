@@ -63,7 +63,7 @@ function thirdParty(bundles: readonly BundleInfoLike[]): BundleInfoLike[] {
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-/** 列表一行：`**名字** · \`版本\``；只在后台查到新版本时给箭头与更新入口，停用的补一句 */
+/** 列表一行：`**名字** · \`版本\``；版本箭头、启停切换入口各占一个位置 */
 function bundleLine(bundle: BundleInfoLike, latest: Readonly<Record<string, string>>): string {
   const parts = [`**${cleanInline(bundle.name)}**`];
   const version = bundle.version === undefined || bundle.version === '' ? '' : `\`${cleanInline(bundle.version)}\``;
@@ -76,8 +76,12 @@ function bundleLine(bundle: BundleInfoLike, latest: Readonly<Record<string, stri
   } else if (version !== '') {
     parts.push(version);
   }
-  if (!bundle.enabled) parts.push('已停用');
   if (hasUpdate) parts.push(commandLink(`/plugins update ${bundle.name}`, '更新'));
+  // 每行一个切换入口：关闭态只由「启用」按钮表达，不再单列状态文字
+  // 按钮文字取当前状态，点下去由命令做幂等兜底
+  parts.push(bundle.enabled
+    ? commandLink(`/plugins disable ${bundle.name}`, '停用')
+    : commandLink(`/plugins enable ${bundle.name}`, '启用'));
   return parts.join(' · ');
 }
 
@@ -134,7 +138,9 @@ export function renderPluginCheck(check: PluginUpdateCheck): string {
 /** 一次操作的结果文案；还在跑（没有 phase）时返回 undefined */
 export function renderPluginResult(state: PluginOpState): string | undefined {
   if (state.phase === undefined) return undefined;
-  const label = state.action === 'install' ? '安装' : '更新';
+  const label = state.action === 'install' ? '安装'
+    : state.action === 'update' ? '更新'
+    : state.action === 'enable' ? '启用' : '停用';
 
   // 构建脚本被拦下不算失败：给出批准后重试的入口，而不是让用户自己拼参数
   if (state.pendingBuilds !== undefined && state.pendingBuilds.length > 0) {
@@ -155,6 +161,17 @@ export function renderPluginResult(state: PluginOpState): string | undefined {
       return `❌ 更新失败: ${reason}\n已回到 ${state.from ?? '原版本'}`;
     }
     return `❌ ${label}失败: ${reason}`;
+  }
+
+  if (state.action === 'enable' || state.action === 'disable') {
+    const name = cleanInline(state.name ?? state.target);
+    if (state.application === 'restart-required') {
+      return `✅ 已${label} ${name}\n⚠️ 重启 dsh 后生效`;
+    }
+    if (state.application === 'overridden') {
+      return `⚠️ 已${label} ${name}，profile 里的配置会覆盖它`;
+    }
+    return `✅ 已${label} ${name}`;
   }
 
   if (state.action === 'install') {
