@@ -116,7 +116,7 @@ export async function handleInbound(
     const current = manager.isCurrentSession(record.sessionId);
     const title = sessionTitleOf(record);
     const receipt = submitted.placement === 'queued'
-      ? queuedPromptReceipt(record.sessionId, title, submitted.messageId, current, manager.canSteer())
+      ? queuedPromptReceipt(record.sessionId, title, submitted.messageId, current, manager.canMutateQueue())
       : steeredPromptReceipt(record.sessionId, title, current);
     try {
       void sendText(replyTarget, receipt).catch((sendErr: unknown) => {

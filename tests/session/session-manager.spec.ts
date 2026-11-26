@@ -1752,7 +1752,7 @@ describe('submitPrompt — 落点由宿主 ui-conversation.busyEnter 决定', ()
   });
 });
 
-describe('canSteer / steerQueued — 委托宿主 sessionController.updateQueue', () => {
+describe('canMutateQueue / steerQueued — 委托宿主 sessionController.updateQueue', () => {
   function controllerCtx(controller: unknown): Context {
     const base = absentCtx() as unknown as Record<string, unknown>;
     return {
@@ -1765,7 +1765,7 @@ describe('canSteer / steerQueued — 委托宿主 sessionController.updateQueue'
     const { registry } = createRegistry(async ({ resumeSessionId }) => fakeHandle(resumeSessionId));
     const manager = createManagerWithCtx(registry, controllerCtx({ list: async () => ({}) }));
 
-    expect(manager.canSteer()).toBe(false);
+    expect(manager.canMutateQueue()).toBe(false);
   });
 
   it('把 updateQueue 的 accepted 转成 ok，并传会话与消息 id', async () => {
@@ -1773,7 +1773,7 @@ describe('canSteer / steerQueued — 委托宿主 sessionController.updateQueue'
     const { registry } = createRegistry(async ({ resumeSessionId }) => fakeHandle(resumeSessionId));
     const manager = createManagerWithCtx(registry, controllerCtx({ updateQueue }));
 
-    expect(manager.canSteer()).toBe(true);
+    expect(manager.canMutateQueue()).toBe(true);
     expect(await manager.steerQueued('session-x', 'msg-1')).toEqual({ ok: true });
     expect(updateQueue).toHaveBeenCalledWith({
       sessionId: 'session-x',
@@ -1797,5 +1797,33 @@ describe('canSteer / steerQueued — 委托宿主 sessionController.updateQueue'
       .toEqual({ ok: false, reason: 'steer-unavailable' });
     const failed = await failWith('EIO').steerQueued('s', 'm');
     expect(failed).toMatchObject({ ok: false, reason: 'failed' });
+  });
+
+  it('删除走同一个 updateQueue，动作是 remove', async () => {
+    const updateQueue = vi.fn(async () => ({ accepted: true }));
+    const { registry } = createRegistry(async ({ resumeSessionId }) => fakeHandle(resumeSessionId));
+    const manager = createManagerWithCtx(registry, controllerCtx({ updateQueue }));
+
+    expect(await manager.removeQueued('session-x', 'msg-1')).toEqual({ ok: true });
+    expect(updateQueue).toHaveBeenCalledWith({
+      sessionId: 'session-x',
+      itemId: 'msg-1',
+      action: { kind: 'remove' },
+    });
+  });
+
+  it('删除只把 queue-item-not-found 归一成 not-found', async () => {
+    const failWith = (code: string) => {
+      const { registry } = createRegistry(async ({ resumeSessionId }) => fakeHandle(resumeSessionId));
+      const manager = createManagerWithCtx(registry, controllerCtx({
+        updateQueue: async () => { throw Object.assign(new Error('nope'), { code }); },
+      }));
+      return manager;
+    };
+
+    expect(await failWith('session/queue-item-not-found').removeQueued('s', 'm'))
+      .toEqual({ ok: false, reason: 'not-found' });
+    expect(await failWith('session/steer-unavailable').removeQueued('s', 'm'))
+      .toMatchObject({ ok: false, reason: 'failed' });
   });
 });

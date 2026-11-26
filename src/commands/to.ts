@@ -185,7 +185,7 @@ export function toCommand({ manager, config, logger }: CommandDeps): SlashComman
                 title,
                 outcome.messageId,
                 current,
-                manager.canSteer(),
+                manager.canMutateQueue(),
               )
               : steeredPromptReceipt(sessionId, title, current);
             await sendMarkdownChunked(cmdCtx, body, config.textChunkLimit);

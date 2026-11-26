@@ -54,7 +54,7 @@ function makeManager(over: {
   live?: boolean;
   record?: SessionRecord;
   current?: boolean;
-  canSteer?: boolean;
+  canMutateQueue?: boolean;
   awaiting?: boolean;
 } = {}) {
   return {
@@ -63,7 +63,7 @@ function makeManager(over: {
     hasLiveSession: vi.fn(() => over.live ?? true),
     findBySessionId: vi.fn(() => over.record),
     isCurrentSession: vi.fn(() => over.current ?? false),
-    canSteer: vi.fn(() => over.canSteer ?? true),
+    canMutateQueue: vi.fn(() => over.canMutateQueue ?? true),
     isAwaitingAnswer: vi.fn(() => over.awaiting ?? false),
     sendTo: vi.fn(async () => over.sendTo ?? { ok: true, kind: 'sent', sessionId: TARGET }),
   } as unknown as SessionManager;
@@ -234,7 +234,7 @@ describe('/to', () => {
 
   it('别的会话排队：回执带标题与短 id，不冒充当前会话', async () => {
     const manager = makeManager({
-      canSteer: false,
+      canMutateQueue: false,
       sendTo: { ok: true, kind: 'queued', sessionId: TARGET, messageId: 'm-1' },
     });
 

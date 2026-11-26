@@ -126,13 +126,16 @@ export interface HostAdapter {
    */
   sandboxMode(): string | undefined;
   /**
-   * 部署里是否有可用的排队消息插话入口（sessionController.updateQueue）。
+   * 部署里是否有可用的排队消息改写入口（sessionController.updateQueue）。
    *
-   * 只有 web 组合包挂载该服务；缺失时 /steer 不注册、排队回执不带插话链接。
+   * 只有 web 组合包挂载该服务；缺失时 /steer、/unqueue 按未知指令处理，
+   * 排队回执不带插话与取消链接。
    */
-  supportsQueueSteer(): boolean;
+  supportsQueueMutation(): boolean;
   /** 把一条仍在 next-turn 的消息改成插话；错误码已归一，绝不抛出 */
   steerQueuedMessage(sessionId: string, itemId: string): Promise<QueueSteerOutcome>;
+  /** 删除一条仍在 next-turn 的消息；错误码已归一，绝不抛出 */
+  removeQueuedMessage(sessionId: string, itemId: string): Promise<QueueRemoveOutcome>;
   /** 探测结果摘要（启动契约检查用） */
   readonly capabilities: string[];
 }
@@ -150,6 +153,11 @@ export interface WorkspaceInfo {
 export type QueueSteerOutcome =
   | { ok: true }
   | { ok: false; reason: 'not-found' | 'steer-unavailable' | 'failed'; message?: string };
+
+/** 删除排队消息的结果：宿主只区分「已不在队列」与其它失败 */
+export type QueueRemoveOutcome =
+  | { ok: true }
+  | { ok: false; reason: 'not-found' | 'failed'; message?: string };
 
 /** 归档 / 取消归档的结果（宿主错误已归一成可展示的文案） */
 export type SessionArchiveOutcome =
@@ -377,13 +385,13 @@ interface SessionControllerLike {
   /**
    * 改一条仍在队列里的消息（宿主 SessionController.updateQueue）。
    *
-   * 只支持把 next-turn 的消息改成插话；已消费或回合已结束时宿主抛
-   * session/queue-item-not-found / session/steer-unavailable。
+   * 支持把 next-turn 的消息改成插话，或直接删掉；已消费或回合已结束时宿主抛
+   * session/queue-item-not-found（插话另抛 session/steer-unavailable）。
    */
   updateQueue?(request: {
     sessionId: string;
     itemId: string;
-    action: { kind: 'steer' };
+    action: { kind: 'steer' } | { kind: 'remove' };
   }): Promise<{ accepted?: boolean } | undefined>;
 }
 
@@ -514,6 +522,34 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
     'sessionTitle.rename',
   ];
 
+  /**
+   * 调宿主 updateQueue 并归一错误码。
+   *
+   * 插话与删除共用同一条调用路径；这里只回传宿主错误码，由各动作决定
+   * 映射成哪种 reason（删除没有 steer-unavailable 这一档）。
+   */
+  const updateQueueAction = async (
+    sessionId: string,
+    itemId: string,
+    action: { kind: 'steer' } | { kind: 'remove' },
+  ): Promise<{ ok: true } | { ok: false; code?: string; message?: string }> => {
+    // 现读而非用构造期快照：服务可能在 apply 之后才挂载
+    const current = optionalSessionController(ctx);
+    if (typeof current?.updateQueue !== 'function') return { ok: false };
+    try {
+      const result = await current.updateQueue({ sessionId, itemId, action });
+      if (result?.accepted === false) return { ok: false };
+      return { ok: true };
+    } catch (err) {
+      const code = (err as { code?: unknown } | null)?.code;
+      return {
+        ok: false,
+        ...(typeof code === 'string' ? { code } : {}),
+        message: errorMessage(err),
+      };
+    }
+  };
+
   /** registry.list() 收窄成纯数据快照；异常降级为空列表 */
   const workspaceList = (): WorkspaceInfo[] => {
     const registry = registryNow();
@@ -633,7 +669,7 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
       }
     },
 
-    supportsQueueSteer() {
+    supportsQueueMutation() {
       // 能力探测已进入每次命令派发的热路径，服务正在挂载时也不能抛穿。
       try {
         return typeof optionalSessionController(ctx)?.updateQueue === 'function';
@@ -644,26 +680,32 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
     },
 
     async steerQueuedMessage(sessionId, itemId) {
-      // 现读而非用构造期快照：服务可能在 apply 之后才挂载
-      const controller = optionalSessionController(ctx);
-      if (typeof controller?.updateQueue !== 'function') {
-        return { ok: false, reason: 'failed' };
+      const outcome = await updateQueueAction(sessionId, itemId, { kind: 'steer' });
+      if (outcome.ok) return { ok: true };
+      if (outcome.code === 'session/queue-item-not-found') return { ok: false, reason: 'not-found' };
+      if (outcome.code === 'session/steer-unavailable') return { ok: false, reason: 'steer-unavailable' };
+      if (outcome.message !== undefined) {
+        logger?.warn?.(`host adapter: sessionController.updateQueue(steer) 失败: ${outcome.message}`);
       }
-      try {
-        const result = await controller.updateQueue({
-          sessionId,
-          itemId,
-          action: { kind: 'steer' },
-        });
-        if (result?.accepted === false) return { ok: false, reason: 'failed' };
-        return { ok: true };
-      } catch (err) {
-        const code = (err as { code?: unknown } | null)?.code;
-        if (code === 'session/queue-item-not-found') return { ok: false, reason: 'not-found' };
-        if (code === 'session/steer-unavailable') return { ok: false, reason: 'steer-unavailable' };
-        logger?.warn?.(`host adapter: sessionController.updateQueue 失败: ${errorMessage(err)}`);
-        return { ok: false, reason: 'failed', message: errorMessage(err) };
+      return {
+        ok: false,
+        reason: 'failed',
+        ...(outcome.message === undefined ? {} : { message: outcome.message }),
+      };
+    },
+
+    async removeQueuedMessage(sessionId, itemId) {
+      const outcome = await updateQueueAction(sessionId, itemId, { kind: 'remove' });
+      if (outcome.ok) return { ok: true };
+      if (outcome.code === 'session/queue-item-not-found') return { ok: false, reason: 'not-found' };
+      if (outcome.message !== undefined) {
+        logger?.warn?.(`host adapter: sessionController.updateQueue(remove) 失败: ${outcome.message}`);
       }
+      return {
+        ok: false,
+        reason: 'failed',
+        ...(outcome.message === undefined ? {} : { message: outcome.message }),
+      };
     },
 
     async listSessions() {

@@ -64,7 +64,7 @@ function makeManager(over: {
     listAcquiredSessions: vi.fn(() => over.acquired ?? []),
     steerQueued: vi.fn(async () => over.steer ?? { ok: true as const }),
     isCurrentSession: vi.fn((id: string) => over.current?.sessionId === id),
-    canSteer: vi.fn(() => true),
+    canMutateQueue: vi.fn(() => true),
   } as unknown as SessionManager;
 }
 
@@ -97,9 +97,9 @@ describe('/steer 命令声明', () => {
   });
 
   it('始终注册，可见性随能力翻转现查（不固化构造期的缺失）', () => {
-    let canSteer = false;
+    let canMutateQueue = false;
     const manager = {
-      canSteer: vi.fn(() => canSteer),
+      canMutateQueue: vi.fn(() => canMutateQueue),
       presetsAvailable: vi.fn(() => true),
       worktreesAvailable: vi.fn(() => true),
     } as unknown as SessionManager;
@@ -109,13 +109,13 @@ describe('/steer 命令声明', () => {
 
     expect(namesOf(commands)).toContain('steer');
     expect(namesOf(visibleCommands(commands))).not.toContain('steer');
-    canSteer = true;
+    canMutateQueue = true;
     expect(namesOf(visibleCommands(commands))).toContain('steer');
   });
 
   it('能力翻转为不可用后按未知指令回绝，不调用宿主', async () => {
     const manager = makeManager({ current: record(CURRENT, { nextTurn: ['m-1'] }) });
-    (manager.canSteer as ReturnType<typeof vi.fn>).mockReturnValue(false);
+    (manager.canMutateQueue as ReturnType<typeof vi.fn>).mockReturnValue(false);
 
     expect(await run(manager)).toBe(
       '⚠️ 没有 `/steer` 这个指令。\n如果只是普通文本，去掉开头的 `/` 再发；全部指令见 `/help`。',
