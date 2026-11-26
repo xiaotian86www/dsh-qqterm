@@ -71,7 +71,7 @@ function makeRecord(sessionId: string, status: 'idle' | 'running' = 'running'): 
 function managerOf(
   records: SessionRecord[],
   placement: 'started' | 'queued' = 'started',
-  canSteer = false,
+  canMutateQueue = false,
 ): SessionManager {
   let index = 0;
   return {
@@ -84,7 +84,7 @@ function managerOf(
       return { messageId: message.id, placement };
     }),
     isCurrentSession: vi.fn(() => true),
-    canSteer: vi.fn(() => canSteer),
+    canMutateQueue: vi.fn(() => canMutateQueue),
   } as unknown as SessionManager;
 }
 

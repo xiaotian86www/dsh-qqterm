@@ -270,17 +270,17 @@ describe('workspaceRegistry 可选', () => {
 
 describe('排队消息改成插话（sessionController.updateQueue）', () => {
   it('没有 sessionController / updateQueue 时不可用', () => {
-    expect(createHostAdapter(makeCtx()).supportsQueueSteer()).toBe(false);
+    expect(createHostAdapter(makeCtx()).supportsQueueMutation()).toBe(false);
     expect(createHostAdapter(makeCtx({
       sessionController: { list: async () => ({}) },
-    })).supportsQueueSteer()).toBe(false);
+    })).supportsQueueMutation()).toBe(false);
   });
 
   it('有 updateQueue 时可用，并原样传会话、消息与 steer 动作', async () => {
     const updateQueue = vi.fn(async () => ({ accepted: true }));
     const adapter = createHostAdapter(makeCtx({ sessionController: { updateQueue } }));
 
-    expect(adapter.supportsQueueSteer()).toBe(true);
+    expect(adapter.supportsQueueMutation()).toBe(true);
     expect(await adapter.steerQueuedMessage('session-a', 'm-1')).toEqual({ ok: true });
     expect(updateQueue).toHaveBeenCalledWith({
       sessionId: 'session-a',
@@ -309,6 +309,31 @@ describe('排队消息改成插话（sessionController.updateQueue）', () => {
     expect(await withCode('session/steer-unavailable').steerQueuedMessage('s', 'm'))
       .toEqual({ ok: false, reason: 'steer-unavailable' });
     expect(await withCode('EIO').steerQueuedMessage('s', 'm'))
+      .toMatchObject({ ok: false, reason: 'failed' });
+  });
+
+  it('删除原样传会话、消息与 remove 动作', async () => {
+    const updateQueue = vi.fn(async () => ({ accepted: true }));
+    const adapter = createHostAdapter(makeCtx({ sessionController: { updateQueue } }));
+
+    expect(await adapter.removeQueuedMessage('session-a', 'm-1')).toEqual({ ok: true });
+    expect(updateQueue).toHaveBeenCalledWith({
+      sessionId: 'session-a',
+      itemId: 'm-1',
+      action: { kind: 'remove' },
+    });
+  });
+
+  it('删除只把 queue-item-not-found 归一成 not-found，其余按失败', async () => {
+    const withCode = (code: string) => createHostAdapter(makeCtx({
+      sessionController: {
+        updateQueue: async () => { throw Object.assign(new Error('nope'), { code }); },
+      },
+    }));
+
+    expect(await withCode('session/queue-item-not-found').removeQueuedMessage('s', 'm'))
+      .toEqual({ ok: false, reason: 'not-found' });
+    expect(await withCode('session/steer-unavailable').removeQueuedMessage('s', 'm'))
       .toMatchObject({ ok: false, reason: 'failed' });
   });
 });

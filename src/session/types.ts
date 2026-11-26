@@ -566,3 +566,8 @@ export interface WorkspaceGroup {
 export type SteerQueuedOutcome =
   | { ok: true }
   | { ok: false; reason: 'not-found' | 'steer-unavailable' | 'failed'; message?: string };
+
+/** 删除一条排队消息的结果（宿主只区分「已不在队列」与其它失败） */
+export type RemoveQueuedOutcome =
+  | { ok: true }
+  | { ok: false; reason: 'not-found' | 'failed'; message?: string };

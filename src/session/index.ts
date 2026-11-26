@@ -40,6 +40,7 @@ export type {
   PromptPlacement,
   PromptSubmission,
   SteerQueuedOutcome,
+  RemoveQueuedOutcome,
   RetryPromptOutcome,
   WorktreeInfo,
 } from './types.ts';

@@ -101,24 +101,30 @@ export function sessionSteerLink(sessionId: string, messageId: string, label = '
   return commandLink(`/steer #${shortSessionId(sessionId)} ${messageId}`, label);
 }
 
+/** 取消链接：从 next-turn 队列里删掉这一条，不影响本轮生成 */
+export function sessionUnqueueLink(sessionId: string, messageId: string, label = '取消'): string {
+  return commandLink(`/unqueue #${shortSessionId(sessionId)} ${messageId}`, label);
+}
+
 /**
- * 排队回执：首行只说已排队，空行后给一条可点的插话入口（部署有该能力时）。
+ * 排队回执：首行只说已排队，空行后给可点的插话与取消入口（部署有该能力时）。
  *
- * 插话入口只对这条消息有效：点下去走 sessionController.updateQueue，不 cancel，
- * 本轮继续跑，消息改在下一步消费。入口平铺、不进引用：动作本身已经说清，
- * 再补一行引导只是重复。
+ * 两个入口都只对这条消息有效：点下去走 sessionController.updateQueue，不 cancel，
+ * 本轮继续跑；插话改在下一步消费，取消直接删掉。入口平铺、不进引用：动作本身
+ * 已经说清，再补一行引导只是重复。
  */
 export function queuedPromptReceipt(
   sessionId: string,
   title: string | undefined,
   messageId: string,
   current: boolean,
-  canSteer: boolean,
+  canMutate: boolean,
 ): string {
   const first = current
     ? '✅ 已排队'
     : `✅ 已排队 · ${sessionTargetLabel(sessionId, title)}`;
-  return canSteer ? `${first}\n\n${sessionSteerLink(sessionId, messageId)}` : first;
+  if (!canMutate) return first;
+  return `${first}\n\n${sessionSteerLink(sessionId, messageId)} · ${sessionUnqueueLink(sessionId, messageId)}`;
 }
 
 /** 插话回执：当前会话只说已插话，别的会话带标题与短 id */
@@ -130,6 +136,17 @@ export function steeredPromptReceipt(
   return current
     ? '✅ 已插话'
     : `✅ 已插话 · ${sessionTargetLabel(sessionId, title)}`;
+}
+
+/** 取消排队回执：当前会话只说已取消排队，别的会话带标题与短 id */
+export function unqueuedPromptReceipt(
+  sessionId: string,
+  title: string | undefined,
+  current: boolean,
+): string {
+  return current
+    ? '✅ 已取消排队'
+    : `✅ 已取消排队 · ${sessionTargetLabel(sessionId, title)}`;
 }
 
 /** 尾部链接行（正文下方独占一行）：回复 + 恢复 [+ 停止] [+ 归档] */

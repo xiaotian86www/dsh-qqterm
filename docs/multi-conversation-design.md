@@ -236,6 +236,7 @@ class SessionManager {
 | `/stop` | cancel current 的 agent（`<id>` / `all` 指定会话）；即使是借来的也 cancel（接受的语义）；排队输入一并丢弃 |
 | `/stop all` | cancel 所有 running 的已获取会话；顺带清对应 pending |
 | `/steer` | 把一条仍排队的 prompt 改成插话（`sessionController.updateQueue`）；不 cancel、不改 current；可指定已获取会话 |
+| `/unqueue` | 删除一条仍排队的 prompt（`sessionController.updateQueue`, action=remove）；不 cancel、不改 current；可指定已获取会话 |
 | agent 被外部 dispose | `agent/disposed` 事件摘掉记录；兜底再比对 `agents.get(id)` 是否换成了另一个 agent |
 
 ---

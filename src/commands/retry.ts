@@ -32,7 +32,7 @@ export function retryCommand({ manager, config }: CommandDeps): SlashCommand {
             title,
             outcome.messageId,
             current,
-            manager.canSteer(),
+            manager.canMutateQueue(),
           )
           : steeredPromptReceipt(outcome.sessionId, title, current);
         await sendMarkdownChunked(cmdCtx, text, config.textChunkLimit);

@@ -50,7 +50,7 @@ function makeManager(options: StubOptions = {}) {
   return {
     presetsAvailable: vi.fn(() => options.available ?? true),
     worktreesAvailable: vi.fn(() => true),
-    canSteer: vi.fn(() => false),
+    canMutateQueue: vi.fn(() => false),
     listPresets: vi.fn(async () => options.presets ?? PRESETS),
     getEffectivePreset: vi.fn(() => options.effective),
     setPresetOverride: vi.fn(async (_scope: unknown, _peer: unknown, id: string) => (

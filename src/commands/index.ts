@@ -21,7 +21,7 @@ import { permissionCommand } from './permission.ts';
 import { retryCommand } from './retry.ts';
 import { helpCommand } from './help.ts';
 import { pluginsCommand } from './plugins.ts';
-import { steerCommand, stopCommand } from './misc.ts';
+import { steerCommand, stopCommand, unqueueCommand } from './misc.ts';
 
 /**
  * 构建标准命令列表
@@ -47,9 +47,10 @@ export function buildCommandList(deps: CommandDeps): SlashCommand[] {
     presetCommand(deps),
     permissionCommand(deps),
     stopCommand(deps),
-    // 插话走宿主 sessionController.updateQueue；能力现查，缺服务时按未知指令处理，
-    // 排队回执也不给链接。
+    // 插话与取消排队走宿主 sessionController.updateQueue；能力现查，缺服务时
+    // 按未知指令处理，排队回执也不给链接。
     steerCommand(deps),
+    unqueueCommand(deps),
     retryCommand(deps),
     pluginsCommand(deps),
   ];

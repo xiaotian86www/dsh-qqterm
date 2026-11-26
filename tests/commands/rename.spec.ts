@@ -31,7 +31,7 @@ function makeManager(overrides: Record<string, unknown> = {}) {
     renameCurrentSession: vi.fn(() => ({ ok: true as const, title: '新名字' })),
     presetsAvailable: vi.fn(() => true),
     worktreesAvailable: vi.fn(() => true),
-    canSteer: vi.fn(() => false),
+    canMutateQueue: vi.fn(() => false),
     ...overrides,
   };
 }

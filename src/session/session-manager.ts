@@ -88,6 +88,7 @@ import type {
   PromptPlacement,
   PromptSubmission,
   SteerQueuedOutcome,
+  RemoveQueuedOutcome,
   RetryPromptOutcome,
   WorktreeInfo,
 } from './types.ts';
@@ -386,7 +387,7 @@ export class SessionManager {
    * 部署里有没有 agentPresets 服务（/preset 每次现查：没有就按未知指令处理）
    */
   presetsAvailable(): boolean {
-    // 与 canSteer 同一来源：每次现查，不在构造期固化缺失。
+    // 与 canMutateQueue 同一来源：每次现查，不在构造期固化缺失。
     try {
       return this.getPresetsService() !== undefined;
     } catch (err) {
@@ -1888,14 +1889,26 @@ export class SessionManager {
     }
   }
 
-  /** 部署是否有插话入口（sessionController.updateQueue） */
-  public canSteer(): boolean {
-    return this.host.supportsQueueSteer();
+  /** 部署是否有排队消息改写入口（sessionController.updateQueue） */
+  public canMutateQueue(): boolean {
+    return this.host.supportsQueueMutation();
   }
 
   /** 把一条仍在排队的消息改成插话；不 cancel、不改当前指针 */
   public async steerQueued(sessionId: string, itemId: string): Promise<SteerQueuedOutcome> {
     const outcome = await this.host.steerQueuedMessage(sessionId, itemId);
+    return outcome.ok
+      ? { ok: true }
+      : {
+        ok: false,
+        reason: outcome.reason,
+        ...(outcome.message === undefined ? {} : { message: outcome.message }),
+      };
+  }
+
+  /** 删除一条仍在排队的消息；不 cancel、不改当前指针、不动别的队列项 */
+  public async removeQueued(sessionId: string, itemId: string): Promise<RemoveQueuedOutcome> {
+    const outcome = await this.host.removeQueuedMessage(sessionId, itemId);
     return outcome.ok
       ? { ok: true }
       : {
