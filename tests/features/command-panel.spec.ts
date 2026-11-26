@@ -23,6 +23,19 @@ function cmd(
 ): SlashCommand {
   return { name, description, scope, handler: () => 'ok' } as SlashCommand;
 }
+
+describe('buildPanelItems（能力门控）', () => {
+  it('不可用的命令不进面板，能力翻转后重新同步可见', () => {
+    let available = false;
+    const gated = { ...cmd('steer', '插话排队消息'), available: () => available } as SlashCommand;
+    const names = (): string[] =>
+      buildPanelItems([cmd('new', '新建会话'), gated]).map((item) => item.name);
+
+    expect(names()).not.toContain('/steer');
+    available = true;
+    expect(names()).toContain('/steer');
+  });
+});
 interface Call {
   method: 'get' | 'post' | 'put';
   path: string;

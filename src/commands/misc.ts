@@ -16,6 +16,7 @@ import {
 import { sendMarkdownChunked } from '../shared/send-helper.ts';
 import { ArgError, parseArgs, parseRest } from './args.ts';
 import { matchSessionTarget } from './sessions.ts';
+import { unavailableCommandReply } from './availability.ts';
 
 /**
  * 中止成功的回执：`⛔ 已中止「标题」 · #短id`，取不到标题时只给 id。
@@ -99,6 +100,8 @@ export function steerCommand({ manager, config }: CommandDeps): SlashCommand {
   return {
     name: 'steer',
     scope: 'all',
+    // sessionController 可能晚于插件挂载；每次现查，不在构造期固化缺失
+    available: () => manager.canSteer(),
     description: '插话排队消息',
     usage: [
       '### 📖 /steer 用法',
@@ -110,6 +113,8 @@ export function steerCommand({ manager, config }: CommandDeps): SlashCommand {
       '只改落点，不中止当前生成；目标用 8 位短 id',
     ].join('\n'),
     handler: async (cmdCtx) => {
+      // SDK 的命令表是注册期快照：能力翻转到不可用时由 handler 自己按未知指令回绝
+      if (!manager.canSteer()) return unavailableCommandReply(cmdCtx, 'steer');
       const { scope, peerId } = getScopePeer(cmdCtx);
       let parsed;
       try {

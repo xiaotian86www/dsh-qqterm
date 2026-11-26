@@ -383,10 +383,16 @@ export class SessionManager {
   }
 
   /**
-   * 部署里有没有 agentPresets 服务（决定 /preset 是否注册：没有就整条命令不出现）
+   * 部署里有没有 agentPresets 服务（/preset 每次现查：没有就按未知指令处理）
    */
   presetsAvailable(): boolean {
-    return this.getPresetsService() !== undefined;
+    // 与 canSteer 同一来源：每次现查，不在构造期固化缺失。
+    try {
+      return this.getPresetsService() !== undefined;
+    } catch (err) {
+      this.logger.debug(`presetsAvailable 探测失败: ${errorMessage(err)}`);
+      return false;
+    }
   }
 
   /**

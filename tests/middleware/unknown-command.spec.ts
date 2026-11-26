@@ -115,6 +115,27 @@ async function run(content: string, options: HarnessOptions = {}): Promise<Harne
   return harness;
 }
 
+describe('rejectUnknownCommands（动态白名单）', () => {
+  it('commandNames 传函数时每请求现查，能力晚到后放行', async () => {
+    let available = false;
+    const guard = rejectUnknownCommands({
+      commandNames: () => (available ? [...COMMANDS, 'steer'] : COMMANDS),
+      sendText: async () => undefined,
+    });
+
+    const blocked = makeHarness('/steer');
+    await guard(blocked.ctx, blocked.next);
+    expect(blocked.next).not.toHaveBeenCalled();
+    expect(blocked.isStopped()).toBe(true);
+
+    available = true;
+    const allowed = makeHarness('/steer');
+    await guard(allowed.ctx, allowed.next);
+    expect(allowed.next).toHaveBeenCalledOnce();
+    expect(allowed.isStopped()).toBe(false);
+  });
+});
+
 describe('parseCommandCandidate（只把明确的指令形态当指令）', () => {
   it('识别半角与全角前缀', () => {
     expect(parseCommandCandidate('/model')).toEqual({ raw: 'model', name: 'model', prefix: '/' });

@@ -29,4 +29,9 @@ export type SlashCommand = SdkSlashCommand & {
    * 只有需要引用内容的命令才标：其它命令无视引用，不做「取不到」判断。
    */
   acceptsQuote?: boolean;
+  /**
+   * 可选能力门控（不进 inject 的服务）：每次调用现查，不能存成构造期常量。
+   * 缺失只让命令按未知指令处理，不解释、不提示；不填表示始终可用。
+   */
+  available?: () => boolean;
 };
