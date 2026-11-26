@@ -11,6 +11,7 @@ import type { PresetEntry, SessionManager } from '../../src/session/index.ts';
 import type { Logger } from '../../src/types.ts';
 import { presetCommand } from '../../src/commands/preset.ts';
 import { buildCommandList } from '../../src/commands/index.ts';
+import { visibleCommands } from '../../src/commands/availability.ts';
 
 const state = vi.hoisted(() => ({ sent: [] as string[] }));
 
@@ -153,18 +154,25 @@ describe('/preset（切换）', () => {
   });
 });
 
-describe('/preset 注册', () => {
-  const namesOf = (available: boolean): string[] => buildCommandList({
-    manager: makeManager({ available }),
-    config,
-    logger,
-  }).flatMap((command) => (Array.isArray(command.name) ? command.name : [command.name]));
+describe('/preset 注册与能力门控', () => {
+  it('始终注册，可见性随能力翻转现查', () => {
+    let available = false;
+    const manager = makeManager();
+    (manager.presetsAvailable as ReturnType<typeof vi.fn>).mockImplementation(() => available);
+    const commands = buildCommandList({ manager, config, logger });
+    const namesOf = (list: typeof commands): string[] =>
+      list.flatMap((command) => (Array.isArray(command.name) ? command.name : [command.name]));
 
-  it('有 agentPresets 服务时注册', () => {
-    expect(namesOf(true)).toContain('preset');
+    expect(namesOf(commands)).toContain('preset');
+    expect(namesOf(visibleCommands(commands))).not.toContain('preset');
+    available = true;
+    expect(namesOf(visibleCommands(commands))).toContain('preset');
   });
 
-  it('没有 agentPresets 服务时整条命令不出现', () => {
-    expect(namesOf(false)).not.toContain('preset');
+  it('能力不可用时按未知指令回绝，不查 preset', async () => {
+    const manager = makeManager({ available: false });
+
+    expect(await run(manager)).toContain('⚠️ 没有 `/preset` 这个指令。');
+    expect(manager.listPresets).not.toHaveBeenCalled();
   });
 });

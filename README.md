@@ -426,15 +426,15 @@ src/
 
 - **纯 Cordis 插件** — 遵循 dsh「Plugins, not loop changes」原则。
 - **声明式依赖** — `inject` 列出 14 个必需服务：`agents`、`llm`、`agentDefaultModel`、`sessionProjections`、`sessionPersistence`、`sessionQuery`、`sessionTitle`、`permissionPresets`、`settings`、`commands`、`tools`、`attachments`、`workingDirectory`、`pluginManager`。缺任一就不激活，不在运行时探测或降级。
-- **可选服务软读** — 可选能力不进 `inject`，在使用点现查；缺失只缩小能力面，不改变语义，也不解释、不提示。
+- **可选服务软读** — 可选能力不进 `inject`，在使用点现查；命令表是注册期快照，门控命令始终注册、由 `available` 在每次使用时现查；缺失只缩小能力面（按未知指令处理），不改变语义，也不解释、不提示。晚挂载的服务立刻出现在帮助、白名单与面板里（面板只在每次连接时同步）。
 
 | 可选服务 | 缺了以后 |
 |---|---|
-| `agentPresets` | `/preset` 不注册，建会话不挂 preset |
+| `agentPresets` | `/preset` 按未知指令处理，建会话不挂 preset；能力晚到后立刻可用 |
 | `webServer` | 端内绑定页不注册，扫码只走终端 / 浏览器 |
 | `workspaceRegistry` | `/sessions` 仍按目录分组，但组标题只有路径，没有 `📌` / 归档入口；归档子命令按未知处理；`/new --dir` 只认绝对路径 |
 | `worktrees` | `/new --worktree` 按未知参数处理，新会话就地创建 |
-| `sessionController` | `/sessions` 的排序退化为创建时间 |
+| `sessionController` | `/sessions` 的排序退化为创建时间；`/steer` 按未知指令处理，排队回执不给链接 |
 
 - **一个当前会话 + 多份已获取会话** — 任何 QQ 窗口续写同一个当前会话；`/sessions resume` 与 `/to` 获取过的会话继续活着并把输出发回 QQ。
 - **薄层** — 模型、preset、思考强度、权限、压缩、工作区都转发给宿主；插件只留通道独有的一层：入站解析、分片、附件、回复目标、绑定、多会话寻址与文案渲染。

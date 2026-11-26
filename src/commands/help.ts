@@ -9,6 +9,7 @@ import type { CommandDeps, SlashCommand } from './types.ts';
 import { ArgError, parseArgs } from './args.ts';
 import { sendMarkdownChunked } from '../shared/index.ts';
 import { commandLink } from '../shared/inline.ts';
+import { visibleCommands } from './availability.ts';
 
 /** 命令的主名：name 可能是数组，第一项是主名 */
 function primaryName(cmd: SlashCommand): string {
@@ -55,7 +56,8 @@ export function helpCommand(
         if (error instanceof ArgError) return error.message;
         throw error;
       }
-      const commands = allCommands();
+      // 能力门控在每次查看时现算：晚挂载的服务立刻出现在用法页
+      const commands = visibleCommands(allCommands());
       const [name] = parsed.words;
 
       if (name !== undefined) {

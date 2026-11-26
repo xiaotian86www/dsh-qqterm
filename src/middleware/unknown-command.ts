@@ -127,8 +127,11 @@ export function collectCommandNames(commands: ReadonlyArray<{ name: string | str
 export type UnknownCommandSend = (target: MiddlewareContext['replyTarget'], body: string) => Promise<void>;
 
 export interface UnknownCommandGuardOptions {
-  /** 已注册的指令名（含别名，不含前缀） */
-  commandNames: readonly string[];
+  /**
+   * 当前已注册的指令名（含别名，不含前缀）。
+   * 传函数以便每次消息现查：可选能力晚挂载时白名单立刻跟上，不在构造期固化。
+   */
+  commandNames: readonly string[] | (() => readonly string[]);
   /** 发回复用的函数（bootstrap 注入 sender.text：分片 + 网络类重试） */
   sendText: UnknownCommandSend;
 }
@@ -140,7 +143,8 @@ export interface UnknownCommandGuardOptions {
  * 回复发不出去时退回 `next()`，不让用户的消息凭空消失。
  */
 export function rejectUnknownCommands(options: UnknownCommandGuardOptions): Middleware {
-  const registered = new Set(options.commandNames.map((name) => name.toLowerCase()));
+  const namesOf = (): readonly string[] =>
+    typeof options.commandNames === 'function' ? options.commandNames() : options.commandNames;
 
   return async (ctx, next) => {
     const content = (ctx.message.content ?? '').trim();
@@ -155,13 +159,17 @@ export function rejectUnknownCommands(options: UnknownCommandGuardOptions): Midd
       return;
     }
 
+    // 每请求现取白名单：晚到的能力服务挂载后命令立刻归守卫放行
+    const names = namesOf();
+    const registered = new Set(names.map((name) => name.toLowerCase()));
+
     // 已注册名字（大小写不敏感）不归守卫管
     if (registered.has(candidate.raw.toLowerCase())) {
       await next();
       return;
     }
 
-    const suggestion = suggestCommand(candidate.name, options.commandNames);
+    const suggestion = suggestCommand(candidate.name, names);
     const reply = buildUnknownCommandReply(candidate, suggestion);
     ctx.log.debug?.(`[qqterm] unknown command: ${candidate.prefix}${candidate.raw}`);
 

@@ -9,6 +9,7 @@
  * name 最多 14 字符（约 7 个汉字）、desc 最多 30 字符（约 15 个汉字）。
  */
 import type { SlashCommand } from '../commands/types.ts';
+import { visibleCommands } from '../commands/availability.ts';
 import type { Logger, OpenApiLike } from '../types.ts';
 
 /** 面板归属标记：列表里靠它认出「这个面板是本插件建的」 */
@@ -114,7 +115,8 @@ export function buildPanelItems(
   commands: readonly SlashCommand[],
 ): PanelItem[] {
   const items: PanelItem[] = [];
-  for (const cmd of commands) {
+  // 同步发生在连接后：能力可能晚于命令表挂载，这里现取可见命令。
+  for (const cmd of visibleCommands(commands)) {
     // SDK 的 scope 还可能有其它场景值，非私聊可见的一律不同步
     if (cmd.scope !== undefined && cmd.scope !== 'c2c' && cmd.scope !== 'all') continue;
 

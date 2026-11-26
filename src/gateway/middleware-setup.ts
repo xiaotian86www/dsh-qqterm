@@ -23,6 +23,7 @@ import type { Reloader } from '../reload/index.ts';
 import type { PluginInstaller } from '../plugins/index.ts';
 import type { Logger } from '../types.ts';
 import { buildCommandList } from '../commands/index.ts';
+import { visibleCommands } from '../commands/availability.ts';
 import type { SlashCommand } from '../commands/types.ts';
 import { attachmentProcessor } from '../middleware/attachment.ts';
 import { questionAnswer } from '../middleware/question-answer.ts';
@@ -107,6 +108,8 @@ export function setupMiddlewares(options: MiddlewareSetupOptions): SlashCommand[
     buildCommandList({ manager, config, logger, bot, reloader, installer }),
   );
   const commandNames = collectCommandNames(commandList);
+  // 守卫白名单现取可见命令：命令表是注册期快照，能力晚到/卸载都要立刻反映。
+  const visibleCommandNames = (): string[] => collectCommandNames(visibleCommands(commandList));
   const slash = slashCommand({
     // 关闭 autoHelp：help 命令由 qqbot 自己注册为 /help，
     // 避免 SDK 再自动注册一个同名命令造成重复
@@ -126,7 +129,7 @@ export function setupMiddlewares(options: MiddlewareSetupOptions): SlashCommand[
   // 6.6. 未知指令兜底（在 questionAnswer 之后：答案优先，别被守卫吃掉）
   //      拼错的 /xxx 直接回「没有这个指令」，不再当成提问转发给大模型
   bot.use(rejectUnknownCommands({
-    commandNames,
+    commandNames: visibleCommandNames,
     sendText: sendText ?? (async (target, body) => {
       await bot.sendMarkdown(target, body);
     }),

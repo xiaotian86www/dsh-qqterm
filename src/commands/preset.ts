@@ -9,6 +9,7 @@ import { parseRest } from './args.ts';
 import { ownerOnlyAuth } from './auth.ts';
 import { getScopePeer, sendMarkdownChunked } from '../shared/index.ts';
 import { commandLinkRaw } from '../shared/inline.ts';
+import { unavailableCommandReply } from './availability.ts';
 
 export function presetCommand({ manager, config, logger }: CommandDeps): SlashCommand {
   return {
@@ -16,6 +17,8 @@ export function presetCommand({ manager, config, logger }: CommandDeps): SlashCo
     // 管理类指令：私聊可用，但仅限绑定用户（复用审批的 owner 语义）
     scope: 'all',
     authorized: ownerOnlyAuth(config, logger),
+    // agentPresets 可能晚于插件挂载；每次现查，不在构造期固化缺失
+    available: () => manager.presetsAvailable(),
     description: '查看或切换 preset',
     usage: [
       '### 📖 /preset 用法',
@@ -24,6 +27,8 @@ export function presetCommand({ manager, config, logger }: CommandDeps): SlashCo
       '`/preset <id>` 切换 preset',
     ].join('\n'),
     handler: async (cmdCtx) => {
+      // SDK 的命令表是注册期快照：能力翻转到不可用时由 handler 自己按未知指令回绝
+      if (!manager.presetsAvailable()) return unavailableCommandReply(cmdCtx, 'preset');
       const { scope, peerId } = getScopePeer(cmdCtx);
       const args = parseRest(cmdCtx.command?.raw ?? '');
 

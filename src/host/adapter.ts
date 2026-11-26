@@ -634,7 +634,13 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
     },
 
     supportsQueueSteer() {
-      return typeof optionalSessionController(ctx)?.updateQueue === 'function';
+      // 能力探测已进入每次命令派发的热路径，服务正在挂载时也不能抛穿。
+      try {
+        return typeof optionalSessionController(ctx)?.updateQueue === 'function';
+      } catch (err) {
+        logger?.debug?.(`host adapter: sessionController 探测失败: ${errorMessage(err)}`);
+        return false;
+      }
     },
 
     async steerQueuedMessage(sessionId, itemId) {

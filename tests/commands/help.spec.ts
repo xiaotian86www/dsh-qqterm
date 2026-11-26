@@ -48,8 +48,8 @@ function makeCtx(raw: string, sent: string[]): SlashCommandHandlerContext {
   } as unknown as SlashCommandHandlerContext;
 }
 
-async function run(raw: string): Promise<string> {
-  const command = helpCommand({ config } as CommandDeps, () => COMMANDS);
+async function run(raw: string, commands: readonly SlashCommand[] = COMMANDS): Promise<string> {
+  const command = helpCommand({ config } as CommandDeps, () => commands);
   const sent: string[] = [];
   const result = await command.handler(makeCtx(raw, sent));
   return typeof result === 'string' ? result : sent.join('');
@@ -83,5 +83,16 @@ describe('/help <命令>', () => {
 
   it('查不到时只给一句指引', async () => {
     expect(await run('nope')).toBe('⚠️ 没有这个指令 · 用法: /help');
+  });
+
+  it('能力不可用的命令既不列出也不能查到用法', async () => {
+    const commands = [...COMMANDS, fake({
+      name: 'steer',
+      description: '插话排队消息',
+      available: () => false,
+    })];
+
+    expect(await run('', commands)).not.toContain('/steer');
+    expect(await run('steer', commands)).toBe('⚠️ 没有这个指令 · 用法: /help');
   });
 });
