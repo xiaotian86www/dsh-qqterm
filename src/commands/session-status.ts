@@ -98,6 +98,8 @@ async function renderStatus(
     }
   } else {
     lines.push('**会话**: 未建立');
+    // 团队意图还没被执行：下一条消息建会话时才会真正开启
+    if (manager.pendingTeamEnabled()) lines.push('**下一条消息**: 团队模式');
   }
 
   // 工作树：只有会话日志里有建树记录时才出现；工作区行给的是主仓库，树路径与分支放这里
@@ -118,6 +120,12 @@ async function renderStatus(
 
   if (worktree) {
     lines.push(`**工作树**: \`${worktree.path}\` (\`${worktree.branch}\`)`);
+  }
+
+  // 团队模式：读会话日志投影；宿主没装团队包时整行不出现（能力面缩小，不解释）
+  if (status.active) {
+    const team = manager.teamEnabled(scope, peerId);
+    if (team !== undefined) lines.push(`**团队**: ${team ? '开' : '关'}`);
   }
 
   // 模型 / 思考强度 / preset / 权限：没有会话时展示部署默认值（新建会话会用它），

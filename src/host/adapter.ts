@@ -111,6 +111,12 @@ export interface HostAdapter {
    */
   worktrees(): WorktreeServiceLike | undefined;
   /**
+   * 团队服务（只有挂载了 dsh-agent-team 的组合提供）。
+   *
+   * 同样每次现读：`/new --team` 在会话建好后调它开团队模式。
+   */
+  agentTeams(): TeamServiceLike | undefined;
+  /**
    * 目录所在仓库的 HEAD（当前分支名 + 提交）。
    *
    * 建工作树的基点用它：宿主默认取 repository root 的 HEAD，在树里再开会话会
@@ -273,6 +279,16 @@ export interface WorktreeServiceLike {
     request: CreatedWorktreeLike,
     signal?: AbortSignal,
   ): Promise<{ path: string; branchRecreated: boolean }>;
+}
+
+/**
+ * agentTeams 服务最小契约（对齐 dsh-agent-team TeamService）。
+ *
+ * 只用 setEnabled：让根会话的团队模式落进会话日志。缺服务时 `/new --team`
+ * 按未知参数处理，`/status` 的团队行走日志投影、不受影响。
+ */
+export interface TeamServiceLike {
+  setEnabled(agent: unknown, enabled: boolean, signal?: AbortSignal): Promise<void>;
 }
 
 /** sandboxPolicy 服务最小契约：只读当前沙箱模式（`/status` 与只读判定用，不在这里发起执行） */
@@ -517,6 +533,7 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
     'sessionPersistence.stat',
     ...(registryNow() === undefined ? [] : ['workspaceRegistry']),
     ...(optionalService<WorktreeServiceLike>(ctx, 'worktrees') === undefined ? [] : ['worktrees']),
+    ...(optionalService<TeamServiceLike>(ctx, 'agentTeams') === undefined ? [] : ['agentTeams']),
     ...(typeof optionalSessionController(ctx)?.updateQueue === 'function' ? ['sessionController.updateQueue'] : []),
     'sessionQuery',
     'sessionTitle.rename',
@@ -637,6 +654,10 @@ export function createHostAdapter(ctx: Context, logger?: AdapterLogger): HostAda
 
     worktrees() {
       return optionalService<WorktreeServiceLike>(ctx, 'worktrees');
+    },
+
+    agentTeams() {
+      return optionalService<TeamServiceLike>(ctx, 'agentTeams');
     },
 
     async headOf(directory) {

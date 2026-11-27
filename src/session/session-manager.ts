@@ -241,6 +241,13 @@ export class SessionManager {
    * 消息之间切目录、切分支都按最终目录算。内存态，重启即丢；切走、恢复、删除都清。
    */
   private pendingWorktree = false;
+  /**
+   * `/new --team` 的意图：下一个新建会话开团队模式。
+   *
+   * 与 `pendingWorktree` 同一条生命周期：只记「要不要」，建会话时交给宿主
+   * `agentTeams.setEnabled` 落进会话日志。内存态，重启即丢；切走、清空都清。
+   */
+  private pendingTeam = false;
   private readonly modelResolver: ModelResolver;
   private readonly ctx: Context;
   private readonly host: HostAdapter;
@@ -405,6 +412,14 @@ export class SessionManager {
   }
 
   /**
+   * 部署里有没有 agentTeams 服务（决定 `/new --team` 认不认这个参数：没有就按
+   * 未知参数处理，不解释部署差异）
+   */
+  teamsAvailable(): boolean {
+    return this.host.agentTeams() !== undefined;
+  }
+
+  /**
    * `/new --worktree`：下一个新建会话开工作树。
    *
    * 只是内存里的意图，基线在创建那一刻才读（chatDir 的 HEAD），所以 `/new` 与
@@ -412,6 +427,36 @@ export class SessionManager {
    */
   armWorktree(): void {
     this.pendingWorktree = true;
+  }
+
+  /** `/new --team`：下一个新建会话开团队模式（与 `armWorktree` 同一条内存意图） */
+  armTeam(): void {
+    this.pendingTeam = true;
+  }
+
+  /** `/status` 用：下一条消息会不会开团队模式（会话还没建时的唯一来源） */
+  pendingTeamEnabled(): boolean {
+    return this.pendingTeam;
+  }
+
+  /**
+   * 让刚建好的会话进入团队模式（`/new --team`）。
+   *
+   * 必须赶在首条消息之前：宿主工具的 when 在步骤准备时求值，晚一步第一轮就看不到
+   * 团队工具。失败不回滚会话——会话已经存在，原因带回回执，`/status` 如实显示「关」。
+   */
+  private async enableTeam(agent: DshAgent, key: string): Promise<string | undefined> {
+    const teams = this.host.agentTeams();
+    if (teams === undefined) return '团队服务不可用';
+    try {
+      await teams.setEnabled(agent, true);
+      this.logger.info(`team mode enabled: key=${key}`);
+      return undefined;
+    } catch (err) {
+      const message = errorMessage(err);
+      this.logger.warn(`team enable failed: key=${key} ${message}`);
+      return message;
+    }
   }
 
   /** 默认策略只读：建不了树，`/new --worktree` 提前拒绝 */
@@ -1427,6 +1472,7 @@ export class SessionManager {
     this.currentByKey.set(key, sessionId);
     this.persistSessionId(key, sessionId);
     this.pendingWorktree = false;
+    this.pendingTeam = false;
   }
 
   /**
@@ -1440,6 +1486,7 @@ export class SessionManager {
     this.currentByKey.delete(key);
     if (this.modelResolver.getSessionId(key) !== undefined) this.modelResolver.clearSessionId(key);
     this.pendingWorktree = false;
+    this.pendingTeam = false;
   }
 
   /** getOrCreate 的实际打开流程（已通过 singleflight 保证同 key 串行） */
@@ -1473,6 +1520,7 @@ export class SessionManager {
     let agentPreset: string | undefined;
     let worktree: SpawnedWorktree | undefined;
     let worktreeSkipped: 'not-repo' | 'read-only' | undefined;
+    let teamError: string | undefined;
 
     const live = this.agents.get(sessionId);
     if (live) {
@@ -1524,6 +1572,8 @@ export class SessionManager {
         directory = created.directory;
         worktree = created.worktree;
         worktreeSkipped = created.worktreeSkipped;
+        // 团队模式要赶在首条消息之前落进会话日志；失败只带回原因，不回滚会话
+        if (this.pendingTeam) teamError = await this.enableTeam(agent, key);
         this.logger.info(`created new session: key=${key} sessionId=${sessionId} preset=${agentPreset ?? 'none'} cwd=${directory}`);
       }
     }
@@ -1545,6 +1595,7 @@ export class SessionManager {
     } else if (worktreeSkipped !== undefined) {
       record.worktreeNotice = worktreeSkipNotice(worktreeSkipped);
     }
+    if (teamError !== undefined) record.teamError = teamError;
 
     this.records.set(sessionId, record);
     this.rememberHeld(sessionId);
@@ -1727,6 +1778,27 @@ export class SessionManager {
     return picked === undefined
       ? undefined
       : { branch: picked.branch, baseCommit: picked.baseCommit, path: picked.path };
+  }
+
+  /**
+   * 当前会话的团队模式（/status 用）：读会话日志里的团队投影，不依赖 agentTeams
+   * 服务——没装团队包时取不到投影，返回 undefined，这一行整行不出现。
+   *
+   * 从未选过模式时（投影里 enabled 为空）按「关」算：与宿主 `isEnabled` 同一口径。
+   */
+  teamEnabled(scope: ChatScope, peerId: string): boolean | undefined {
+    const record = this.getSessionRecord(scope, peerId);
+    if (record === undefined) return undefined;
+    try {
+      const state = this.sessionProjections.stateOf(record.agent.session, 'agentTeam') as
+        | { enabled?: boolean }
+        | undefined;
+      if (state === undefined) return undefined;
+      return state.enabled === true;
+    } catch (err) {
+      this.logger.debug(`team projection unavailable: ${errorMessage(err)}`);
+      return undefined;
+    }
   }
 
   /** 已获取会话有没有工作树（归档回执用）；冷会话查不到，按没有处理 */
@@ -2046,9 +2118,13 @@ export class SessionManager {
     const notice = record.worktreeNotice;
     if (notice !== undefined) delete record.worktreeNotice;
     this.logger.info(`prompt sent with /new: sessionId=${record.sessionId}`);
-    return notice === undefined
-      ? { sessionId: record.sessionId }
-      : { sessionId: record.sessionId, worktreeNotice: notice };
+    const teamError = record.teamError;
+    if (teamError !== undefined) delete record.teamError;
+    return {
+      sessionId: record.sessionId,
+      ...(notice === undefined ? {} : { worktreeNotice: notice }),
+      ...(teamError === undefined ? {} : { teamError }),
+    };
   }
 
   /**
@@ -2061,6 +2137,7 @@ export class SessionManager {
   async startBackgroundSession(input: {
     directory: string;
     worktree: boolean;
+    team: boolean;
     prompt: string;
     scope: ChatScope;
     peerId: string;
@@ -2081,6 +2158,9 @@ export class SessionManager {
       composed.setup,
       input.worktree,
     );
+
+    // 后台会话不读 pendingTeam：要求从参数进来；失败不取消会话，由回执说明
+    const teamError = input.team ? await this.enableTeam(created.agent, key) : undefined;
 
     const record: SessionRecord = {
       sessionKey: key,
@@ -2110,7 +2190,11 @@ export class SessionManager {
       : created.worktreeSkipped === undefined
         ? undefined
         : worktreeSkipNotice(created.worktreeSkipped);
-    return notice === undefined ? { sessionId } : { sessionId, worktreeNotice: notice };
+    return {
+      sessionId,
+      ...(notice === undefined ? {} : { worktreeNotice: notice }),
+      ...(teamError === undefined ? {} : { teamError }),
+    };
   }
 
   /**

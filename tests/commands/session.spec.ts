@@ -30,8 +30,10 @@ function makeManager() {
     chatWorkspaceInfo: vi.fn(async () => ({ title: 'repo', path: 'D:\\repo', missing: false })),
     workspaceRegistryAvailable: vi.fn(() => true),
     worktreesAvailable: vi.fn(() => true),
+    teamsAvailable: vi.fn(() => true),
     readOnlySandbox: vi.fn(() => false),
     armWorktree: vi.fn(),
+    armTeam: vi.fn(),
     resolveWorkspace: vi.fn(() => ({ ok: true as const, title: 'repo', path: 'D:\\repo', isNew: false })),
     changeChatWorkspace: vi.fn(async () => ({ ok: true as const, title: 'repo', path: 'D:\\repo', isNew: false })),
     // 默认没有当前会话：既有用例不该被确认门禁挡住
@@ -197,82 +199,89 @@ describe('/new（不带参数）', () => {
 
 describe('parseNewArgs', () => {
   it('一段裸文字是提示词，多段要引号或 --', () => {
-    expect(parseNewArgs('修一下')).toEqual({ arg: '', worktree: false, background: false, prompt: '修一下', error: undefined });
-    expect(parseNewArgs('"看下 这个 bug"')).toEqual({ arg: '', worktree: false, background: false, prompt: '看下 这个 bug', error: undefined });
-    expect(parseNewArgs('看下这个 bug')).toEqual({ arg: '', worktree: false, background: false, prompt: undefined, error: '⚠️ 提示词只能一段：有空格就用引号包起来，或写到 -- 之后 · 用法: /help new' });
-    expect(parseNewArgs('')).toEqual({ arg: '', worktree: false, background: false, prompt: undefined, error: undefined });
+    expect(parseNewArgs('修一下')).toEqual({ arg: '', worktree: false, team: false, background: false, prompt: '修一下', error: undefined });
+    expect(parseNewArgs('"看下 这个 bug"')).toEqual({ arg: '', worktree: false, team: false, background: false, prompt: '看下 这个 bug', error: undefined });
+    expect(parseNewArgs('看下这个 bug')).toEqual({ arg: '', worktree: false, team: false, background: false, prompt: undefined, error: '⚠️ 提示词只能一段：有空格就用引号包起来，或写到 -- 之后 · 用法: /help new' });
+    expect(parseNewArgs('')).toEqual({ arg: '', worktree: false, team: false, background: false, prompt: undefined, error: undefined });
   });
 
   it('--dir 与 -d 取后一个 token 作工作区，其余是提示词', () => {
-    expect(parseNewArgs('--dir repo')).toEqual({ arg: 'repo', worktree: false, background: false, prompt: undefined, error: undefined });
-    expect(parseNewArgs('-d repo 修一下')).toEqual({ arg: 'repo', worktree: false, background: false, prompt: '修一下', error: undefined });
-    expect(parseNewArgs('-w --dir repo 修一下')).toEqual({ arg: 'repo', worktree: true, background: false, prompt: '修一下', error: undefined });
-    expect(parseNewArgs('--worktree')).toEqual({ arg: '', worktree: true, background: false, prompt: undefined, error: undefined });
+    expect(parseNewArgs('--dir repo')).toEqual({ arg: 'repo', worktree: false, team: false, background: false, prompt: undefined, error: undefined });
+    expect(parseNewArgs('-d repo 修一下')).toEqual({ arg: 'repo', worktree: false, team: false, background: false, prompt: '修一下', error: undefined });
+    expect(parseNewArgs('-w --dir repo 修一下')).toEqual({ arg: 'repo', worktree: true, team: false, background: false, prompt: '修一下', error: undefined });
+    expect(parseNewArgs('--worktree')).toEqual({ arg: '', worktree: true, team: false, background: false, prompt: undefined, error: undefined });
+  });
+
+  it('--team 与 -t 交出团队意图', () => {
+    expect(parseNewArgs('--team')).toEqual({ arg: '', worktree: false, team: true, background: false, prompt: undefined, error: undefined });
+    expect(parseNewArgs('-t 修一下')).toEqual({ arg: '', worktree: false, team: true, background: false, prompt: '修一下', error: undefined });
+    expect(parseNewArgs('-tb')).toEqual({ arg: '', worktree: false, team: true, background: true, prompt: undefined, error: undefined });
+    expect(parseNewArgs('--team -w')).toEqual({ arg: '', worktree: true, team: true, background: false, prompt: undefined, error: undefined });
   });
 
   it('成对引号里的空格算同一个 token', () => {
-    expect(parseNewArgs('--dir "D:\\My Repo"')).toEqual({ arg: 'D:\\My Repo', worktree: false, background: false, prompt: undefined, error: undefined });
-    expect(parseNewArgs("-d 'D:\\My Repo' -w")).toEqual({ arg: 'D:\\My Repo', worktree: true, background: false, prompt: undefined, error: undefined });
+    expect(parseNewArgs('--dir "D:\\My Repo"')).toEqual({ arg: 'D:\\My Repo', worktree: false, team: false, background: false, prompt: undefined, error: undefined });
+    expect(parseNewArgs("-d 'D:\\My Repo' -w")).toEqual({ arg: 'D:\\My Repo', worktree: true, team: false, background: false, prompt: undefined, error: undefined });
   });
 
   it('参数写在提示词前后都生效，但提示词只收一段', () => {
-    expect(parseNewArgs('--dir repo -w 修一下')).toEqual({ arg: 'repo', worktree: true, background: false, prompt: '修一下', error: undefined });
-    expect(parseNewArgs('修一下 -w')).toEqual({ arg: '', worktree: true, background: false, prompt: '修一下', error: undefined });
-    expect(parseNewArgs('修一下 --dir repo 再跑测试')).toEqual({ arg: '', worktree: false, background: false, prompt: undefined, error: '⚠️ 提示词只能一段：有空格就用引号包起来，或写到 -- 之后 · 用法: /help new' });
+    expect(parseNewArgs('--dir repo -w 修一下')).toEqual({ arg: 'repo', worktree: true, team: false, background: false, prompt: '修一下', error: undefined });
+    expect(parseNewArgs('修一下 -w')).toEqual({ arg: '', worktree: true, team: false, background: false, prompt: '修一下', error: undefined });
+    expect(parseNewArgs('修一下 --dir repo 再跑测试')).toEqual({ arg: '', worktree: false, team: false, background: false, prompt: undefined, error: '⚠️ 提示词只能一段：有空格就用引号包起来，或写到 -- 之后 · 用法: /help new' });
   });
 
   it('提示词带空格时用引号包住，或写到 -- 之后', () => {
-    expect(parseNewArgs('"看下 -w 这个参数"')).toEqual({ arg: '', worktree: false, background: false, prompt: '看下 -w 这个参数', error: undefined });
-    expect(parseNewArgs('-- 看下 -w 这个参数')).toEqual({ arg: '', worktree: false, background: false, prompt: '看下 -w 这个参数', error: undefined });
-    expect(parseNewArgs('-d "-w"')).toEqual({ arg: '-w', worktree: false, background: false, prompt: undefined, error: undefined });
+    expect(parseNewArgs('"看下 -w 这个参数"')).toEqual({ arg: '', worktree: false, team: false, background: false, prompt: '看下 -w 这个参数', error: undefined });
+    expect(parseNewArgs('-- 看下 -w 这个参数')).toEqual({ arg: '', worktree: false, team: false, background: false, prompt: '看下 -w 这个参数', error: undefined });
+    expect(parseNewArgs('-d "-w"')).toEqual({ arg: '-w', worktree: false, team: false, background: false, prompt: undefined, error: undefined });
   });
 
   it('--dir=值 与 --dir 值等价', () => {
-    expect(parseNewArgs('--dir=repo 修一下')).toEqual({ arg: 'repo', worktree: false, background: false, prompt: '修一下', error: undefined });
-    expect(parseNewArgs('--dir="D:\\My Repo"')).toEqual({ arg: 'D:\\My Repo', worktree: false, background: false, prompt: undefined, error: undefined });
-    expect(parseNewArgs('--dir=')).toEqual({ arg: '', worktree: false, background: false, prompt: undefined, error: '⚠️ --dir 后要跟工作区 · 用法: /help new' });
+    expect(parseNewArgs('--dir=repo 修一下')).toEqual({ arg: 'repo', worktree: false, team: false, background: false, prompt: '修一下', error: undefined });
+    expect(parseNewArgs('--dir="D:\\My Repo"')).toEqual({ arg: 'D:\\My Repo', worktree: false, team: false, background: false, prompt: undefined, error: undefined });
+    expect(parseNewArgs('--dir=')).toEqual({ arg: '', worktree: false, team: false, background: false, prompt: undefined, error: '⚠️ --dir 后要跟工作区 · 用法: /help new' });
   });
 
   it('-- 之后一律当提示词', () => {
-    expect(parseNewArgs('--dir repo -- 看下 --prompt 这个参数')).toEqual({ arg: 'repo', worktree: false, background: false, prompt: '看下 --prompt 这个参数', error: undefined });
-    expect(parseNewArgs('修一下 -- 再跑测试')).toEqual({ arg: '', worktree: false, background: false, prompt: undefined, error: '⚠️ 提示词只能一段：有空格就用引号包起来，或写到 -- 之后 · 用法: /help new' });
-    expect(parseNewArgs('--')).toEqual({ arg: '', worktree: false, background: false, prompt: undefined, error: undefined });
+    expect(parseNewArgs('--dir repo -- 看下 --prompt 这个参数')).toEqual({ arg: 'repo', worktree: false, team: false, background: false, prompt: '看下 --prompt 这个参数', error: undefined });
+    expect(parseNewArgs('修一下 -- 再跑测试')).toEqual({ arg: '', worktree: false, team: false, background: false, prompt: undefined, error: '⚠️ 提示词只能一段：有空格就用引号包起来，或写到 -- 之后 · 用法: /help new' });
+    expect(parseNewArgs('--')).toEqual({ arg: '', worktree: false, team: false, background: false, prompt: undefined, error: undefined });
   });
 
   it('不认识的参数与已删除的 --prompt 都回未知参数', () => {
-    expect(parseNewArgs('--prompt 修一下')).toEqual({ arg: '', worktree: false, background: false, prompt: undefined, error: '⚠️ 未知参数: --prompt · 用法: /help new' });
-    expect(parseNewArgs('-p 修一下')).toEqual({ arg: '', worktree: false, background: false, prompt: undefined, error: '⚠️ 未知参数: -p · 用法: /help new' });
-    expect(parseNewArgs('--nope 修一下')).toEqual({ arg: '', worktree: false, background: false, prompt: undefined, error: '⚠️ 未知参数: --nope · 用法: /help new' });
+    expect(parseNewArgs('--prompt 修一下')).toEqual({ arg: '', worktree: false, team: false, background: false, prompt: undefined, error: '⚠️ 未知参数: --prompt · 用法: /help new' });
+    expect(parseNewArgs('-p 修一下')).toEqual({ arg: '', worktree: false, team: false, background: false, prompt: undefined, error: '⚠️ 未知参数: -p · 用法: /help new' });
+    expect(parseNewArgs('--nope 修一下')).toEqual({ arg: '', worktree: false, team: false, background: false, prompt: undefined, error: '⚠️ 未知参数: --nope · 用法: /help new' });
   });
 
   it('引号没闭合只回错误', () => {
-    expect(parseNewArgs('--dir "D:\\My Repo')).toEqual({ arg: '', worktree: false, background: false, prompt: undefined, error: '⚠️ 引号没有闭合 · 用法: /help new' });
+    expect(parseNewArgs('--dir "D:\\My Repo')).toEqual({ arg: '', worktree: false, team: false, background: false, prompt: undefined, error: '⚠️ 引号没有闭合 · 用法: /help new' });
   });
 
   it('--dir 缺值时只回参数错', () => {
-    expect(parseNewArgs('--dir')).toEqual({ arg: '', worktree: false, background: false, prompt: undefined, error: '⚠️ --dir 后要跟工作区 · 用法: /help new' });
+    expect(parseNewArgs('--dir')).toEqual({ arg: '', worktree: false, team: false, background: false, prompt: undefined, error: '⚠️ --dir 后要跟工作区 · 用法: /help new' });
     // 解析失败就不给部分结果：写错时开关一律按未写处理
-    expect(parseNewArgs('-w -d')).toEqual({ arg: '', worktree: false, background: false, prompt: undefined, error: '⚠️ --dir 后要跟工作区 · 用法: /help new' });
-    expect(parseNewArgs('--dir -w')).toEqual({ arg: '', worktree: false, background: false, prompt: undefined, error: '⚠️ --dir 后要跟工作区 · 用法: /help new' });
-    expect(parseNewArgs('--dir ""')).toEqual({ arg: '', worktree: false, background: false, prompt: undefined, error: '⚠️ --dir 后要跟工作区 · 用法: /help new' });
+    expect(parseNewArgs('-w -d')).toEqual({ arg: '', worktree: false, team: false, background: false, prompt: undefined, error: '⚠️ --dir 后要跟工作区 · 用法: /help new' });
+    expect(parseNewArgs('--dir -w')).toEqual({ arg: '', worktree: false, team: false, background: false, prompt: undefined, error: '⚠️ --dir 后要跟工作区 · 用法: /help new' });
+    expect(parseNewArgs('--dir ""')).toEqual({ arg: '', worktree: false, team: false, background: false, prompt: undefined, error: '⚠️ --dir 后要跟工作区 · 用法: /help new' });
   });
 
   it('--background / -b 是后台开关，不参与提示词', () => {
-    expect(parseNewArgs('-b 修一下')).toEqual({ arg: '', worktree: false, background: true, prompt: '修一下', error: undefined });
-    expect(parseNewArgs('--background --dir repo 修一下')).toEqual({ arg: 'repo', worktree: false, background: true, prompt: '修一下', error: undefined });
-    expect(parseNewArgs('-b -w')).toEqual({ arg: '', worktree: true, background: true, prompt: undefined, error: undefined });
+    expect(parseNewArgs('-b 修一下')).toEqual({ arg: '', worktree: false, team: false, background: true, prompt: '修一下', error: undefined });
+    expect(parseNewArgs('--background --dir repo 修一下')).toEqual({ arg: 'repo', worktree: false, team: false, background: true, prompt: '修一下', error: undefined });
+    expect(parseNewArgs('-b -w')).toEqual({ arg: '', worktree: true, team: false, background: true, prompt: undefined, error: undefined });
   });
 
   it('开关可以合写：-wb / -bw 等于 -w -b', () => {
-    expect(parseNewArgs('-wb')).toEqual({ arg: '', worktree: true, background: true, prompt: undefined, error: undefined });
-    expect(parseNewArgs('-bw 修一下')).toEqual({ arg: '', worktree: true, background: true, prompt: '修一下', error: undefined });
-    expect(parseNewArgs('-wbd repo 修一下')).toEqual({ arg: 'repo', worktree: true, background: true, prompt: '修一下', error: undefined });
-    expect(parseNewArgs('-dw repo')).toEqual({ arg: '', worktree: false, background: false, prompt: undefined, error: '⚠️ 未知参数: -dw · 用法: /help new' });
+    expect(parseNewArgs('-wb')).toEqual({ arg: '', worktree: true, team: false, background: true, prompt: undefined, error: undefined });
+    expect(parseNewArgs('-bw 修一下')).toEqual({ arg: '', worktree: true, team: false, background: true, prompt: '修一下', error: undefined });
+    expect(parseNewArgs('-wbd repo 修一下')).toEqual({ arg: 'repo', worktree: true, team: false, background: true, prompt: '修一下', error: undefined });
+    expect(parseNewArgs('-dw repo')).toEqual({ arg: '', worktree: false, team: false, background: false, prompt: undefined, error: '⚠️ 未知参数: -dw · 用法: /help new' });
   });
 
   it('--prompt / -p 按未知参数回绝', () => {
-    expect(parseNewArgs('--prompt 修一下')).toEqual({ arg: '', worktree: false, background: false, prompt: undefined, error: '⚠️ 未知参数: --prompt · 用法: /help new' });
-    expect(parseNewArgs('-p 修一下')).toEqual({ arg: '', worktree: false, background: false, prompt: undefined, error: '⚠️ 未知参数: -p · 用法: /help new' });
+    expect(parseNewArgs('--prompt 修一下')).toEqual({ arg: '', worktree: false, team: false, background: false, prompt: undefined, error: '⚠️ 未知参数: --prompt · 用法: /help new' });
+    expect(parseNewArgs('-p 修一下')).toEqual({ arg: '', worktree: false, team: false, background: false, prompt: undefined, error: '⚠️ 未知参数: -p · 用法: /help new' });
   });
 });
 
@@ -404,6 +413,66 @@ describe('/new --dir', () => {
       logger,
     });
     expect(noService.usage).not.toContain('--worktree');
+  });
+});
+
+describe('/new --team', () => {
+  it('--team 交出意图，回执标团队模式', async () => {
+    const manager = makeManager();
+
+    const text = await run(manager, '--team');
+
+    expect(text).toBe('✅ 已开启新会话（团队模式）');
+    expect(manager.armTeam).toHaveBeenCalledTimes(1);
+    expect(manager.armWorktree).not.toHaveBeenCalled();
+    expect(manager.remove).toHaveBeenCalledWith();
+  });
+
+  it('-t 是 --team 的别名', async () => {
+    const manager = makeManager();
+
+    expect(await run(manager, '-t')).toBe('✅ 已开启新会话（团队模式）');
+    expect(manager.armTeam).toHaveBeenCalledTimes(1);
+  });
+
+  it('带提示词也标团队模式', async () => {
+    const manager = makeManager();
+
+    expect(await run(manager, '--team 修一下')).toBe('✅ 已开启新会话（团队模式）');
+    expect(manager.promptNewSession).toHaveBeenCalledWith('c2c', 'user1', 'user1', '修一下', { scope: 'c2c', targetId: 'user1' });
+  });
+
+  it('团队没开成：会话照常，另起一行说原因', async () => {
+    const manager = {
+      ...makeManager(),
+      promptNewSession: vi.fn(async () => ({ sessionId: 's1', teamError: 'flush failed' })),
+    };
+
+    const text = await run(manager, '--team 修一下');
+
+    expect(text).toBe('✅ 已开启新会话\n⚠️ 团队模式没开: flush failed');
+  });
+
+  it('没有 agentTeams 服务：按未知参数处理，不动会话', async () => {
+    const manager = { ...makeManager(), teamsAvailable: vi.fn(() => false) };
+
+    const text = await run(manager, '--team');
+
+    expect(text).toBe('⚠️ 未知参数: --team · 用法: /help new');
+    expect(manager.remove).not.toHaveBeenCalled();
+    expect(manager.armTeam).not.toHaveBeenCalled();
+  });
+
+  it('用法页只在有 agentTeams 服务时列 --team', () => {
+    const withService = newCommand({ manager: makeManager() as unknown as SessionManager, config, logger });
+    expect(withService.usage).toContain('`/new --team`');
+
+    const noService = newCommand({
+      manager: { ...makeManager(), teamsAvailable: vi.fn(() => false) } as unknown as SessionManager,
+      config,
+      logger,
+    });
+    expect(noService.usage).not.toContain('--team');
   });
 });
 
@@ -655,6 +724,7 @@ describe('/new --background', () => {
     expect(manager.startBackgroundSession).toHaveBeenCalledWith({
       directory: 'D:\\repo',
       worktree: false,
+      team: false,
       prompt: '修一下',
       scope: 'c2c',
       peerId: 'user1',
@@ -668,6 +738,16 @@ describe('/new --background', () => {
     expect(manager.promptNewSession).not.toHaveBeenCalled();
     expect(text.split('\n')[0]).toBe('✅ 已在后台开启会话 `#abcdef12`');
     expect(text).not.toContain('/sessions resume');
+  });
+
+  it('--team 在后台也开团队，且不放意图', async () => {
+    const manager = makeManager();
+
+    const text = await run(manager, '-bt 修一下');
+
+    expect(manager.startBackgroundSession).toHaveBeenCalledWith(expect.objectContaining({ team: true }));
+    expect(manager.armTeam).not.toHaveBeenCalled();
+    expect(text).toBe('✅ 已在后台开启会话 `#abcdef12`（团队模式）');
   });
 
   it('--dir 指定目录时在那一处开会话，工作区并进首行', async () => {

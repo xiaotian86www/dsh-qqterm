@@ -279,6 +279,7 @@ Workspaces are the host's `workspaceRegistry` concept; dsh-qqterm keeps no direc
 - Matching order: workspace title → directory name (case-insensitive, unique prefix) → absolute path. Without `workspaceRegistry` only absolute paths are accepted.
 - The title defaults to the last path segment and can be changed in the web sidebar; a manually edited title is never overwritten automatically.
 - Worktrees: `/new --worktree` makes the next message create a tree from the current directory's HEAD first, then opens the session in that tree, on branch `dsh-<short session id>`. Uncommitted changes do not travel into the tree. If HEAD cannot be read or tree creation fails, no session is created that round; the reply gives the reason and next step, the intent is kept, and resending retries. A directory that is not a Git repository opens the session in place with a notice; a read-only sandbox is refused at `/new` on the spot. When a session is archived, the host removes a clean worktree and keeps the branch, and keeps the tree if there are uncommitted changes.
+- Team mode: `/new --team` opens the session created by the next message with agent team collaboration enabled — the same switch as "Enable agent team collaboration" in the Web UI; `/status` adds a "Team" line, and while no session exists a pending intent shows as "Next message: team mode". When the team service is absent, `--team` is treated as an unknown argument.
 - Run directory and workspace are two different things: a runtime `cd` only changes the run directory, while `/get` and `/ls` keep using the directory the dsh process was started in; workspace grouping, the workspace line in `/status`, and the landing point of the next `/new` still use the session's `header.cwd` at creation. For a worktree session, the workspace is the main repository root and the tree is only the run directory.
 
 ### Models, presets, and reasoning effort
@@ -310,7 +311,7 @@ Workspaces are the host's `workspaceRegistry` concept; dsh-qqterm keeps no direc
 
 | Command | Description |
 |---|---|
-| `/new` | New session; `--dir` (`-d`) picks the workspace, `--worktree` (`-w`) makes the first message create a worktree first, `--background` (`-b`) opens another session in the background without touching the current one; the remaining text is sent immediately as the prompt; replying to a message carries its quote along and a quote alone opens the session too; the old session keeps running |
+| `/new` | New session; `--dir` (`-d`) picks the workspace, `--worktree` (`-w`) makes the first message create a worktree first, `--team` (`-t`) opens the new session with team mode on, `--background` (`-b`) opens another session in the background without touching the current one; the remaining text is sent immediately as the prompt; replying to a message carries its quote along and a quote alone opens the session too; the old session keeps running |
 | `/clear` (alias `/reset`) | Stop the current session; the next message opens a new one in the original workspace; `/clear all` stops every acquired session; a 5-minute confirmation card comes first |
 | `/compact` | Compact session history (summaries replace older records); the reply includes the host command's result |
 | `/goal` | Set or view the current session's long-term goal; `/goal <goal>` sets it, `edit` / `pause` / `resume` / `clear` manage it |
@@ -347,6 +348,7 @@ Notes:
 | `/new --dir <workspace>` | Open the new session in the given workspace (`-d`, one word only) |
 | `/new --background <prompt>` | Open another session in the background without touching the current session or workspace (`-b`, prompt required) |
 | `/new --worktree [prompt]` | Create a worktree before the next message (`-w`, see "Workspaces") |
+| `/new --team [prompt]` | The session created by the next message has team mode on (`-t`); treated as an unknown argument when the team service is absent |
 
 - Arguments and prompt may come in any order; the prompt is exactly one argument - quote it when it contains spaces, or put it after `--` (verbatim, never re-split or re-joined).
 - `-w` and `-b` combine as `-wb`; when short flags are clustered, the value-taking `-d` goes last (`-wbd <workspace>`).

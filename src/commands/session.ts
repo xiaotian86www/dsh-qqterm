@@ -60,15 +60,23 @@ const PROMPT_FORMAT = '⚠️ 提示词只能一段：有空格就用引号包�
 /**
  * `/new` 的开启回执：带工作区时并进首行，不再另起一行；后台保留短 id。
  */
-function newSessionHead(workspace: string | undefined, backgroundShort?: string): string {
-  if (backgroundShort !== undefined) {
-    return workspace === undefined
+function newSessionHead(workspace: string | undefined, backgroundShort?: string, team?: boolean): string {
+  const head = backgroundShort !== undefined
+    ? workspace === undefined
       ? `✅ 已在后台开启会话 \`#${backgroundShort}\``
-      : `✅ 已在工作区 ${workspace} 开启后台会话 \`#${backgroundShort}\``;
-  }
-  return workspace === undefined
-    ? '✅ 已开启新会话'
-    : `✅ 已在工作区 ${workspace} 开启新会话`;
+      : `✅ 已在工作区 ${workspace} 开启后台会话 \`#${backgroundShort}\``
+    : workspace === undefined
+      ? '✅ 已开启新会话'
+      : `✅ 已在工作区 ${workspace} 开启新会话`;
+  return team ? `${head}（团队模式）` : head;
+}
+
+/**
+ * 团队模式没开成：会话照常回执，另起一行只说事实——不回滚会话，也不把「开成了」
+ * 说成成功。
+ */
+function withTeamFailure(head: string, teamError: string | undefined): string {
+  return teamError === undefined ? head : `${head}\n⚠️ 团队模式没开: ${teamError}`;
 }
 
 
@@ -87,6 +95,7 @@ const NEW_SPEC: CommandSpec = {
   options: [
     { name: 'dir', alias: 'd', kind: 'value', missing: DIR_MISSING },
     { name: 'worktree', alias: 'w' },
+    { name: 'team', alias: 't' },
     { name: 'background', alias: 'b' },
   ],
 };
@@ -94,6 +103,7 @@ const NEW_SPEC: CommandSpec = {
 export function parseNewArgs(raw: string): {
   arg: string;
   worktree: boolean;
+  team: boolean;
   background: boolean;
   prompt: string | undefined;
   error: string | undefined;
@@ -103,14 +113,15 @@ export function parseNewArgs(raw: string): {
     parsed = parseArgs(raw, NEW_SPEC);
   } catch (error) {
     if (error instanceof ArgError) {
-      return { arg: '', worktree: false, background: false, prompt: undefined, error: error.message };
+      return { arg: '', worktree: false, team: false, background: false, prompt: undefined, error: error.message };
     }
     throw error;
   }
   const worktree = optionValue<boolean>(parsed, 'worktree') ?? false;
+  const team = optionValue<boolean>(parsed, 'team') ?? false;
   const background = optionValue<boolean>(parsed, 'background') ?? false;
   const arg = optionValue<string>(parsed, 'dir') ?? '';
-  const failed = (error: string) => ({ arg: '', worktree, background, prompt: undefined, error });
+  const failed = (error: string) => ({ arg: '', worktree, team, background, prompt: undefined, error });
 
   // 提示词只收一段：`--` 之后整段原样；没有 `--` 时只能是切出来的那一个词
   if (parsed.rest !== undefined) {
@@ -118,6 +129,7 @@ export function parseNewArgs(raw: string): {
     return {
       arg,
       worktree,
+      team,
       background,
       prompt: parsed.rest === '' ? undefined : parsed.rest,
       error: undefined,
@@ -127,6 +139,7 @@ export function parseNewArgs(raw: string): {
   return {
     arg,
     worktree,
+    team,
     background,
     prompt: parsed.words[0],
     error: undefined,
@@ -166,22 +179,28 @@ export function newCommand({ manager, config, logger }: CommandDeps): SlashComma
         '回复一条消息再发：被引用的内容会一起作为新会话首条消息',
         named ? '`/new --dir <工作区>` 在指定工作区新建（`-d`）' : '`/new --dir <路径>` 在指定目录新建（`-d`）',
         ...(manager.worktreesAvailable() ? ['`/new --worktree` 新会话开在独立工作树（`-w`）'] : []),
+        ...(manager.teamsAvailable() ? ['`/new --team` 新会话开团队模式（`-t`）'] : []),
         '`/new --background <提示词>` 后台另开一条，不切走当前会话（`-b`）',
         ...(named ? ['工作区认标题、目录名或绝对路径'] : []),
-        '`-w` 与 `-b` 可合写为 `-wb`，带值的 `-d` 只能收尾（`-wbd <工作区>`）',
+        '`-t`、`-w`、`-b` 可合写（如 `-tb`），带值的 `-d` 只能收尾（`-wbd <工作区>`）',
         '`--` 之后不再解析参数：提示词里的 `-w` 这样原样带过去',
       ].join('\n');
     },
     handler: async (cmdCtx) => {
       const { scope, peerId } = getScopePeer(cmdCtx);
       const senderId = cmdCtx.message.senderId;
-      const { arg, worktree, background, prompt, error } = parseNewArgs((cmdCtx.command?.raw ?? '').trim());
+      const { arg, worktree, team, background, prompt, error } = parseNewArgs((cmdCtx.command?.raw ?? '').trim());
 
       if (error !== undefined) return error;
 
       // 没有 worktrees 服务时按未知参数处理：不解释部署差异（同 /preset 缺服务）
       if (worktree && !manager.worktreesAvailable()) {
         return '⚠️ 未知参数: --worktree · 用法: /help new';
+      }
+
+      // 没有 agentTeams 服务时同样按未知参数处理（团队模式由宿主服务落日志）
+      if (team && !manager.teamsAvailable()) {
+        return '⚠️ 未知参数: --team · 用法: /help new';
       }
 
       // 带工作区参数 = 换 agent 能读写的目录：只允许唯一绑定用户
@@ -226,11 +245,12 @@ export function newCommand({ manager, config, logger }: CommandDeps): SlashComma
           ? prompt!
           : buildPromptBody({ quote: quote.quote, quoteFiles: quote.files, text: prompt ?? '' });
 
-        let started: { sessionId: string; worktreeNotice?: string };
+        let started: { sessionId: string; worktreeNotice?: string; teamError?: string };
         try {
           started = await manager.startBackgroundSession({
             directory,
             worktree,
+            team,
             prompt: body,
             scope,
             peerId,
@@ -244,11 +264,15 @@ export function newCommand({ manager, config, logger }: CommandDeps): SlashComma
         }
         const short = shortSessionId(started.sessionId);
         if (started.worktreeNotice !== undefined) {
-          return workspaceName === undefined
+          const head = workspaceName === undefined
             ? started.worktreeNotice
             : worktreeNoticeWithWorkspace(started.worktreeNotice, workspaceName);
+          return withTeamFailure(head, started.teamError);
         }
-        return newSessionHead(workspaceLabel, short);
+        return withTeamFailure(
+          newSessionHead(workspaceLabel, short, team && started.teamError === undefined),
+          started.teamError,
+        );
       }
 
       // 先解析目标再动会话：路径写错不该把当前会话弄丢
@@ -271,6 +295,7 @@ export function newCommand({ manager, config, logger }: CommandDeps): SlashComma
           : `\`${changed.path}\``;
       }
       if (worktree) manager.armWorktree();
+      if (team) manager.armTeam();
 
       // 带提示词或引用：立刻开会话，把内容作为第一条消息发出（--worktree 的树也在这条上建）
       if (prompt !== undefined || quote !== undefined) {
@@ -278,31 +303,30 @@ export function newCommand({ manager, config, logger }: CommandDeps): SlashComma
           ...(quote === undefined ? {} : { quote: quote.quote, quoteFiles: quote.files }),
           text: prompt ?? '',
         });
-        let notice: string | undefined;
+        let started: { sessionId: string; worktreeNotice?: string; teamError?: string };
         try {
-          const started = await manager.promptNewSession(
+          started = await manager.promptNewSession(
             scope,
             peerId,
             senderId,
             body,
             { scope, targetId: peerId },
           );
-          notice = started.worktreeNotice;
         } catch (err) {
           if (err instanceof WorktreeError) return worktreeErrorText(err);
           const message = errorMessage(err);
           return `❌ 没能开启会话: ${message}`;
         }
-        if (notice !== undefined) {
-          return workspaceName === undefined
-            ? notice
-            : worktreeNoticeWithWorkspace(notice, workspaceName);
-        }
-        return newSessionHead(workspaceLabel);
+        const head = started.worktreeNotice === undefined
+          ? newSessionHead(workspaceLabel, undefined, team && started.teamError === undefined)
+          : workspaceName === undefined
+            ? started.worktreeNotice
+            : worktreeNoticeWithWorkspace(started.worktreeNotice, workspaceName);
+        return withTeamFailure(head, started.teamError);
       }
 
       // 树要到下一条消息才建，这里不预告：建好那一刻由建树回执交代
-      return newSessionHead(workspaceLabel);
+      return newSessionHead(workspaceLabel, undefined, team);
     },
   };
 }
