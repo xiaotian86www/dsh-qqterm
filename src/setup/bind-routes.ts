@@ -20,7 +20,7 @@ import {
   type SetupCredentials,
 } from './persist.ts';
 import { getProfileDir } from '../shared/index.ts';
-import { AccessControlSchema } from '../config.ts';
+import { AccessControlSchema, PanelConfigSchema } from '../config.ts';
 import {
   BIND_CONFIG_PATH,
   BIND_MANUAL_PATH,
@@ -28,6 +28,7 @@ import {
   BIND_STATE_PATH,
   BIND_UNBIND_PATH,
   type BindStateWire,
+  type PanelCommandWire,
 } from '../shared/bind-protocol.ts';
 import { errorMessage } from '../shared/utils.ts';
 
@@ -87,18 +88,24 @@ export interface BindRoutesOptions {
    * 配置写入处理（默认：最小合并写入 profile patch）。
    */
   onUpdateConfig?: (config: Record<string, unknown>) => boolean;
+  /**
+   * 指令面板设置页的命令目录（请求时现查；网关未就绪时返回空数组）。
+   */
+  panelCommands?: () => PanelCommandWire[];
 }
 
 /** 可经 UI 编辑的配置键（白名单：只收用户必要的字段，其余走 patch/env） */
 const EDITABLE_CONFIG_KEYS = new Set([
   'showToolResults',
   'access',
+  'panel',
 ]);
 
 /** 白名单键的子 Schema（服务端校验：客户端校验仅为体验，安全边界在宿主） */
 const EDITABLE_CONFIG_SCHEMAS: Record<string, (value: unknown) => unknown> = {
   showToolResults: (v) => booleanSchema(v, 'showToolResults'),
   access: (v) => AccessControlSchema(v as never),
+  panel: (v) => PanelConfigSchema(v as never),
 };
 
 function booleanSchema(value: unknown, name: string): boolean {
@@ -372,7 +379,8 @@ async function handleConfig(req: IncomingMessage, res: ServerResponse, options: 
     const current = options.currentConfig?.() ?? {};
     // appSecret 永不回传；其余（工作目录已跟随会话，不再是配置项）原样回显
     const { appSecret: _s, ...safe } = current;
-    sendJson(res, 200, { config: safe });
+    // panelCommands 供设置页逐条渲染「是否进入指令面板」开关
+    sendJson(res, 200, { config: safe, panelCommands: options.panelCommands?.() ?? [] });
     return;
   }
 

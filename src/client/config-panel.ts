@@ -15,17 +15,25 @@
  * 超时与性能调优类字段走 profile patch / 环境变量。
  */
 import { createElement, useCallback, useEffect, useState, type ChangeEvent, type FormEvent, type ReactElement, type ReactNode } from 'react';
-import { BIND_CONFIG_PATH } from '../shared/bind-protocol.ts';
+import { BIND_CONFIG_PATH, PANEL_MAX_ITEMS, type PanelCommandWire } from '../shared/bind-protocol.ts';
 
 /** 访问控制配置（与 src/config.ts 的 AccessControlConfig 对应的局部投影） */
 interface AccessControlWire {
   owner: string;
 }
 
+/** 指令面板配置（与 src/config.ts 的 PanelConfig 对应的局部投影） */
+interface PanelConfigWire {
+  enabled?: boolean;
+  /** [] = 不展示任何命令 */
+  commands?: string[];
+}
+
 /** GET 回显的生效配置（appSecret 已剔除） */
 type ConfigWire = {
   showToolResults?: boolean;
   access?: AccessControlWire;
+  panel?: PanelConfigWire;
 };
 
 /** 样式注入标记（幂等） */
@@ -107,24 +115,24 @@ function useConfigPanelStyles(): void {
 }
 
 /** 开关（官方 Switch 原语结构：aria-checked 驱动视觉态） */
-function Switch({ checked, label, onChange }: {
-  checked: boolean; label: string; onChange: (next: boolean) => void;
+function Switch({ checked, label, onChange, disabled = false }: {
+  checked: boolean; label: string; onChange: (next: boolean) => void; disabled?: boolean;
 }): ReactNode {
   return createElement('button', {
     type: 'button', role: 'switch', 'aria-checked': checked, 'aria-label': label,
-    className: 'qqterm-config-switch',
-    onClick: () => { onChange(!checked); },
+    className: 'qqterm-config-switch', disabled,
+    onClick: () => { if (!disabled) onChange(!checked); },
   }, createElement('span', { className: 'qqterm-config-switch-thumb' }));
 }
 
 /** 开关行（label 左 + Switch 右 + 可选 help） */
-function SwitchRow({ label, help, checked, onChange }: {
-  label: string; help?: string; checked: boolean; onChange: (next: boolean) => void;
+function SwitchRow({ label, help, checked, onChange, disabled = false }: {
+  label: string; help?: string; checked: boolean; onChange: (next: boolean) => void; disabled?: boolean;
 }): ReactNode {
   return createElement('div', { className: 'qqterm-config-field' },
     createElement('div', { className: 'qqterm-config-head' },
       createElement('span', { className: 'qqterm-config-label' }, label),
-      createElement(Switch, { checked, label, onChange }),
+      createElement(Switch, { checked, label, onChange, disabled }),
     ),
     help === undefined ? null : createElement('p', { className: 'qqterm-config-help' }, help),
   );
@@ -162,6 +170,8 @@ export function ConfigPanel(props: { bindPhase?: string } = {}): ReactElement {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // 命令目录由服务端按当前可见命令现取；网关未就绪时为空
+  const [commands, setCommands] = useState<PanelCommandWire[]>([]);
   // 绑定相位变化时重拉配置（扫码落库的白名单等新值）
   const bindPhase = props?.bindPhase;
 
@@ -170,10 +180,11 @@ export function ConfigPanel(props: { bindPhase?: string } = {}): ReactElement {
     void fetch(BIND_CONFIG_PATH, { cache: 'no-store' })
       .then(async (res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const body = (await res.json()) as { config: ConfigWire };
+        const body = (await res.json()) as { config: ConfigWire; panelCommands?: PanelCommandWire[] };
         if (stopped) return;
         setInitial(body.config);
         setForm(body.config);
+        setCommands(body.panelCommands ?? []);
       })
       .catch((err: unknown) => {
         if (!stopped) setLoadError(err instanceof Error ? err.message : String(err));
@@ -228,6 +239,29 @@ export function ConfigPanel(props: { bindPhase?: string } = {}): ReactElement {
 
   const dirty = (Object.keys(form) as Array<keyof ConfigWire>).some((key) => !shallowEqual(form[key], initial[key]));
   const access: AccessControlWire = form.access ?? { owner: '' };
+  const panel: PanelConfigWire = form.panel ?? {};
+  const panelEnabled = panel.enabled ?? true;
+  // 没配置就是一条都不展示；空数组与缺省同义
+  const chosenNames = new Set(panel.commands ?? []);
+  const isShown = (name: string): boolean => chosenNames.has(name);
+  const visibleCount = commands.filter((cmd) => isShown(cmd.name)).length;
+  // 上限按当前可见命令算：暂时不可用的历史选择不占面板位置，也不该挡住用户改可见项
+  const atLimit = visibleCount >= PANEL_MAX_ITEMS;
+  const countHint = commands.length === 0
+    ? null
+    : atLimit
+      ? `已选 ${visibleCount} 项 · 已达 ${PANEL_MAX_ITEMS} 项上限，先取消一条再选其他命令`
+      : `已选 ${visibleCount} 项 · 面板最多 ${PANEL_MAX_ITEMS} 项${visibleCount === 0 ? '，保存后移除面板' : ''}`;
+  const toggleCommand = (name: string, show: boolean): void => {
+    if (show && atLimit) return;
+    const next = new Set(chosenNames);
+    if (show) next.add(name);
+    else next.delete(name);
+    // 按注册顺序写，并保留暂时不可用命令此前的选择
+    const known = commands.map((cmd) => cmd.name).filter((n) => next.has(n));
+    const unknown = [...next].filter((n) => !commands.some((cmd) => cmd.name === n));
+    patch('panel', { ...panel, commands: [...known, ...unknown] });
+  };
 
   return createElement('form', { className: 'qqterm-config-form', onSubmit: submit },
     createElement('div', { className: 'qqterm-config-group-title' }, '服务范围'),
@@ -245,6 +279,32 @@ export function ConfigPanel(props: { bindPhase?: string } = {}): ReactElement {
       help: '在聊天中展示工具调用结果，含失败',
       onChange: (v) => { patch('showToolResults', v); },
     }),
+
+    createElement('div', { className: 'qqterm-config-group-title' }, '指令面板'),
+    createElement(SwitchRow, {
+      label: '展示指令面板', checked: panelEnabled,
+      help: '总开关；关闭并保存后移除本插件创建的指令面板',
+      onChange: (v) => { patch('panel', { ...panel, enabled: v }); },
+    }),
+    panelEnabled
+      ? createElement('div', null,
+          commands.length === 0
+            ? createElement('p', { className: 'qqterm-config-hint' }, '连接机器人后可在这里逐条选择是否进入指令面板。')
+            : createElement('div', null,
+                commands.map((cmd) => createElement('div', { key: cmd.name },
+                  createElement(SwitchRow, {
+                    label: `/${cmd.name}`,
+                    ...(cmd.description === undefined ? {} : { help: cmd.description }),
+                    checked: isShown(cmd.name),
+                    // 选满后只锁住未选中的开关，已选中的仍可取消
+                    disabled: !isShown(cmd.name) && atLimit,
+                    onChange: (v) => { toggleCommand(cmd.name, v); },
+                  }),
+                )),
+              ),
+          countHint === null ? null : createElement('p', { className: 'qqterm-config-hint' }, countHint),
+        )
+      : createElement('p', { className: 'qqterm-config-hint' }, '已关闭：保存后移除本插件创建的指令面板。'),
 
     createElement('div', { className: 'qqterm-config-footer' },
       result !== null
