@@ -15,6 +15,7 @@
  */
 import type { Context } from '@deepseek-ai/cordis';
 import type { Logger } from '../types.ts';
+import type { PanelCommandWire } from '../shared/bind-protocol.ts';
 import { BindingService } from './binding-service.ts';
 import { mountBindRoutes } from './bind-routes.ts';
 import { createBrowserPresenter, createTerminalPresenter, isDesktopHost } from './presenters.ts';
@@ -40,6 +41,8 @@ export interface EnsureCredentialsOptions {
    * 不依赖 HMR 重载也能让状态接口从 saving 收敛到 bound。
    */
   boundAppId?: () => string | null;
+  /** 指令面板设置页的命令目录（网关未就绪时返回空数组） */
+  panelCommands?: () => PanelCommandWire[];
 }
 
 /**
@@ -95,6 +98,7 @@ export async function ensureCredentials(
       return persistCredentials(credentials, logger);
     },
     currentConfig: () => options.config,
+    ...(options.panelCommands === undefined ? {} : { panelCommands: options.panelCommands }),
   });
 
   return service.start();
@@ -106,11 +110,18 @@ export async function ensureCredentials(
  * 在 apply 的 bootstrapGateway 之前调用；写入经同一 persist 路径，
  * 保存后触发 HMR 重载、新 fiber 以新凭据重启网关。
  */
-export function registerBoundCredentialRoutes(ctx: Context, logger: Logger, appId: string, config: Record<string, unknown>): void {
+export function registerBoundCredentialRoutes(
+  ctx: Context,
+  logger: Logger,
+  appId: string,
+  config: Record<string, unknown>,
+  panelCommands?: () => PanelCommandWire[],
+): void {
   mountBindRoutes(ctx, null, logger, {
     boundAppId: () => appId,
     onManualCredentials: (credentials) => persistCredentials(credentials, logger),
     currentConfig: () => config,
+    ...(panelCommands === undefined ? {} : { panelCommands }),
   });
 }
 

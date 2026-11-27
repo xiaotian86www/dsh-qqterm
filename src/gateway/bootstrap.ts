@@ -24,6 +24,7 @@ import { decodeButtonData } from '../features/button-utils.ts';
 import { buildUserAgent, isOwner, shortSessionId } from '../shared/index.ts';
 import { commandLink } from '../shared/inline.ts';
 import type { QQTermConfig } from '../config.ts';
+import type { SlashCommand } from '../commands/types.ts';
 import type { Logger, ReplyTarget } from '../types.ts';
 import { setupMiddlewares } from './middleware-setup.ts';
 import { createGatewaySession } from './gateway-session.ts';
@@ -68,11 +69,18 @@ export function onGatewayConnected(
   bot.on('resumed', () => handler('resumed'));
 }
 
+/** 网关组装期间可注入的回调 */
+export interface BootstrapOptions {
+  /** 命令表就绪（setupMiddlewares 返回后立即调用；设置页据此列出命令） */
+  onCommandsReady?: (commands: readonly SlashCommand[]) => void;
+}
+
 export async function bootstrapGateway(
   ctx: Context,
   agents: DshAgentRegistry,
   config: QQTermConfig,
   logger: Logger,
+  options: BootstrapOptions = {},
 ): Promise<void> {
   const manager = new SessionManager(ctx, agents, config, logger);
   // 被动回复凭证：msg_id 与用量落盘，重启/热重载后仍能走被动回复
@@ -139,6 +147,7 @@ export async function bootstrapGateway(
     // 插件只做 C2C：SDK 的 ReplyTarget 里 group 分支不会走到这里
     sendText: (target, body) => sender.text(target as ReplyTarget, body),
   });
+  options.onCommandsReady?.(commands);
 
   // ── 入站：经过中间件链后的消息交给 dsh agent ──
   bot.on('message', async (mCtx: MiddlewareContext) => {
@@ -270,17 +279,19 @@ export async function bootstrapGateway(
     });
 
     // 指令面板：连上后把当前命令推到私聊全局面板。
-    // 每次连接（含续传）都同步一次，面板被外部删掉也能自愈；失败只记 warn，
-    // 不影响网关（OpenAPI 未开通时这里会拿到 4xx）。
-    if (config.panel.autoSync) {
-      void syncCommandPanels(bot.api, commands, logger)
-        .then((results: PanelSyncResult[]) => {
-          logger.info(`指令面板已同步: ${formatPanelSummary(results)}`);
-        })
-        .catch((err: unknown) => {
-          logger.warn(`指令面板同步失败: ${errorMessage(err)}`);
-        });
-    }
+    // 每次连接（含续传）都同步一次，面板被外部删掉也能自愈；总开关关闭或没选命令时
+    // 删除归属面板，避免旧内容残留。失败只记 warn（OpenAPI 未开通时这里会拿到 4xx）。
+    void syncCommandPanels(bot.api, commands, {
+      enabled: config.panel.enabled,
+      shown: config.panel.commands,
+      logger,
+    })
+      .then((results: PanelSyncResult[]) => {
+        logger.info(`指令面板已同步: ${formatPanelSummary(results)}`);
+      })
+      .catch((err: unknown) => {
+        logger.warn(`指令面板同步失败: ${errorMessage(err)}`);
+      });
 
     // 自定义菜单：单聊窗口底部的固定入口（四个按钮 + 权限 / 思考两个子菜单）
     if (config.menu.autoSync) {

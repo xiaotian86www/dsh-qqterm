@@ -22,6 +22,16 @@ export const BIND_UNBIND_PATH = '/qqterm/bind/unbind';
 /** 配置读写（设置面板表单） */
 export const BIND_CONFIG_PATH = '/qqterm/config';
 
+/** 单个 QQ 指令面板最多能放的命令数（平台限制，服务端截断与设置页勾选共用） */
+export const PANEL_MAX_ITEMS = 20;
+
+/** 指令面板设置页的命令目录项（服务端按注册顺序现取可见命令） */
+export interface PanelCommandWire {
+  /** 命令主名，不带 `/` */
+  name: string;
+  description?: string;
+}
+
 /** 线上协议（HTTP 路由序列化形态） */
 export type BindStateWire =
   | { phase: 'starting' }

@@ -12,6 +12,9 @@ import type { DshAgentRegistry } from './session/index.ts';
 import { getProfileDir, outsideHmrTransaction, resolveEnv } from './shared/index.ts';
 import { ensureCredentials, persistCredentialsToProfile, registerBoundCredentialRoutes } from './setup/index.ts';
 import type { Logger } from './types.ts';
+import { listPanelCommands } from './features/command-panel.ts';
+import type { PanelCommandWire } from './shared/bind-protocol.ts';
+import type { SlashCommand } from './commands/types.ts';
 import { errorMessage } from './shared/utils.ts';
 
 // ── Cordis 插件元数据 ──
@@ -65,6 +68,13 @@ export async function apply(ctx: Context, config: QQTermConfig): Promise<void> {
   // 状态接口据此从 saving 收敛到 bound
   let boundAppId: string | null = null;
 
+  // 指令面板设置页需要命令目录：命令表在网关组装时才建好，先用回调占位。
+  let panelCommands: (() => PanelCommandWire[]) | null = null;
+  const currentPanelCommands = (): PanelCommandWire[] => panelCommands?.() ?? [];
+  const onCommandsReady = (commands: readonly SlashCommand[]): void => {
+    panelCommands = () => listPanelCommands(commands);
+  };
+
   // ── 凭据缺失时唤起扫码绑定 ──
   if (!appId || !appSecret) {
     logger.info('凭据未配置，启动扫码绑定...');
@@ -77,6 +87,7 @@ export async function apply(ctx: Context, config: QQTermConfig): Promise<void> {
       logger,
       config: { ...config },
       boundAppId: () => boundAppId,
+      panelCommands: currentPanelCommands,
     })
       .then((credentials): void => {
         if (!credentials) {
@@ -103,7 +114,7 @@ export async function apply(ctx: Context, config: QQTermConfig): Promise<void> {
             ...config,
             appId: credentials.appId,
             appSecret: credentials.appSecret,
-          }, logger)).catch((err: unknown) => {
+          }, logger, { onCommandsReady })).catch((err: unknown) => {
             boundAppId = null;
             logger.error(`网关启动失败: ${errorMessage(err)}`);
           });
@@ -132,9 +143,9 @@ export async function apply(ctx: Context, config: QQTermConfig): Promise<void> {
   }
 
   // 已绑定：注册常驻路由（状态回显 + 手动编辑/更换凭据 + 配置编辑）
-  registerBoundCredentialRoutes(ctx, logger, appId, { ...config });
+  registerBoundCredentialRoutes(ctx, logger, appId, { ...config }, currentPanelCommands);
 
   const resolvedConfig: QQTermConfig = { ...config, appId, appSecret };
 
-  await outsideHmrTransaction(ctx, () => bootstrapGateway(ctx, agents, resolvedConfig, logger));
+  await outsideHmrTransaction(ctx, () => bootstrapGateway(ctx, agents, resolvedConfig, logger, { onCommandsReady }));
 }
