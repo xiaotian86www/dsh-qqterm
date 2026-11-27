@@ -1,7 +1,7 @@
 /**
  * 会话状态命令：/status
  *
- * 当前聊天会话的「现场」：会话标题与 id、生成状态、所在工作区、模型 / 思考强度 /
+ * 当前聊天会话的「现场」：会话标题与 id、生成状态、所在工作区、模型（含思考强度）/
  * preset / 权限、上下文占用。
  *
  * 与其它状态类命令的分工：
@@ -131,12 +131,10 @@ async function renderStatus(
   // 模型 / 思考强度 / preset / 权限：没有会话时展示部署默认值（新建会话会用它），
   // 与各命令的「当前」口径一致，不另标默认
   if (status.model) {
-    lines.push(`**模型**: ${status.provider}/${status.model}`);
-  }
-  // 思考强度跟着模型走：只在模型支持时显示
-  const effort = await manager.getEffortView(scope, peerId);
-  if (effort.current) {
-    lines.push(`**思考强度**: ${effortLabel(effort.current)}`);
+    // 思考强度是模型选择的一部分：档位只写短名，用括号跟在模型后
+    const effort = await manager.getEffortView(scope, peerId);
+    const effortText = effort.current ? `（${effortLabel(effort.current)}）` : '';
+    lines.push(`**模型**: ${status.provider}/${status.model}${effortText}`);
   }
   const preset = manager.getEffectivePreset(scope, peerId);
   if (preset) lines.push(`**Preset**: ${preset}`);
