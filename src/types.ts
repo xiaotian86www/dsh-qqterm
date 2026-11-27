@@ -53,4 +53,5 @@ export interface OpenApiLike {
   get<T = unknown>(path: string, query?: Record<string, string | number | boolean>): Promise<T>;
   post<T = unknown>(path: string, body?: unknown): Promise<T>;
   put<T = unknown>(path: string, body?: unknown): Promise<T>;
+  delete<T = unknown>(path: string): Promise<T>;
 }

@@ -23,6 +23,7 @@ import {
   type WebRoute,
 } from '../../src/setup/bind-routes.ts';
 import type { BindingService } from '../../src/setup/binding-service.ts';
+import { DEFAULT_PANEL_COMMANDS } from '../../src/config.ts';
 
 /** 默认 unbind/persist 实现依赖 getProfileDir：用可控 mock 替换（其余导出保留） */
 const profileDirState = vi.hoisted(() => ({ dir: undefined as string | undefined }));
@@ -331,14 +332,25 @@ describe('bind-routes', () => {
     }
   });
 
-  it('GET config：回显生效配置且剔除 appSecret', async () => {
+  it('GET config：回显生效配置且剔除 appSecret，附带命令目录', async () => {
     const { routes } = createHarness({
       currentConfig: () => ({ appId: '102120114', appSecret: 'SECRET', debug: true, cwd: '/tmp/w' }),
+      panelCommands: () => [{ name: 'new', description: '新建会话' }],
     });
     const res = fakeRes();
     await invoke(routes.get(BIND_CONFIG_PATH), fakeReq('GET', { host: '127.0.0.1:3080' }), res);
     expect(res.statusCode).toBe(200);
-    expect(json(res)).toEqual({ config: { appId: '102120114', debug: true, cwd: '/tmp/w' } });
+    expect(json(res)).toEqual({
+      config: { appId: '102120114', debug: true, cwd: '/tmp/w' },
+      panelCommands: [{ name: 'new', description: '新建会话' }],
+    });
+  });
+
+  it('GET config：没有命令目录回调时回空数组', async () => {
+    const { routes } = createHarness({ currentConfig: () => ({}) });
+    const res = fakeRes();
+    await invoke(routes.get(BIND_CONFIG_PATH), fakeReq('GET', { host: '127.0.0.1:3080' }), res);
+    expect(json(res)).toEqual({ config: {}, panelCommands: [] });
   });
 
   it('POST config：owner 合法值通过并触发合并写入', async () => {
@@ -352,6 +364,56 @@ describe('bind-routes', () => {
     );
     expect(res.statusCode).toBe(200);
     expect(json(res)).toEqual({ ok: true, message: '配置已保存，插件将自动重载（进行中的机器人会话将重置）' });
+  });
+
+  it('POST config：panel 整块通过并交给写入', async () => {
+    const submitted: unknown[] = [];
+    const { routes } = createHarness({
+      onUpdateConfig: (config) => {
+        submitted.push(config);
+        return true;
+      },
+    });
+    const res = fakeRes();
+    await invoke(
+      routes.get(BIND_CONFIG_PATH),
+      fakeReq('POST', { host: '127.0.0.1:3080' },
+        '{"panel":{"enabled":false,"commands":["help"]}}'),
+      res,
+    );
+    expect(res.statusCode).toBe(200);
+    expect(submitted[0]).toEqual({ panel: { enabled: false, commands: ['help'] } });
+  });
+
+
+  it('POST config：panel 缺 commands 时填入推荐默认值', async () => {
+    const submitted: unknown[] = [];
+    const { routes } = createHarness({
+      onUpdateConfig: (config) => {
+        submitted.push(config);
+        return true;
+      },
+    });
+    const res = fakeRes();
+    await invoke(
+      routes.get(BIND_CONFIG_PATH),
+      fakeReq('POST', { host: '127.0.0.1:3080' }, '{"panel":{"enabled":true}}'),
+      res,
+    );
+    expect(res.statusCode).toBe(200);
+    expect(submitted[0]).toEqual({ panel: { enabled: true, commands: [...DEFAULT_PANEL_COMMANDS] } });
+  });
+
+  it('POST config：panel.commands 非字符串数组被 Schema 拒绝', async () => {
+    const { routes } = createHarness();
+    const res = fakeRes();
+    await invoke(
+      routes.get(BIND_CONFIG_PATH),
+      fakeReq('POST', { host: '127.0.0.1:3080' },
+        '{"panel":{"commands":[1]}}'),
+      res,
+    );
+    expect(res.statusCode).toBe(400);
   });
 
   it('POST config：凭据字段被拒绝并引导绑定功能', async () => {

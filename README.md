@@ -229,9 +229,10 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqterm/cordis.dev.yml
 
 | 配置 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
-| `panel.autoSync` | boolean | `true` | 机器人就绪后是否把内置指令同步到 QQ 指令面板 |
+| `panel.enabled` | boolean | `true` | 是否展示指令面板；关闭并保存后移除本插件创建的面板 |
+| `panel.commands` | string[] | 常用命令 | 展示在指令面板的命令主名（不带 `/`）；默认预置 `new`、`sessions`、`status`、`model`、`reasoning`、`compact`、`clear`、`stop`、`to`、`goal`、`rename`、`ls`、`get`、`run`、`cost`、`preset`、`permission`、`retry`、`plugins`、`help`（正好 20 项），显式空数组 = 一条都不展示 |
 
-同步是整表覆盖，remark 固定为 `qqterm:commands`；没有变化时跳过写入。
+每次连接（含续传）都会同步一次，整表覆盖，remark 固定为 `qqterm:commands`；没有变化时跳过写入。设置页「指令面板」有总开关，并列出当前可见命令，每条一个开关，等价于写 `panel.commands`：只展示勾选的命令，新配置默认勾选上面这些常用命令，全部取消才一条都不展示。总开关关闭或名单为空时，本插件创建的指令面板会被删除（别人的面板不动），避免旧内容残留；设置页最多只能勾选 20 项，选满后未选中的开关不可用；手工把配置改到超过 20 项时，同步仍按命令注册顺序截断。
 
 ### 自定义菜单
 

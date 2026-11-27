@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ConfigSchema } from '../src/config.ts';
+import { ConfigSchema, DEFAULT_PANEL_COMMANDS } from '../src/config.ts';
 
 describe('ConfigSchema 访问控制（唯一绑定用户）', () => {
   it('完全省略 access → owner 为空（拒绝所有人）', () => {
@@ -32,7 +32,8 @@ describe('ConfigSchema 访问控制（唯一绑定用户）', () => {
     expect(cfg.retryOffer).toEqual({ enabled: true, timeoutMs: 600_000 });
     expect(cfg.media).toEqual({ enabled: true, maxMB: 200, ttlHours: 24 });
     expect(cfg.sendFile.maxFiles).toBe(4);
-    expect(cfg.panel.autoSync).toBe(true);
+    expect(cfg.panel.enabled).toBe(true);
+    expect(cfg.panel.commands).toEqual([...DEFAULT_PANEL_COMMANDS]);
     expect(cfg.menu.autoSync).toBe(true);
   });
 });
