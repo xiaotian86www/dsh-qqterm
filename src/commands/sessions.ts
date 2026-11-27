@@ -294,11 +294,10 @@ function workspaceHeader(
 export const RUNNING_MARK = '⚡';
 
 /**
- * 会话是否正在生成：子会话看 `live`（还没被丢弃就算活着），其余看 `running`。
- * 冷行两者都为 false。判定只在这一个函数里，渲染处不各自比较字段。
+ * 会话是否正在生成：看 `running`。判定只在这一个函数里，渲染处不各自比较字段。
  */
 function isGenerating(entry: WorkspaceSession): boolean {
-  return entry.subagent ? entry.live : entry.running;
+  return entry.running;
 }
 
 /** 一行会话的展示文本：`⚡ #9d2c4410 · 标题 · 3d 前 ✅`（空闲行没有 ⚡） */
@@ -313,8 +312,6 @@ function renderRow(entry: WorkspaceSession, options: RowOptions = {}): string {
   const body: string[] = [];
   body.push(displayId(entry.id));
   body.push(shortTitle(entry));
-  // 子会话紧跟父行，纯文本行没有缩进与按钮，用这个词说明自己不是独立会话
-  if (entry.subagent) body.push('子会话');
   const time = formatRelativeTime(entry.updatedAt);
   if (time !== '—') body.push(time);
   // 持有标记固定放行尾
@@ -349,8 +346,7 @@ function renderLine(entry: WorkspaceSession, label: string, extra = ''): string 
  *   部署没有 `workspaceRegistry` 时这条命令按未知子命令处理，所以也不给入口。
  *
  * 只有工作中的会话才走到这里：两个列表都滤掉已归档的行（它们在 `/sessions archived`
- * 里各有「取消归档」入口）。与行首的恢复按钮同处一行，用 ` · ` 分隔；子会话不是
- * 独立目标，不挂这些链接。
+ * 里各有「取消归档」入口）。与行首的恢复按钮同处一行，用 ` · ` 分隔。
  */
 function quickLinks(entry: WorkspaceSession, archivable: boolean): string {
   const links: string[] = [];
@@ -810,7 +806,6 @@ function renderHeldList(
 
   const shown = pageSlice(entries, page).shown;
   const workspaceCount = groupHeldEntries(entries).length;
-  const subagentCount = entries.reduce((sum, entry) => sum + (entry.children?.length ?? 0), 0);
   const currentEntry = entries.find((entry) => entry.current);
   const currentLineId = currentId !== undefined && !shown.some((entry) => entry.current)
     ? currentId
@@ -831,8 +826,7 @@ function renderHeldList(
   }
 
   const lines: string[] = [
-    `### 🗂 工作中会话（${workspaceCount} 个工作区 · ${total} 个会话`
-      + `${subagentCount > 0 ? ` · ${subagentCount} 个子会话` : ''}）`,
+    `### 🗂 工作中会话（${workspaceCount} 个工作区 · ${total} 个会话）`,
     '',
     ...fields,
     ...(fields.length > 0 ? [''] : []),
@@ -849,10 +843,6 @@ function renderHeldList(
     lines.push(...workspaceHeader(group.title, group.path, group.missing, true), '');
     for (const row of group.rows) {
       lines.push(renderLine(row, renderRow(row, { showCurrent: true }), quickLinks(row, archivable)));
-      // 子会话不是独立目标（/sessions resume 解析不到），只作为父行后的说明
-      for (const child of row.children ?? []) {
-        lines.push(renderRow(child));
-      }
     }
   });
 
