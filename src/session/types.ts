@@ -300,6 +300,8 @@ export interface SessionRecord {
    * 入站发完即清，后续消息不重复。
    */
   worktreeNotice?: string;
+  /** `/new --team` 建成会话但团队模式没开成的原因（回执用，读后即删） */
+  teamError?: string;
 }
 
 /** 会话所在的工作树（/status 用；只有会话日志里有建树记录的会话才有） */

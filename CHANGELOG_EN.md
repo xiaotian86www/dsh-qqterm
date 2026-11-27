@@ -8,6 +8,8 @@ User-visible changes to QQ SuperTerm (`dsh-qqterm`). The format follows [Keep a 
 
 ### Added
 
+- `/new --team` (`-t`): opens the session created by the next message with agent team collaboration enabled, the same switch as in the Web UI; if team mode fails to turn on, the session still opens and a second line states why. `/status` gains a "Team" line, and while no session exists a pending intent shows as "Next message: team mode". Treated as an unknown argument when the team service is absent.
+
 - `/run`: run a local command in the current directory, with `--timeout <seconds>` (120 s by default, 600 s max); oversized output is trimmed to its tail. The plugin spawns the process itself and does not go through the host's shell capability: the working directory is the host process's current directory (independent of the session workspace or the run directory), the shell is the OS one (`exec.shell` / `exec.shellArgs`), The command is user-initiated, so its consequences are the user's; `/run` takes exactly one command: everything after `--` goes to the shell verbatim (`/run -- cd /d D:\source && dir`), or quote the whole command when it contains spaces; an extra word is rejected as a malformed argument, and `&&` and pipes are interpreted by the shell.
 
 - `/unqueue`: cancel one queued prompt without aborting the current turn or changing the current session; with no arguments it targets the current session's most recent queued message, `<session>` names an acquired session, and `<session> <message-id>` picks one exact message. The queued receipt now offers both "插话" (steer) and "取消" (cancel) links; a message already steered into the next step cannot be cancelled.

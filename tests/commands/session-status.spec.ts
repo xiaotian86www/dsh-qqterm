@@ -34,6 +34,10 @@ interface StubOptions {
   workspace?: { title: string; path: string; missing: boolean; branch?: string } | undefined;
   /** 会话所在工作树（默认没有） */
   worktree?: { branch: string; baseCommit: string; path: string } | undefined;
+  /** 会话团队模式（默认没有：投影缺失，该行不出现） */
+  team?: boolean;
+  /** 下一条消息的团队意图（默认没有） */
+  pendingTeam?: boolean;
   /** 思考强度视图：默认支持 high、未显式设置 */
   effort?: { options?: Array<{ id: string; name: string }>; current?: { id: string; name: string }; defaulted: boolean };
   /** 生效 preset（没有会话时是部署默认值） */
@@ -82,6 +86,8 @@ function makeManager(options: StubOptions = {}) {
       ? options.workspace
       : { title: 'repo', path: 'D:\\repo', missing: false, branch: 'main' })),
     worktreeOf: vi.fn(() => options.worktree),
+    teamEnabled: vi.fn(() => options.team),
+    pendingTeamEnabled: vi.fn(() => options.pendingTeam ?? false),
   } as unknown as SessionManager;
 }
 
@@ -143,6 +149,19 @@ describe('/status（有会话）', () => {
     // 树会话只显示树的分支：工作区行不再重复主仓库的分支
     expect(text).toContain('**工作区**: repo · `D:\\repo`');
     expect(text).not.toContain('`D:\\repo` (`main`)');
+  });
+
+  it('团队模式开着时给一行「开」', async () => {
+    expect(await run(makeManager({ team: true }))).toContain('**团队**: 开');
+  });
+
+  it('团队模式关着时给一行「关」', async () => {
+    expect(await run(makeManager({ team: false }))).toContain('**团队**: 关');
+  });
+
+  it('没有团队投影时不出现团队行', async () => {
+    const text = await run(makeManager());
+    expect(text).not.toContain('**团队**');
   });
 
   it('没有工作树的会话不出现这一行', async () => {
@@ -293,6 +312,14 @@ describe('/status（没有会话）', () => {
     expect(text).toContain('**Preset**: default');
     expect(text).toContain('**权限**: 工作区内修改 (workspace-write)');
     expect(text).not.toContain('默认');
+  });
+
+  it('没有会话但留了团队意图时写在下一条消息上', async () => {
+    expect(await run(makeManager({ active: false, pendingTeam: true }))).toContain('**下一条消息**: 团队模式');
+  });
+
+  it('没有团队意图时不出现下一条消息行', async () => {
+    expect(await run(makeManager({ active: false }))).not.toContain('**下一条消息**');
   });
 
   it('没有会话时不展示上下文', async () => {
