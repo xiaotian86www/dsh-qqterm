@@ -408,10 +408,6 @@ export interface WorkspaceSession {
   workspacePath?: string;
   /** 所属工作区目录是否已不存在（分组标题行补 ⚠️ 用） */
   workspaceMissing?: boolean;
-  /** 是否是子代理会话（只挂在父条目的 children 下，不单独成行） */
-  subagent?: boolean;
-  /** 正在运行的子代理会话（只在持有父条目上填充，按活跃时间倒序） */
-  children?: WorkspaceSession[];
 }
 
 /** 切换会话结果 */
