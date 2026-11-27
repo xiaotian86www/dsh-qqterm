@@ -129,8 +129,8 @@ describe('/status（有会话）', () => {
     expect(text).toContain('**会话**: 「修登录」 · `#9d2c4410`');
     expect(text).toContain('**状态**: 空闲');
     expect(text).toContain('**工作区**: repo · `D:\\repo` (`main`)');
-    expect(text).toContain('**模型**: deepseek/deepseek-v4');
-    expect(text).toContain('**思考强度**: 高');
+    expect(text).toContain('**模型**: deepseek/deepseek-v4（高）');
+    expect(text).not.toContain('**思考强度**');
     expect(text).toContain('**Preset**: default');
     expect(text).toContain('**权限**: 工作区内修改 (workspace-write)');
   });
@@ -169,9 +169,11 @@ describe('/status（有会话）', () => {
     expect(text).not.toContain('**工作树**');
   });
 
-  it('模型不支持思考时不显示思考强度行', async () => {
+  it('模型不支持思考时模型行不带思考强度', async () => {
     const text = await run(makeManager({ effort: { defaulted: true } }));
-    expect(text).not.toContain('**思考强度**:');
+    expect(text).toContain('**模型**: deepseek/deepseek-v4');
+    expect(text).not.toContain('（');
+    expect(text).not.toContain('**思考强度**');
   });
 
   it('宿主还没生成标题时只给短 id，不写「未命名会话」', async () => {
@@ -303,12 +305,12 @@ describe('/status（有会话）', () => {
 });
 
 describe('/status（没有会话）', () => {
-  it('展示模型 / 思考强度 / preset / 权限的默认值，不标「默认」', async () => {
+  it('展示模型（含思考强度）/ preset / 权限的默认值，不标「默认」', async () => {
     const text = await run(makeManager({ active: false }));
     expect(text).toContain('**会话**: 未建立');
     expect(text).toContain('**工作区**: repo · `D:\\repo` (`main`)');
-    expect(text).toContain('**模型**: deepseek/deepseek-v4');
-    expect(text).toContain('**思考强度**: 高');
+    expect(text).toContain('**模型**: deepseek/deepseek-v4（高）');
+    expect(text).not.toContain('**思考强度**');
     expect(text).toContain('**Preset**: default');
     expect(text).toContain('**权限**: 工作区内修改 (workspace-write)');
     expect(text).not.toContain('默认');

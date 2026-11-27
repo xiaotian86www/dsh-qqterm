@@ -23,6 +23,7 @@ User-visible changes to QQ SuperTerm (`dsh-qqterm`). The format follows [Keep a 
 - `/to` takes the body either as a single argument (`/to <session> <text>`, quoted when it contains spaces) or verbatim after `--` (`/to <session> -- <text>`); multiple unquoted words or a body starting with `-` are rejected as bad arguments (a bare target means an empty body); the reply link at the bottom of messages from other sessions now reads `/to #short-id -- `, so the user only adds the text.
 - `exec.shell` and `exec.shellArgs` now default to the platform's values in the config (the actual `cmd.exe` path and `["/d","/s","/c"]` on Windows, `/bin/sh` and `["-c"]` otherwise) instead of being derived only at runtime, so they are visible and editable; both are used literally at runtime, clearing one means empty (`/run` reports "no shell configured"), and nothing is re-defaulted or rewritten for the chosen shell.
 - `/sessions` no longer shows subagent sessions: the list contains only resumable sessions, subagent children no longer appear as entries under their parent, and a session's generating state is no longer turned into `⚡` by a running subagent child.
+- `/status` now shows the model and reasoning effort on one line: the level follows the model in parentheses (`**Model**: <provider>/<model> (<level>)`), with no parentheses when no level is active; the separate "Reasoning effort" line is gone.
 
 ### Fixed
 

@@ -326,7 +326,7 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqterm/cordis.dev.yml
 | `/preset` | 查看或切换当前 agent preset（只对新建会话生效） |
 | `/permission` | 查看或切换当前会话的权限预设（仅绑定用户） |
 | `/cost` | 查看当前会话的 token 消耗 |
-| `/status` | 查看会话状态：会话、状态、工作区、工作树、模型、思考强度、preset、权限、上下文 |
+| `/status` | 查看会话状态：会话、状态、工作区、工作树、模型（含思考强度）、preset、权限、上下文 |
 | `/stop` | 中止当前生成；`/stop <id>` 停指定已获取会话；`/stop all` 停全部；排队中的消息一并丢弃 |
 | `/steer` | 把排队中的提示词改成插话（下一步生效）；不带参数用当前会话最近一条，`<id>` 指定已获取会话，`<id> <消息id>` 指定具体消息 |
 | `/unqueue` | 取消排队中的提示词（不中止当前生成）；参数与 `/steer` 相同，已插话的消息不能取消 |

@@ -326,7 +326,7 @@ Workspaces are the host's `workspaceRegistry` concept; dsh-qqterm keeps no direc
 | `/preset` | View or switch the current agent preset (only affects new sessions) |
 | `/permission` | View or switch the current session's permission preset (bound user only) |
 | `/cost` | View the current session's token usage |
-| `/status` | View session status: session, state, workspace, worktree, model, reasoning effort, preset, permission, context |
+| `/status` | View session status: session, state, workspace, worktree, model (with reasoning effort), preset, permission, context |
 | `/stop` | Abort the current generation; `/stop <id>` stops a given acquired session; `/stop all` stops everything; queued messages are discarded |
 | `/steer` | Change a queued prompt to steering (takes effect at the next step); no argument uses the latest queued message in the current session, `<id>` names an acquired session, `<id> <message-id>` picks one message |
 | `/retry` | Resend the current session's previous user message |
