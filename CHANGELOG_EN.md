@@ -16,6 +16,8 @@ User-visible changes to QQ SuperTerm (`dsh-qqterm`). The format follows [Keep a 
 
 - `/run`: run a local command in the current directory, with `--timeout <seconds>` (120 s by default, 600 s max); oversized output is trimmed to its tail. The plugin spawns the process itself and does not go through the host's shell capability: the working directory is the host process's current directory (independent of the session workspace or the run directory), the shell is the OS one (`exec.shell` / `exec.shellArgs`), The command is user-initiated, so its consequences are the user's; `/run` takes exactly one command: everything after `--` goes to the shell verbatim (`/run -- cd /d D:\source && dir`), or quote the whole command when it contains spaces; an extra word is rejected as a malformed argument, and `&&` and pipes are interpreted by the shell.
 
+- `/reasoning default`: leaves the effort unspecified so the model's own declared default applies (same meaning as Default in the Web UI); with an active session it is written to that session and to the deployment default. The inspection view lists "默认（跟随模型）" with `✅`, stops marking a concrete level as current while following the model, and the command panel's reasoning submenu replaces "查看强度" with "跟随模型".
+
 - `/unqueue`: cancel one queued prompt without aborting the current turn or changing the current session; with no arguments it targets the current session's most recent queued message, `<session>` names an acquired session, and `<session> <message-id>` picks one exact message. The queued receipt now offers both "插话" (steer) and "取消" (cancel) links; a message already steered into the next step cannot be cancelled.
 
 ### Changed

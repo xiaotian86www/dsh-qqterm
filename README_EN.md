@@ -287,7 +287,7 @@ Workspaces are the host's `workspaceRegistry` concept; dsh-qqterm keeps no direc
 
 - A new session resolves its model through `settings.yaml` → `agentDefaultModel` → `deepseek-official/deepseek-v4-flash`.
 - `/model` and `/reasoning` write into the current session when one is active and take effect next turn (no fork, no rebuild); they also write the deployment default. With no session they write only the default.
-- The effort chosen by `/reasoning` also becomes the global default, and later sessions inherit it.
+- The effort chosen by `/reasoning` also becomes the global default, and later sessions inherit it. `/reasoning default` leaves the effort unspecified so the model's own default applies (the same meaning as Default in the Web UI), and is written to the current session and the deployment default in the same way.
 - `/preset` is deployment-level: it is persisted to `settings.yaml` and only affects new sessions; the plugin stores no preset.
 - `/permission` takes effect immediately in the current session when one is active; otherwise it changes the default.
 - Inspection views show the current value with `✅` and invent no "global" label.
@@ -323,7 +323,7 @@ Workspaces are the host's `workspaceRegistry` concept; dsh-qqterm keeps no direc
 | `/get` | Send a file to the current chat (images / videos / voice by type); any path, relative ones resolved against the same base |
 | `/run` | Run a local command in the current directory (shell is the OS one, configurable via `exec`); `--timeout <seconds>` changes the timeout (120 s by default, 600 s max) |
 | `/model` | View or switch the current session's model |
-| `/reasoning` (alias `/think`) | View or switch the current session's reasoning effort |
+| `/reasoning` (alias `/think`) | View or switch the current session's reasoning effort; `/reasoning default` returns to the model's own default |
 | `/preset` | View or switch the current agent preset (only affects new sessions) |
 | `/permission` | View or switch the current session's permission preset (bound user only) |
 | `/cost` | View the current session's token usage |

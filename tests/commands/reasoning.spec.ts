@@ -86,9 +86,10 @@ describe('/reasoning（查看）', () => {
     // 四档都给出可点击链接（中文名 + 实际参数名），当前档位行尾标 ✅
     expect(text).toContain('text="/reasoning off" show="/reasoning 关闭 (off)"');
     expect(text).toContain('text="/reasoning low" show="/reasoning 低 (low)"');
-    expect(text).toContain('text="/reasoning high" show="/reasoning 高 (high) ✅"');
+    // 默认状态：选中「默认（跟随模型）」，具体档位行不再标 ✅
+    expect(text).toContain('text="/reasoning default" show="/reasoning 默认（跟随模型） ✅"');
+    expect(text).toContain('text="/reasoning high" show="/reasoning 高 (high)"');
     expect(text).toContain('text="/reasoning max" show="/reasoning 最高 (max)"');
-    expect(text).not.toContain('跟随模型');
   });
 
   it('显式设置过时只显示该档位', async () => {
@@ -96,7 +97,9 @@ describe('/reasoning（查看）', () => {
       view: { options: OPTIONS, current: { id: 'max', name: 'Max' }, defaulted: false },
     }));
     expect(text).toContain('当前: 最高');
-    expect(text).not.toContain('跟随模型');
+    expect(text).toContain('text="/reasoning max" show="/reasoning 最高 (max) ✅"');
+    expect(text).toContain('text="/reasoning default" show="/reasoning 默认（跟随模型）"');
+    expect(text).not.toContain('默认（跟随模型） ✅');
   });
 
   it('模型不支持思考强度时只报原因', async () => {
@@ -107,8 +110,9 @@ describe('/reasoning（查看）', () => {
   it('没有会话时也照常展示当前档位（核心默认值），写法不变', async () => {
     const text = await run(makeManager({ noSession: true }));
     expect(text).toContain('当前: 高 (high)');
-    // 核心默认档位同样标 ✅：新建会话会用它
-    expect(text).toContain('text="/reasoning high" show="/reasoning 高 (high) ✅"');
+    // 核心默认值走的就是「跟随模型」，新建会话会用它
+    expect(text).toContain('text="/reasoning default" show="/reasoning 默认（跟随模型） ✅"');
+    expect(text).toContain('text="/reasoning high" show="/reasoning 高 (high)"');
   });
 });
 
@@ -122,6 +126,20 @@ describe('/reasoning（切换）', () => {
   it('目标就是当前档位时返回「已是当前」', async () => {
     const manager = makeManager({ outcome: { ok: true, effort: 'high', unchanged: true } });
     expect(await run(manager, 'high')).toBe('✅ 已是当前思考强度: 高 (high)');
+  });
+
+  it('default 交回模型默认：不传 effort，回显生效档位', async () => {
+    const manager = makeManager({ outcome: { ok: true, effort: 'high' } });
+    const text = await run(manager, 'default');
+    expect(manager.selectEffort).toHaveBeenCalledWith('c2c', 'owner', undefined);
+    expect(text).toBe('✅ 思考强度已恢复默认: 高 (high)');
+  });
+
+  it('已经是默认时回「已是默认」', async () => {
+    const manager = makeManager({ outcome: { ok: true, effort: 'high', unchanged: true } });
+    const text = await run(manager, 'default');
+    expect(manager.selectEffort).toHaveBeenCalledWith('c2c', 'owner', undefined);
+    expect(text).toBe('✅ 已是默认思考强度: 高 (high)');
   });
 
   it('未知档位只报原因，不列可选值', async () => {
