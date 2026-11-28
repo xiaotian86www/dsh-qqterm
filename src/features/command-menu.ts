@@ -62,7 +62,7 @@ export const MENU_ENTRIES: readonly MenuEntry[] = [
   {
     name: '思考强度',
     children: [
-      { name: '跟随模型', command: '/reasoning default' },
+      { name: '查看强度', command: '/reasoning' },
       { name: '关闭', command: '/reasoning off' },
       { name: '低', command: '/reasoning low' },
       { name: '高', command: '/reasoning high' },
