@@ -52,6 +52,11 @@ function useConfigPanelStyles(): void {
   padding: 14px 0 2px; font-size: 12px; font-weight: 600; line-height: 18px;
   color: var(--dsw-alias-label-tertiary); text-transform: uppercase; letter-spacing: .04em;
 }
+.qqterm-config-group-title--split { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.qqterm-panel-total {
+  font-size: 11px; font-weight: 400; letter-spacing: normal; text-transform: none;
+  color: var(--dsw-alias-label-tertiary); font-variant-numeric: tabular-nums;
+}
 .qqterm-config-field { display: flex; flex-direction: column; gap: 6px; padding: 12px 0; }
 .qqterm-config-field + .qqterm-config-field { border-top: 0.5px solid var(--dsw-alias-border-l2); }
 .qqterm-config-head { display: flex; align-items: center; gap: 8px; min-height: 28px; }
@@ -92,32 +97,12 @@ function useConfigPanelStyles(): void {
 .qqterm-config-input:focus { outline: none; border-color: var(--dsw-alias-state-business-primary); }
 .qqterm-config-input:disabled { color: var(--dsw-alias-label-tertiary); cursor: default; }
 /* 指令面板选择器：命令多，按组收进卡片，每行一条紧凑展示 */
-.qqterm-panel-picker { display: flex; flex-direction: column; gap: 10px; padding: 0 0 4px; }
-.qqterm-panel-summary { display: flex; align-items: center; gap: 10px; }
-.qqterm-panel-count {
-  flex: none; font-size: 12px; line-height: 18px;
-  color: var(--dsw-alias-label-secondary); font-variant-numeric: tabular-nums;
-}
-.qqterm-panel-meter {
-  flex: 1; min-width: 40px; height: 2px; border-radius: 2px;
-  background: var(--dsw-alias-border-l2); overflow: hidden;
-}
-.qqterm-panel-meter-fill {
-  display: block; height: 100%; border-radius: inherit;
-  background: var(--dsw-alias-brand-primary); transition: width 160ms ease;
-}
-.qqterm-panel-meter-fill[data-full='true'] {
-  background: var(--dsw-alias-state-warning-primary, var(--dsw-alias-brand-primary));
-}
+.qqterm-panel-picker { display: flex; flex-direction: column; padding: 0 0 4px; }
 .qqterm-panel-groups { display: flex; flex-direction: column; gap: 14px; }
-.qqterm-panel-group-head { display: flex; align-items: baseline; gap: 8px; padding: 0 12px 6px; }
+.qqterm-panel-group-head { padding: 0 12px 6px; }
 .qqterm-panel-group-name {
   font-size: 12px; font-weight: 600; line-height: 18px;
   color: var(--dsw-alias-label-secondary); letter-spacing: .02em;
-}
-.qqterm-panel-group-count {
-  margin-left: auto; font-size: 11px; line-height: 18px;
-  color: var(--dsw-alias-label-tertiary); font-variant-numeric: tabular-nums;
 }
 .qqterm-panel-group-body {
   overflow: hidden; border: 0.5px solid var(--dsw-alias-settings-card-stroke, var(--dsw-alias-border-l2));
@@ -258,18 +243,16 @@ function CommandRow({ command, checked, disabled, onToggle }: {
   );
 }
 
-/** 一组命令：组头（组名 + 已选/总数）+ 卡片内的紧凑行 */
+/** 一组命令：组名 + 卡片内的紧凑行 */
 function CommandGroupCard({ group, isShown, atLimit, onToggle }: {
   group: CommandGroup;
   isShown: (name: string) => boolean;
   atLimit: boolean;
   onToggle: (name: string, next: boolean) => void;
 }): ReactNode {
-  const chosen = group.items.filter((cmd) => isShown(cmd.name)).length;
   return createElement('section', { className: 'qqterm-panel-group' },
     createElement('div', { className: 'qqterm-panel-group-head' },
       createElement('span', { className: 'qqterm-panel-group-name' }, group.label),
-      createElement('span', { className: 'qqterm-panel-group-count' }, `已选 ${chosen}/${group.items.length}`),
     ),
     createElement('div', { className: 'qqterm-panel-group-body' },
       group.items.map((cmd) => createElement(CommandRow, {
@@ -379,14 +362,6 @@ export function ConfigPanel(props: { bindPhase?: string } = {}): ReactElement {
   const visibleCount = commands.filter((cmd) => isShown(cmd.name)).length;
   // 上限按当前可见命令算：暂时不可用的历史选择不占面板位置，也不该挡住用户改可见项
   const atLimit = visibleCount >= PANEL_MAX_ITEMS;
-  // 数量与进度条已经常显，提示只在「选满」或「一条没选」时补充后果
-  const countHint = commands.length === 0
-    ? null
-    : atLimit
-      ? `已达 ${PANEL_MAX_ITEMS} 项上限，取消一条后可再选其他命令`
-      : visibleCount === 0
-        ? '未选任何命令，保存后移除指令面板'
-        : null;
   const groups = groupPanelCommands(commands);
   const toggleCommand = (name: string, show: boolean): void => {
     if (show && atLimit) return;
@@ -416,27 +391,21 @@ export function ConfigPanel(props: { bindPhase?: string } = {}): ReactElement {
       onChange: (v) => { patch('showToolResults', v); },
     }),
 
-    createElement('div', { className: 'qqterm-config-group-title' }, '指令面板'),
+    createElement('div', { className: 'qqterm-config-group-title qqterm-config-group-title--split' },
+      '指令面板',
+      commands.length === 0
+        ? null
+        : createElement('span', { className: 'qqterm-panel-total' }, `已选 ${visibleCount}/${PANEL_MAX_ITEMS}`),
+    ),
     createElement(SwitchRow, {
       label: '展示指令面板', checked: panelEnabled,
-      help: '总开关；关闭并保存后移除本插件创建的指令面板',
+      help: '关闭并保存后移除面板，已选命令保留',
       onChange: (v) => { patch('panel', { ...panel, enabled: v }); },
     }),
     panelEnabled
       ? commands.length === 0
-        ? createElement('p', { className: 'qqterm-config-hint' }, '连接机器人后可在这里逐条选择是否进入指令面板。')
+        ? createElement('p', { className: 'qqterm-config-hint' }, '连接机器人后可选择命令')
         : createElement('div', { className: 'qqterm-panel-picker' },
-            createElement('div', { className: 'qqterm-panel-summary' },
-              createElement('span', { className: 'qqterm-panel-count' }, `已选 ${visibleCount} / ${PANEL_MAX_ITEMS}`),
-              createElement('span', { className: 'qqterm-panel-meter', 'aria-hidden': 'true' },
-                createElement('span', {
-                  className: 'qqterm-panel-meter-fill',
-                  style: { width: `${Math.round(Math.min(1, visibleCount / PANEL_MAX_ITEMS) * 100)}%` },
-                  ...(atLimit ? { 'data-full': 'true' } : {}),
-                }),
-              ),
-            ),
-            countHint === null ? null : createElement('p', { className: 'qqterm-config-hint' }, countHint),
             createElement('div', { className: 'qqterm-panel-groups' },
               groups.map((group) => createElement(CommandGroupCard, {
                 key: group.label,
@@ -447,7 +416,7 @@ export function ConfigPanel(props: { bindPhase?: string } = {}): ReactElement {
               })),
             ),
           )
-      : createElement('p', { className: 'qqterm-config-hint' }, '已关闭：保存后移除本插件创建的指令面板。'),
+      : createElement('p', { className: 'qqterm-config-hint' }, '已关闭：保存后移除面板'),
 
     createElement('div', { className: 'qqterm-config-footer' },
       result !== null
