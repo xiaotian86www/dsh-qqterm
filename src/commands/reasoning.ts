@@ -15,6 +15,9 @@ import type { EffortOption } from '../model/types.ts';
 /** 不支持思考强度时的原因（只报原因，不给下一步） */
 const UNSUPPORTED_REASON = '⚠️ 当前模型不支持思考强度';
 
+/** 恢复模型默认的参数：不是 adapter 档位，等价于「不指定 effort」 */
+const MODEL_DEFAULT = 'default';
+
 export function reasoningCommand({ manager, config, logger }: CommandDeps): SlashCommand {
   return {
     name: ['reasoning', 'think'],
@@ -27,6 +30,7 @@ export function reasoningCommand({ manager, config, logger }: CommandDeps): Slas
       '',
       '`/reasoning` 查看当前思考强度',
       '`/reasoning <档位>` 切换思考强度',
+      '`/reasoning default` 恢复模型默认档位',
     ].join('\n'),
     handler: async (cmdCtx) => {
       const { scope, peerId } = getScopePeer(cmdCtx);
@@ -45,9 +49,17 @@ export function reasoningCommand({ manager, config, logger }: CommandDeps): Slas
         const lines: string[] = ['### 🧠 思考强度'];
         if (current) lines.push('', `当前: ${optionLabel(current)}`);
         lines.push('');
+        // 「默认」不是 adapter 档位，而是「不指定 effort、交给模型默认」——与 Web 的 Default 同义
+        lines.push(
+          commandLinkRaw(
+            `/reasoning ${MODEL_DEFAULT}`,
+            `/reasoning 默认（跟随模型）${view.defaulted ? ' ✅' : ''}`,
+          ),
+        );
 
         for (const option of view.options) {
-          const isCurrent = current?.id === option.id;
+          // 跟随模型时当前值虽解析成某一档，选中的仍是「默认」，不再给该档打 ✅
+          const isCurrent = !view.defaulted && current?.id === option.id;
           lines.push(
             commandLinkRaw(`/reasoning ${option.id}`, `/reasoning ${optionLabel(option)}${isCurrent ? ' ✅' : ''}`),
           );
@@ -57,8 +69,9 @@ export function reasoningCommand({ manager, config, logger }: CommandDeps): Slas
         return { kind: 'noop' as const };
       }
 
-      // 切换
-      const outcome = await manager.selectEffort(scope, peerId, args);
+      // 切换：`default` 不是 adapter 档位，而是交回「不指定 effort，用模型默认」
+      const isDefault = args === MODEL_DEFAULT;
+      const outcome = await manager.selectEffort(scope, peerId, isDefault ? undefined : args);
 
       if (!outcome.ok) {
         if (outcome.reason === 'unsupported') {
@@ -71,8 +84,13 @@ export function reasoningCommand({ manager, config, logger }: CommandDeps): Slas
       }
 
       const label = view.options?.find((option) => option.id === outcome.effort);
-      const display = label ? optionLabel(label) : outcome.effort;
+      const display = label ? optionLabel(label) : outcome.effort ?? '模型默认';
 
+      if (isDefault) {
+        return outcome.unchanged
+          ? `✅ 已是默认思考强度: ${display}`
+          : `✅ 思考强度已恢复默认: ${display}`;
+      }
       if (outcome.unchanged) return `✅ 已是当前思考强度: ${display}`;
       return `✅ 思考强度已切换: ${display}`;
     },

@@ -287,7 +287,7 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqterm/cordis.dev.yml
 
 - 新会话的模型按 `settings.yaml` → `agentDefaultModel` → `deepseek-official/deepseek-v4-flash` 解析。
 - `/model`、`/reasoning`：有活跃会话时写进当前会话，下一轮生效（不 fork、不重建），同时写部署默认；没有会话时只写默认。
-- `/reasoning` 选的档位同时成为全局默认，之后的会话沿用。
+- `/reasoning` 选的档位同时成为全局默认，之后的会话沿用；`/reasoning default` 不指定档位、回到模型自己的默认（与 Web 的 Default 同义），同样写进当前会话与部署默认。
 - `/preset` 是部署级：落盘到 `settings.yaml`，只影响新建会话；插件不存 preset。
 - `/permission`：有活跃会话时在当前会话立即生效，没有会话时改默认。
 - 查看视图显示当前值并标 `✅`，不造「全局」标签。
@@ -323,7 +323,7 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqterm/cordis.dev.yml
 | `/get` | 把文件发到当前聊天（图片 / 视频 / 语音按类型发送），路径不限 |
 | `/run` | 在当前目录执行一条本地命令（shell 用系统自带的，可在 `exec` 配置里换）；`--timeout <秒>` 改超时（默认 120 秒、最长 600 秒） |
 | `/model` | 查看或切换当前会话的模型 |
-| `/reasoning`（别名 `/think`） | 查看或切换当前会话的思考强度 |
+| `/reasoning`（别名 `/think`） | 查看或切换当前会话的思考强度；`/reasoning default` 回到模型默认档位 |
 | `/preset` | 查看或切换当前 agent preset（只对新建会话生效） |
 | `/permission` | 查看或切换当前会话的权限预设（仅绑定用户） |
 | `/cost` | 查看当前会话的 token 消耗 |

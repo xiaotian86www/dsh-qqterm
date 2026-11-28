@@ -60,10 +60,10 @@ describe('MENU_ENTRIES', () => {
     ]);
   });
 
-  it('思考强度子菜单列出查看与四个档位', () => {
+  it('思考强度子菜单列出跟随模型与四个档位', () => {
     const reasoning = OUR_ITEMS.find((item) => item.name === '思考强度');
     expect(reasoning?.sub_menu_items?.map((child) => child.send_message)).toEqual([
-      '/reasoning',
+      '/reasoning default',
       '/reasoning off',
       '/reasoning low',
       '/reasoning high',
