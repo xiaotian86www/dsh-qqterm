@@ -33,7 +33,7 @@ export type PanelScope = (typeof PANEL_SCOPES)[number];
 /**
  * 设置页的命令分组：组的先后与组内命令的先后都由这张表决定。
  *
- * 分组只是展示结构，不改变命令注册表；新命令忘了归组会落到「其他」，
+ * 分组只是展示结构，不改变命令注册表；没收录的命令不显示组名，
  * 排在所有分组之后，不会从面板消失。
  */
 export const PANEL_GROUPS: ReadonlyArray<{ label: string; names: readonly string[] }> = [
@@ -44,15 +44,12 @@ export const PANEL_GROUPS: ReadonlyArray<{ label: string; names: readonly string
   { label: '插件与帮助', names: ['plugins', 'help'] },
 ];
 
-/** 未归类命令的组名（排在所有分组之后） */
-export const PANEL_GROUP_FALLBACK = '其他';
-
-/** 命令所属分组：查表，未收录返回「其他」 */
-export function panelGroupOf(name: string): string {
+/** 命令所属分组：查表，未收录返回 undefined（设置页不显示组名） */
+export function panelGroupOf(name: string): string | undefined {
   for (const group of PANEL_GROUPS) {
     if (group.names.includes(name)) return group.label;
   }
-  return PANEL_GROUP_FALLBACK;
+  return undefined;
 }
 
 /** 宽字符区间：CJK、假名、全角符号、emoji */
@@ -151,16 +148,20 @@ export function listPanelCommands(commands: readonly SlashCommand[]): PanelComma
 
     const name = Array.isArray(cmd.name) ? cmd.name[0] : cmd.name;
     if (!name) continue;
+    const group = panelGroupOf(name);
     infos.push({
       name,
       ...(cmd.description ? { description: cmd.description } : {}),
-      group: panelGroupOf(name),
+      ...(group === undefined ? {} : { group }),
     });
   }
 
-  // 按分组顺序重排：设置页与 QQ 面板共用这一份顺序
-  return [...PANEL_GROUPS.map((group) => group.label), PANEL_GROUP_FALLBACK]
-    .flatMap((label) => infos.filter((info) => info.group === label));
+  // 按分组顺序重排：设置页与 QQ 面板共用这一份顺序，未归类的排最后
+  const labels = PANEL_GROUPS.map((group) => group.label);
+  return [
+    ...labels.flatMap((label) => infos.filter((info) => info.group === label)),
+    ...infos.filter((info) => info.group === undefined),
+  ];
 }
 
 /** 按私聊可见性筛选命令，只保留 shown 中的主名后拼成面板元素；空名单就是空面板 */

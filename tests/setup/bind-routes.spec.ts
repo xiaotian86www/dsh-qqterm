@@ -363,7 +363,7 @@ describe('bind-routes', () => {
       res,
     );
     expect(res.statusCode).toBe(200);
-    expect(json(res)).toEqual({ ok: true, message: '配置已保存，插件将自动重载（进行中的机器人会话将重置）' });
+    expect(json(res)).toEqual({ ok: true, message: '配置已保存' });
   });
 
   it('POST config：panel 整块通过并交给写入', async () => {

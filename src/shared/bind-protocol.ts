@@ -30,7 +30,7 @@ export interface PanelCommandWire {
   /** 命令主名，不带 `/` */
   name: string;
   description?: string;
-  /** 展示分组；缺省按「其他」聚合（设置页分块与 QQ 指令面板排序共用） */
+  /** 展示分组；缺省表示未归类，设置页不显示组名并排在最后（分块与 QQ 面板排序共用） */
   group?: string;
 }
 

@@ -202,20 +202,21 @@ function FieldRow({ label, help, value, placeholder, onChange }: {
 
 /** 设置页的命令分组（服务端已按分组顺序下发，这里只做聚合） */
 interface CommandGroup {
-  label: string;
+  /** 未归类的命令没有组名，直接排在最后 */
+  label?: string;
   items: PanelCommandWire[];
 }
 
-/** 把扁平目录聚合成分组卡片；缺组归入「其他」，保持首次出现的先后 */
+/** 把扁平目录聚合成分组卡片；未归类的合成一组且不显示组名，保持首次出现的先后 */
 function groupPanelCommands(commands: readonly PanelCommandWire[]): CommandGroup[] {
   const groups: CommandGroup[] = [];
   const index = new Map<string, CommandGroup>();
   for (const cmd of commands) {
-    const label = cmd.group ?? '其他';
-    let group = index.get(label);
+    const key = cmd.group ?? '';
+    let group = index.get(key);
     if (group === undefined) {
-      group = { label, items: [] };
-      index.set(label, group);
+      group = { label: cmd.group, items: [] };
+      index.set(key, group);
       groups.push(group);
     }
     group.items.push(cmd);
@@ -251,9 +252,11 @@ function CommandGroupCard({ group, isShown, atLimit, onToggle }: {
   onToggle: (name: string, next: boolean) => void;
 }): ReactNode {
   return createElement('section', { className: 'qqterm-panel-group' },
-    createElement('div', { className: 'qqterm-panel-group-head' },
-      createElement('span', { className: 'qqterm-panel-group-name' }, group.label),
-    ),
+    group.label === undefined
+      ? null
+      : createElement('div', { className: 'qqterm-panel-group-head' },
+          createElement('span', { className: 'qqterm-panel-group-name' }, group.label),
+        ),
     createElement('div', { className: 'qqterm-panel-group-body' },
       group.items.map((cmd) => createElement(CommandRow, {
         key: cmd.name,
@@ -275,8 +278,7 @@ function shallowEqual(a: unknown, b: unknown): boolean {
 /**
  * 配置面板主体。
  *
- * 保存仅提交变更键（服务端按白名单合并），保存成功后提示
- * HMR 重载语义（进行中的机器人会话将重置）。
+ * 保存仅提交变更键（服务端按白名单合并），保存成功后只提示已保存。
  */
 export function ConfigPanel(props: { bindPhase?: string } = {}): ReactElement {
   useConfigPanelStyles();
@@ -332,7 +334,7 @@ export function ConfigPanel(props: { bindPhase?: string } = {}): ReactElement {
       .then(async (res) => {
         const body = (await res.json().catch(() => ({}))) as { ok?: boolean; message?: string; error?: string };
         if (res.ok && body.ok === true) {
-          setResult({ ok: true, message: body.message ?? '配置已保存，插件将自动重载' });
+          setResult({ ok: true, message: body.message ?? '配置已保存' });
           setInitial(form);
           return;
         }
@@ -399,7 +401,6 @@ export function ConfigPanel(props: { bindPhase?: string } = {}): ReactElement {
     ),
     createElement(SwitchRow, {
       label: '展示指令面板', checked: panelEnabled,
-      help: '关闭并保存后移除面板，已选命令保留',
       onChange: (v) => { patch('panel', { ...panel, enabled: v }); },
     }),
     panelEnabled
@@ -408,7 +409,7 @@ export function ConfigPanel(props: { bindPhase?: string } = {}): ReactElement {
         : createElement('div', { className: 'qqterm-panel-picker' },
             createElement('div', { className: 'qqterm-panel-groups' },
               groups.map((group) => createElement(CommandGroupCard, {
-                key: group.label,
+                key: group.label ?? '',
                 group,
                 isShown,
                 atLimit,
@@ -416,15 +417,13 @@ export function ConfigPanel(props: { bindPhase?: string } = {}): ReactElement {
               })),
             ),
           )
-      : createElement('p', { className: 'qqterm-config-hint' }, '已关闭：保存后移除面板'),
+      : null,
 
     createElement('div', { className: 'qqterm-config-footer' },
       result !== null
         ? createElement('p', { className: `qqterm-config-note${result.ok ? ' qqterm-config-note--ok' : ' qqterm-config-note--error'}` },
             (result.ok ? '' : '⚠️ ') + result.message)
-        : dirty
-          ? createElement('p', { className: 'qqterm-config-note' }, '保存后插件将重载，进行中的机器人会话将重置')
-          : createElement('p', { className: 'qqterm-config-note' }),
+        : createElement('p', { className: 'qqterm-config-note' }),
       createElement('button', { className: 'qqterm-config-save', type: 'submit', disabled: busy || !dirty },
         busy ? '正在保存…' : '保存'),
     ),

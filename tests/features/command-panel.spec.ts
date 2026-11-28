@@ -176,10 +176,10 @@ describe('PANEL_GROUPS / listPanelCommands（分组）', () => {
     expect(wire.map((w) => w.group)).toEqual(['会话', '生成控制', '文件与执行', '插件与帮助', '插件与帮助']);
   });
 
-  it('未归类的命令落到「其他」并排在最后', () => {
+  it('未归类的命令不带分组并排在最后', () => {
     const wire = listPanelCommands([cmd('custom-one', '自定义'), cmd('new', '新建会话')]);
     expect(wire.map((w) => w.name)).toEqual(['new', 'custom-one']);
-    expect(wire[1]!.group).toBe('其他');
+    expect(wire[1]).toEqual({ name: 'custom-one', description: '自定义' });
   });
 
   it('一条命令只归一个组', () => {
