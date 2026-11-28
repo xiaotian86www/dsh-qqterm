@@ -30,6 +30,28 @@ export const PANEL_SCOPES = ['c2c'] as const;
 
 export type PanelScope = (typeof PANEL_SCOPES)[number];
 
+/**
+ * 设置页的命令分组：组的先后与组内命令的先后都由这张表决定。
+ *
+ * 分组只是展示结构，不改变命令注册表；没收录的命令不显示组名，
+ * 排在所有分组之后，不会从面板消失。
+ */
+export const PANEL_GROUPS: ReadonlyArray<{ label: string; names: readonly string[] }> = [
+  { label: '会话', names: ['new', 'clear', 'compact', 'goal', 'sessions', 'rename', 'to', 'status'] },
+  { label: '生成控制', names: ['stop', 'steer', 'unqueue', 'retry'] },
+  { label: '模型与权限', names: ['model', 'reasoning', 'cost', 'preset', 'permission'] },
+  { label: '文件与执行', names: ['ls', 'get', 'run'] },
+  { label: '插件与帮助', names: ['plugins', 'help'] },
+];
+
+/** 命令所属分组：查表，未收录返回 undefined（设置页不显示组名） */
+export function panelGroupOf(name: string): string | undefined {
+  for (const group of PANEL_GROUPS) {
+    if (group.names.includes(name)) return group.label;
+  }
+  return undefined;
+}
+
 /** 宽字符区间：CJK、假名、全角符号、emoji */
 const WIDE_RANGES: ReadonlyArray<readonly [number, number]> = [
   [0x1100, 0x115f],
@@ -112,9 +134,10 @@ function shortPanelDesc(text: string): string {
 }
 
 /**
- * 面板命令目录：按注册顺序列出私聊可见命令（不带斜杠）。
+ * 面板命令目录：按分组顺序列出私聊可见命令（不带斜杠）。
  *
- * 设置页用它给每条命令一个开关；命令可用性在请求时现查。
+ * 组内保持注册顺序；设置页按 group 聚合成卡片，QQ 指令面板也按这个顺序展示。
+ * 命令可用性在请求时现查。
  */
 export function listPanelCommands(commands: readonly SlashCommand[]): PanelCommandWire[] {
   const infos: PanelCommandWire[] = [];
@@ -125,9 +148,20 @@ export function listPanelCommands(commands: readonly SlashCommand[]): PanelComma
 
     const name = Array.isArray(cmd.name) ? cmd.name[0] : cmd.name;
     if (!name) continue;
-    infos.push({ name, ...(cmd.description ? { description: cmd.description } : {}) });
+    const group = panelGroupOf(name);
+    infos.push({
+      name,
+      ...(cmd.description ? { description: cmd.description } : {}),
+      ...(group === undefined ? {} : { group }),
+    });
   }
-  return infos;
+
+  // 按分组顺序重排：设置页与 QQ 面板共用这一份顺序，未归类的排最后
+  const labels = PANEL_GROUPS.map((group) => group.label);
+  return [
+    ...labels.flatMap((label) => infos.filter((info) => info.group === label)),
+    ...infos.filter((info) => info.group === undefined),
+  ];
 }
 
 /** 按私聊可见性筛选命令，只保留 shown 中的主名后拼成面板元素；空名单就是空面板 */

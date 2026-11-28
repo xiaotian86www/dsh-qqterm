@@ -52,6 +52,11 @@ function useConfigPanelStyles(): void {
   padding: 14px 0 2px; font-size: 12px; font-weight: 600; line-height: 18px;
   color: var(--dsw-alias-label-tertiary); text-transform: uppercase; letter-spacing: .04em;
 }
+.qqterm-config-group-title--split { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.qqterm-panel-total {
+  font-size: 11px; font-weight: 400; letter-spacing: normal; text-transform: none;
+  color: var(--dsw-alias-label-tertiary); font-variant-numeric: tabular-nums;
+}
 .qqterm-config-field { display: flex; flex-direction: column; gap: 6px; padding: 12px 0; }
 .qqterm-config-field + .qqterm-config-field { border-top: 0.5px solid var(--dsw-alias-border-l2); }
 .qqterm-config-head { display: flex; align-items: center; gap: 8px; min-height: 28px; }
@@ -91,6 +96,49 @@ function useConfigPanelStyles(): void {
 }
 .qqterm-config-input:focus { outline: none; border-color: var(--dsw-alias-state-business-primary); }
 .qqterm-config-input:disabled { color: var(--dsw-alias-label-tertiary); cursor: default; }
+/* 指令面板选择器：命令多，按组收进卡片，每行一条紧凑展示 */
+.qqterm-panel-picker { display: flex; flex-direction: column; padding: 0 0 4px; }
+.qqterm-panel-groups { display: flex; flex-direction: column; gap: 14px; }
+.qqterm-panel-group-head { padding: 0 12px 6px; }
+.qqterm-panel-group-name {
+  font-size: 12px; font-weight: 600; line-height: 18px;
+  color: var(--dsw-alias-label-secondary); letter-spacing: .02em;
+}
+.qqterm-panel-group-body {
+  overflow: hidden; border: 0.5px solid var(--dsw-alias-settings-card-stroke, var(--dsw-alias-border-l2));
+  border-radius: var(--dsw-radius-xl, 12px);
+  background: var(--dsw-alias-settings-card-fill, transparent);
+}
+.qqterm-panel-row {
+  box-sizing: border-box; display: flex; align-items: center; gap: 12px;
+  width: 100%; min-height: 36px; margin: 0; padding: 6px 12px;
+  border: 0; background: transparent; color: inherit; font: inherit;
+  text-align: left; cursor: pointer;
+}
+.qqterm-panel-row + .qqterm-panel-row { border-top: 0.5px solid var(--dsw-alias-border-l2); }
+@media (hover: hover) {
+  .qqterm-panel-row:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); }
+}
+.qqterm-panel-row:focus-visible {
+  outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline-offset: -2px;
+}
+.qqterm-panel-row:disabled { cursor: default; }
+.qqterm-panel-row:disabled .qqterm-panel-switch { opacity: .45; }
+.qqterm-panel-cmd {
+  flex: 0 0 auto; width: 88px;
+  font-family: var(--dsw-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px; font-weight: 500; line-height: 18px; color: var(--dsw-alias-label-primary);
+}
+.qqterm-panel-desc {
+  flex: 1; min-width: 0; overflow: hidden; font-size: 12px; line-height: 18px;
+  color: var(--dsw-alias-label-secondary); text-overflow: ellipsis; white-space: nowrap;
+}
+.qqterm-panel-switch { flex: none; pointer-events: none; }
+.qqterm-panel-switch[data-checked='true'] { background: var(--dsw-alias-brand-primary); }
+.qqterm-panel-switch[data-checked='true'] .qqterm-config-switch-thumb {
+  background: var(--dsw-alias-label-primary-foreground, #ffffff); transform: translateX(16px);
+}
 /* 分段控件样式已移除：访问控制只保留唯一用户输入 */
 /* 底栏（官方 SettingsForm.footer 复刻） */
 .qqterm-config-footer { display: flex; align-items: center; gap: 8px; padding-top: 16px; }
@@ -152,6 +200,76 @@ function FieldRow({ label, help, value, placeholder, onChange }: {
   );
 }
 
+/** 设置页的命令分组（服务端已按分组顺序下发，这里只做聚合） */
+interface CommandGroup {
+  /** 未归类的命令没有组名，直接排在最后 */
+  label?: string;
+  items: PanelCommandWire[];
+}
+
+/** 把扁平目录聚合成分组卡片；未归类的合成一组且不显示组名，保持首次出现的先后 */
+function groupPanelCommands(commands: readonly PanelCommandWire[]): CommandGroup[] {
+  const groups: CommandGroup[] = [];
+  const index = new Map<string, CommandGroup>();
+  for (const cmd of commands) {
+    const key = cmd.group ?? '';
+    let group = index.get(key);
+    if (group === undefined) {
+      group = { label: cmd.group, items: [] };
+      index.set(key, group);
+      groups.push(group);
+    }
+    group.items.push(cmd);
+  }
+  return groups;
+}
+
+/** 分组内的一行：整行就是开关（命令名 + 单行说明 + 右侧开关） */
+function CommandRow({ command, checked, disabled, onToggle }: {
+  command: PanelCommandWire; checked: boolean; disabled: boolean; onToggle: (next: boolean) => void;
+}): ReactNode {
+  const name = `/${command.name}`;
+  return createElement('button', {
+    type: 'button', role: 'switch', 'aria-checked': checked,
+    'aria-label': command.description === undefined ? name : `${name} ${command.description}`,
+    className: 'qqterm-panel-row', disabled,
+    onClick: () => { if (!disabled) onToggle(!checked); },
+  },
+    createElement('span', { className: 'qqterm-panel-cmd' }, name),
+    command.description === undefined
+      ? null
+      : createElement('span', { className: 'qqterm-panel-desc', title: command.description }, command.description),
+    createElement('span', { className: 'qqterm-config-switch qqterm-panel-switch', 'data-checked': checked, 'aria-hidden': 'true' },
+      createElement('span', { className: 'qqterm-config-switch-thumb' })),
+  );
+}
+
+/** 一组命令：组名 + 卡片内的紧凑行 */
+function CommandGroupCard({ group, isShown, atLimit, onToggle }: {
+  group: CommandGroup;
+  isShown: (name: string) => boolean;
+  atLimit: boolean;
+  onToggle: (name: string, next: boolean) => void;
+}): ReactNode {
+  return createElement('section', { className: 'qqterm-panel-group' },
+    group.label === undefined
+      ? null
+      : createElement('div', { className: 'qqterm-panel-group-head' },
+          createElement('span', { className: 'qqterm-panel-group-name' }, group.label),
+        ),
+    createElement('div', { className: 'qqterm-panel-group-body' },
+      group.items.map((cmd) => createElement(CommandRow, {
+        key: cmd.name,
+        command: cmd,
+        checked: isShown(cmd.name),
+        // 选满后只锁住未选中的行，已选中的仍可取消
+        disabled: !isShown(cmd.name) && atLimit,
+        onToggle: (next) => { onToggle(cmd.name, next); },
+      })),
+    ),
+  );
+}
+
 /** 深比较（表单值与初始回显值的 dirty 判断） */
 function shallowEqual(a: unknown, b: unknown): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
@@ -160,8 +278,7 @@ function shallowEqual(a: unknown, b: unknown): boolean {
 /**
  * 配置面板主体。
  *
- * 保存仅提交变更键（服务端按白名单合并），保存成功后提示
- * HMR 重载语义（进行中的机器人会话将重置）。
+ * 保存仅提交变更键（服务端按白名单合并），保存成功后只提示已保存。
  */
 export function ConfigPanel(props: { bindPhase?: string } = {}): ReactElement {
   useConfigPanelStyles();
@@ -217,7 +334,7 @@ export function ConfigPanel(props: { bindPhase?: string } = {}): ReactElement {
       .then(async (res) => {
         const body = (await res.json().catch(() => ({}))) as { ok?: boolean; message?: string; error?: string };
         if (res.ok && body.ok === true) {
-          setResult({ ok: true, message: body.message ?? '配置已保存，插件将自动重载' });
+          setResult({ ok: true, message: body.message ?? '配置已保存' });
           setInitial(form);
           return;
         }
@@ -247,17 +364,13 @@ export function ConfigPanel(props: { bindPhase?: string } = {}): ReactElement {
   const visibleCount = commands.filter((cmd) => isShown(cmd.name)).length;
   // 上限按当前可见命令算：暂时不可用的历史选择不占面板位置，也不该挡住用户改可见项
   const atLimit = visibleCount >= PANEL_MAX_ITEMS;
-  const countHint = commands.length === 0
-    ? null
-    : atLimit
-      ? `已选 ${visibleCount} 项 · 已达 ${PANEL_MAX_ITEMS} 项上限，先取消一条再选其他命令`
-      : `已选 ${visibleCount} 项 · 面板最多 ${PANEL_MAX_ITEMS} 项${visibleCount === 0 ? '，保存后移除面板' : ''}`;
+  const groups = groupPanelCommands(commands);
   const toggleCommand = (name: string, show: boolean): void => {
     if (show && atLimit) return;
     const next = new Set(chosenNames);
     if (show) next.add(name);
     else next.delete(name);
-    // 按注册顺序写，并保留暂时不可用命令此前的选择
+    // 按面板目录顺序写，并保留暂时不可用命令此前的选择
     const known = commands.map((cmd) => cmd.name).filter((n) => next.has(n));
     const unknown = [...next].filter((n) => !commands.some((cmd) => cmd.name === n));
     patch('panel', { ...panel, commands: [...known, ...unknown] });
@@ -280,39 +393,37 @@ export function ConfigPanel(props: { bindPhase?: string } = {}): ReactElement {
       onChange: (v) => { patch('showToolResults', v); },
     }),
 
-    createElement('div', { className: 'qqterm-config-group-title' }, '指令面板'),
+    createElement('div', { className: 'qqterm-config-group-title qqterm-config-group-title--split' },
+      '指令面板',
+      commands.length === 0
+        ? null
+        : createElement('span', { className: 'qqterm-panel-total' }, `已选 ${visibleCount}/${PANEL_MAX_ITEMS}`),
+    ),
     createElement(SwitchRow, {
       label: '展示指令面板', checked: panelEnabled,
-      help: '总开关；关闭并保存后移除本插件创建的指令面板',
       onChange: (v) => { patch('panel', { ...panel, enabled: v }); },
     }),
     panelEnabled
-      ? createElement('div', null,
-          commands.length === 0
-            ? createElement('p', { className: 'qqterm-config-hint' }, '连接机器人后可在这里逐条选择是否进入指令面板。')
-            : createElement('div', null,
-                commands.map((cmd) => createElement('div', { key: cmd.name },
-                  createElement(SwitchRow, {
-                    label: `/${cmd.name}`,
-                    ...(cmd.description === undefined ? {} : { help: cmd.description }),
-                    checked: isShown(cmd.name),
-                    // 选满后只锁住未选中的开关，已选中的仍可取消
-                    disabled: !isShown(cmd.name) && atLimit,
-                    onChange: (v) => { toggleCommand(cmd.name, v); },
-                  }),
-                )),
-              ),
-          countHint === null ? null : createElement('p', { className: 'qqterm-config-hint' }, countHint),
-        )
-      : createElement('p', { className: 'qqterm-config-hint' }, '已关闭：保存后移除本插件创建的指令面板。'),
+      ? commands.length === 0
+        ? createElement('p', { className: 'qqterm-config-hint' }, '连接机器人后可选择命令')
+        : createElement('div', { className: 'qqterm-panel-picker' },
+            createElement('div', { className: 'qqterm-panel-groups' },
+              groups.map((group) => createElement(CommandGroupCard, {
+                key: group.label ?? '',
+                group,
+                isShown,
+                atLimit,
+                onToggle: toggleCommand,
+              })),
+            ),
+          )
+      : null,
 
     createElement('div', { className: 'qqterm-config-footer' },
       result !== null
         ? createElement('p', { className: `qqterm-config-note${result.ok ? ' qqterm-config-note--ok' : ' qqterm-config-note--error'}` },
             (result.ok ? '' : '⚠️ ') + result.message)
-        : dirty
-          ? createElement('p', { className: 'qqterm-config-note' }, '保存后插件将重载，进行中的机器人会话将重置')
-          : createElement('p', { className: 'qqterm-config-note' }),
+        : createElement('p', { className: 'qqterm-config-note' }),
       createElement('button', { className: 'qqterm-config-save', type: 'submit', disabled: busy || !dirty },
         busy ? '正在保存…' : '保存'),
     ),

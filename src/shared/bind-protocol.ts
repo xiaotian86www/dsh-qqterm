@@ -25,11 +25,13 @@ export const BIND_CONFIG_PATH = '/qqterm/config';
 /** 单个 QQ 指令面板最多能放的命令数（平台限制，服务端截断与设置页勾选共用） */
 export const PANEL_MAX_ITEMS = 20;
 
-/** 指令面板设置页的命令目录项（服务端按注册顺序现取可见命令） */
+/** 指令面板设置页的命令目录项（服务端按唯一分组目录排序后下发） */
 export interface PanelCommandWire {
   /** 命令主名，不带 `/` */
   name: string;
   description?: string;
+  /** 展示分组；缺省表示未归类，设置页不显示组名并排在最后（分块与 QQ 面板排序共用） */
+  group?: string;
 }
 
 /** 线上协议（HTTP 路由序列化形态） */

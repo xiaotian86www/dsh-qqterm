@@ -6,6 +6,7 @@ import type { SlashCommand } from '../../src/commands/types.ts';
 import type { OpenApiLike } from '../../src/types.ts';
 import {
   PANEL_DESC_MAX,
+  PANEL_GROUPS,
   PANEL_MAX_ITEMS,
   PANEL_NAME_MAX,
   PANEL_REMARK,
@@ -118,7 +119,7 @@ describe('buildPanelItems（按私聊可见性取命令）', () => {
 describe('buildPanelItems（面板展示配置）', () => {
   const commands = [cmd('new', '新建会话'), cmd('plugins', '插件'), cmd('help', '帮助')];
 
-  it('只展示 commands 中的主名，保持注册顺序', () => {
+  it('只展示 commands 中的主名，按面板目录排序', () => {
     expect(buildPanelItems(commands, ['help', 'new']).map((i) => i.name)).toEqual(['/new', '/help']);
   });
 
@@ -144,11 +145,11 @@ describe('buildPanelItems（面板展示配置）', () => {
 });
 
 describe('listPanelCommands（设置页目录）', () => {
-  it('按注册顺序返回主名与说明，不带斜杠', () => {
+  it('返回主名、说明与分组，不带斜杠', () => {
     expect(listPanelCommands([cmd('new', '新建会话'), cmd(['sessions', 'session'], '会话')]))
       .toEqual([
-        { name: 'new', description: '新建会话' },
-        { name: 'sessions', description: '会话' },
+        { name: 'new', description: '新建会话', group: '会话' },
+        { name: 'sessions', description: '会话', group: '会话' },
       ]);
   });
 
@@ -157,7 +158,38 @@ describe('listPanelCommands（设置页目录）', () => {
     const gated = { ...cmd('steer', '插话排队消息'), available: () => available } as SlashCommand;
     expect(listPanelCommands([gated])).toEqual([]);
     available = true;
-    expect(listPanelCommands([gated])).toEqual([{ name: 'steer', description: '插话排队消息' }]);
+    expect(listPanelCommands([gated])).toEqual([{ name: 'steer', description: '插话排队消息', group: '生成控制' }]);
+  });
+});
+
+describe('PANEL_GROUPS / listPanelCommands（分组）', () => {
+  it('组内保持注册顺序，组间按目录顺序', () => {
+    const wire = listPanelCommands([
+      cmd('help', '帮助'),
+      cmd('ls', '列出子目录'),
+      cmd('stop', '停止生成'),
+      cmd('new', '新建会话'),
+      cmd('plugins', '插件'),
+    ]);
+
+    expect(wire.map((w) => w.name)).toEqual(['new', 'stop', 'ls', 'help', 'plugins']);
+    expect(wire.map((w) => w.group)).toEqual(['会话', '生成控制', '文件与执行', '插件与帮助', '插件与帮助']);
+  });
+
+  it('未归类的命令不带分组并排在最后', () => {
+    const wire = listPanelCommands([cmd('custom-one', '自定义'), cmd('new', '新建会话')]);
+    expect(wire.map((w) => w.name)).toEqual(['new', 'custom-one']);
+    expect(wire[1]).toEqual({ name: 'custom-one', description: '自定义' });
+  });
+
+  it('一条命令只归一个组', () => {
+    const seen = new Set<string>();
+    for (const group of PANEL_GROUPS) {
+      for (const name of group.names) {
+        expect(seen.has(name)).toBe(false);
+        seen.add(name);
+      }
+    }
   });
 });
 

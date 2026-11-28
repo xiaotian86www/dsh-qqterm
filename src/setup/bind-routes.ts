@@ -428,5 +428,5 @@ async function handleConfig(req: IncomingMessage, res: ServerResponse, options: 
     sendJson(res, 500, { ok: false, error: '无法定位 profile 目录或写入失败' });
     return;
   }
-  sendJson(res, 200, { ok: true, message: '配置已保存，插件将自动重载（进行中的机器人会话将重置）' });
+  sendJson(res, 200, { ok: true, message: '配置已保存' });
 }
